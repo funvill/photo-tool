@@ -6,3 +6,8 @@ playwright-report
 fixtures/generated
 *.log
 .DS_Store
+
+# Local to this fork
+trial-output
+photos
+.claude/settings.local.json
