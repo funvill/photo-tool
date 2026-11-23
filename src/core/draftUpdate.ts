@@ -189,6 +189,8 @@ export function relayPage(doc: BookDocument, assets: PhotoAsset[], spreadIndex: 
   const whole: Side = s.layout?.spread ? 'spread' : side;
   const photos = pagePhotos(ctx, s, whole);
   if (!photos) throw new Error('A photo on this page is no longer in the library');
+  // Nothing to lay out: leave the page (and any text or shapes on it) alone.
+  if (!photos.length) return doc;
   const autoBefore = draftedSides(s).filter((k) => k !== whole && !isPageEdited(doc, s, k));
   const laid = relaySpreadSide(ctx, doc.spreads, spreadIndex, whole, photos);
   const now = new Date().toISOString();

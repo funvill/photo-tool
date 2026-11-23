@@ -447,6 +447,17 @@ describe('relayPage on a spread the user made', () => {
   });
 });
 
+describe('relayPage on a page without photos', () => {
+  it('returns the document unchanged for a text-only page that has no provenance', () => {
+    const { starred, doc } = book();
+    const s0 = 1;
+    const base: BookDocument = { ...doc, spreads: doc.spreads.map((s, i) => (i === s0 ? { ...s, elements: [], layout: undefined, provenance: undefined } : s)) };
+    const d = addTextAt(base, base.spreads[s0].id, 20, 20, 'Hello').doc;
+    expect(d.spreads[s0].elements).toHaveLength(1);
+    expect(relayPage(d, starred, s0, 'left', SETTINGS)).toBe(d);
+  });
+});
+
 describe('relayPage on the title page', () => {
   it('keeps the title layout', () => {
     const { starred, doc } = book();

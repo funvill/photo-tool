@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  COVER_INDEX, TEXT_ROLES, addChapter, defaultGenerationSettings, isPageEdited, relayPage, applyMosaicLayout, nearestWeight, resetTextToStyle, roleLabel, saveTextAsRoleStyle, setTextRole, weightName, addTextAt, applyTemplate, defaultCrop, duplicateElement, duplicateSpread, effectiveDpi,
+  COVER_INDEX, TEXT_ROLES, addChapter, defaultGenerationSettings, isPageEdited, pageElements, relayPage, applyMosaicLayout, nearestWeight, resetTextToStyle, roleLabel, saveTextAsRoleStyle, setTextRole, weightName, addTextAt, applyTemplate, defaultCrop, duplicateElement, duplicateSpread, effectiveDpi,
   fitFrameToPhoto, fontFamily, insertSpreadAfter, isPrintable, removeElements, removeSpread, reorderElement, setFramePhoto,
   setSpreadChapter, setSpreadLocked, setSurfaceBackground, shuffleSpreadLayout, spreadPagesLabel, templateName, updateElement,
   MM_PER_PT, TEXT_QUICK_STYLES, useAsBackground, applyQuickStyle, estimateTextHeightMm, boldWeight, isBold, type BookDocument, type ImageElement, type TextElement, type TextRole,
@@ -498,7 +498,8 @@ function SpreadPanel() {
   const [seed, setSeed] = useState(1);
   const allAssets = useEditor((s) => s.assets);
   // Drafted pages that were changed by hand can be laid out again from their photos.
-  const relayable = (side: 'left' | 'right' | 'spread') => isPageEdited(doc, spread, side);
+  const relayable = (side: 'left' | 'right' | 'spread') =>
+    pageElements(doc, spread, side).some((e) => e.type === 'image' && !!e.assetId && !e.locked) && isPageEdited(doc, spread, side);
   const relay = (side: 'left' | 'right' | 'spread') =>
     run('Re-lay page', (d) => relayPage(d, allAssets, i, side, d.generation?.settings ?? defaultGenerationSettings(d, allAssets.length)));
   const imagesOn = (side: 'left' | 'right') =>
