@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   COVER_INDEX, addPhotoAt, defaultCrop, effectiveDpi, elementBounds, elementPlacement, geometryFor, innerBox, panCrop, toInnerBox, zoomCropAt,
-  elementsInRect, expandGroups, sizeSnap, spacingSnap, type SpacingMark, pageContentRect, pointInElement, setFramePhoto, unionBounds, surfaceAt, swapFramePhotos, updateElement, type BookDocument,
+  elementsInRect, expandGroups, findSurface, sizeSnap, spacingSnap, type SpacingMark, pageContentRect, pointInElement, setFramePhoto, unionBounds, surfaceAt, swapFramePhotos, updateElement, type BookDocument,
   type Element, type ImageElement, type PhotoAsset, type SurfaceGeometry, MM_PER_PT,
 } from '../../core';
 import { thumbUrl } from '../api';
@@ -537,7 +537,9 @@ export function Canvas() {
     run('Add dropped photos', (d) => {
       let cur = d;
       found.forEach((asset, i) => {
-        if (i === 0 && hit) {
+        // The frame may have been deleted or locked while the import ran: then add the photo instead.
+        const frame = i === 0 && hit ? findSurface(cur, surface.id)?.surface.elements.find((x) => x.id === hit.id) : undefined;
+        if (hit && frame && frame.type === 'image' && !frame.locked) {
           cur = setFramePhoto(cur, surface.id, hit.id, asset);
           selectId = hit.id;
         } else {

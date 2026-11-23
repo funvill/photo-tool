@@ -29,7 +29,7 @@ export interface ImportJob {
   /** Linked folders that weren't there (renamed, deleted, or on a drive that isn't plugged in). */
   missingFolders: string[];
   failed: number;
-  /** 'paths' jobs: the asset id for each input file in input order ('' for a file that failed). */
+  /** 'paths' jobs: the asset id for each input in order ('' for a file that failed); a folder input gives one entry per photo in it. */
   assetIds: string[];
   errors: { file: string; error: string }[];
   startedAt: string;

@@ -64,16 +64,17 @@ export interface FoundFile {
 }
 
 // Files the file input handed over, by pick id. They live as long as the page.
-const picks = new Map<string, { name: string; files: File[] }>();
+const picks = new Map<string, { name: string; files: File[]; ordered: boolean }>();
 let pickCounter = 0;
 
 /** Register files from `<input webkitdirectory>` (or a drop) and get a folder reference for them. */
-export function registerPick(files: File[]): string {
+/** `ordered` keeps the files in the order given (a drop), instead of sorting them by name. */
+export function registerPick(files: File[], ordered = false): string {
   const photos = files.filter((f) => isSupported(f.name));
   const first = files[0] as (File & { webkitRelativePath?: string }) | undefined;
   const name = first?.webkitRelativePath?.split('/')[0] || (files.length === 1 ? first!.name : `${photos.length} photos`);
   const id = `p${Date.now().toString(36)}${(pickCounter++).toString(36)}`;
-  picks.set(id, { name, files: photos });
+  picks.set(id, { name, files: photos, ordered });
   return folderRef({ kind: 'pick', id, rootName: name.replace(/[/]/g, '-'), sub: '' });
 }
 
@@ -150,11 +151,12 @@ export class Folders {
     if (ref.kind === 'pick') {
       const pick = picks.get(ref.id);
       if (!pick) throw new Error('Those files are no longer available. Choose the folder again.');
-      return pick.files
-        .map((f) => {
-          const path = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
-          return { name: f.name, path, file: async () => f };
-        })
+      const found = pick.files.map((f) => {
+        const path = (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name;
+        return { name: f.name, path, file: async () => f };
+      });
+      if (pick.ordered) return found;
+      return found
         .sort((a, b) => a.path.localeCompare(b.path, undefined, { numeric: true }));
     }
     const dir = await this.directory(ref);

@@ -85,6 +85,8 @@ export function Library() {
       onDrop={(e) => {
         if (!e.dataTransfer.files.length) return;
         e.preventDefault();
+        const running = useEditor.getState().importJob;
+        if (running && (running.status === 'scanning' || running.status === 'running')) return useEditor.getState().toast('error', 'An import is already running. Drop again when it finishes.');
         void useEditor.getState().importDropped([...e.dataTransfer.files]);
       }}
     >

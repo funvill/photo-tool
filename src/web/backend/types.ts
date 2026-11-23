@@ -36,7 +36,7 @@ export interface ImportJob {
   removed: number;
   missingFolders: string[];
   failed: number;
-  /** Photos from a drop: the asset for each input file in order ('' for one that failed). */
+  /** Photos from a drop: the asset for each input in order ('' for one that failed); a dropped folder gives one entry per photo in it. */
   assetIds: string[];
   errors: { file: string; error: string }[];
 }

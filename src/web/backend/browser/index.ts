@@ -6,6 +6,7 @@ import type { WorkerAsset } from './export.worker';
 import { BrowserExporter } from './exporter';
 import { canPickDirectories, containsFile, folderDisplayName, folderRef, Folders, parseFolder, registerPick } from './folders';
 import { fontBytes } from './fonts';
+import { alignDropped } from './drop';
 import { BrowserImporter } from './importer';
 
 // The web version's backend: everything src/server/app.ts does, in the page. Same methods and
@@ -174,6 +175,9 @@ function shelfPreview(c: Context, key: string, file: File, name: string): Promis
   }
   return p;
 }
+
+/** The files of each drop job, to report the job's photos in drop order. */
+const dropped = new Map<string, File[]>();
 
 let placesCache: Promise<import('../../../shared/places').Place[]> | null = null;
 const places = () =>
@@ -344,12 +348,16 @@ export const browserBackend: Backend = {
     if (!files.length) throw new ApiError(400, 'Drop some photos to import');
     void persist();
     // Files handed over by a drop are imported like a picked folder: copied into browser storage.
-    return c.importer.start(projectId, registerPick(files));
+    // Registered in drop order, so the job's ids line up with the dropped files.
+    const job = c.importer.start(projectId, registerPick(files, true));
+    dropped.set(job.id, files);
+    return alignDropped(files, job);
   },
   async job(id) {
     const j = (await ctx()).importer.get(id);
     if (!j) throw notFound('Job not found');
-    return j;
+    const files = dropped.get(id);
+    return files ? alignDropped(files, j) : j;
   },
   async listFolder() {
     throw new ApiError(501, 'The web version uses your browser’s folder picker.');

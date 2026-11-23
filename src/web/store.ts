@@ -94,7 +94,7 @@ interface EditorState {
   startImport(folder: string, opts?: { link?: boolean }): Promise<void>;
   /**
    * Import photos dropped from the file manager. Resolves to the ids of the photos now in the book
-   * (non-empty only), in drop order; errors are shown as a toast.
+   * (non-empty only), in drop order (a dropped folder's photos in name order); errors are shown as a toast.
    */
   importDropped(files: File[]): Promise<string[]>;
   refreshLinks(): Promise<void>;
@@ -373,7 +373,14 @@ export const useEditor = create<EditorState>((set, get) => ({
     try {
       const dsk = desktop;
       const paths = dsk ? files.map((f) => dsk.pathForFile(f)) : null;
-      let job = await api.importDropped(projectId, files, paths && paths.every(Boolean) ? paths : null);
+      // Desktop: files with no path on disk (dragged out of a zip or a web page) cannot be imported; say which.
+      const pathless = paths ? files.filter((_, i) => !paths[i]).map((f) => `${f.name}: has no file on disk to import`) : [];
+      const usable = paths ? files.filter((_, i) => paths[i]) : files;
+      if (paths && !usable.length) {
+        get().toast('error', pathless.slice(0, 3).join(' · '));
+        return [];
+      }
+      let job = await api.importDropped(projectId, usable, paths ? paths.filter(Boolean) : null);
       set({ importJob: job });
       while (job.status === 'scanning' || job.status === 'running') {
         await new Promise((r) => setTimeout(r, 300));
@@ -382,7 +389,8 @@ export const useEditor = create<EditorState>((set, get) => ({
       }
       await get().refreshAssets();
       const ids = (job.assetIds ?? []).filter(Boolean);
-      if (job.status === 'failed' || job.errors.length) get().toast('error', job.errors.map((e) => e.error).slice(0, 3).join(' · ') || 'Import failed');
+      const problems = [...pathless, ...job.errors.map((e) => e.error)];
+      if (job.status === 'failed' || problems.length) get().toast('error', problems.slice(0, 3).join(' · ') || 'Import failed');
       else if (!ids.length) get().toast('error', 'None of those could be read as photos');
       setTimeout(() => set((s) => (s.importJob?.id === job.id ? { importJob: null } : {})), 2500);
       return ids;
