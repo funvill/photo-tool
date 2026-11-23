@@ -113,6 +113,42 @@ describe('photoinfo', () => {
     expect(Object.keys(readFolderInfo(dir, ro).photos).sort()).toEqual(['a.jpg', 'b.jpg']);
   });
 
+  const readOnlyOpts = (): PhotoInfoOptions => ({
+    fallbackDir,
+    writeFile: (target, text) => {
+      if (target.startsWith(dir)) throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+      writeFileSync(target, text);
+    },
+  });
+
+  it('existing read-only photoinfo.json: edit lands in fallback and is visible on the next read', () => {
+    writeFileSync(file(), JSON.stringify({ format: 'photoinfo/1', photos: { 'a.jpg': { star: true } } }));
+    updatePhotoInfo(dir, 'b.jpg', { notes: 'new' }, readOnlyOpts());
+    for (const o of [readOnlyOpts(), opts]) {
+      const info = readFolderInfo(dir, o);
+      expect(info.source).toBe('fallback');
+      expect(info.photos['a.jpg']).toEqual({ star: true });
+      expect(info.photos['b.jpg']).toEqual({ notes: 'new' });
+    }
+    expect(JSON.parse(readFileSync(file(), 'utf8')).photos['b.jpg']).toBeUndefined();
+  });
+
+  it('a later successful folder write removes the fallback file', () => {
+    updatePhotoInfo(dir, 'a.jpg', { star: true }, readOnlyOpts());
+    expect(readdirSync(fallbackDir)).toHaveLength(1);
+    updatePhotoInfo(dir, 'b.jpg', { star: true }, opts);
+    expect(readdirSync(fallbackDir)).toEqual([]);
+    const info = readFolderInfo(dir, opts);
+    expect(info.source).toBe('folder');
+    expect(Object.keys(info.photos).sort()).toEqual(['a.jpg', 'b.jpg']);
+  });
+
+  it('update does not create a missing photo folder', () => {
+    const missing = join(dir, 'nope');
+    expect(() => updatePhotoInfo(missing, 'a.jpg', { star: true }, opts)).toThrow(PhotoInfoWriteError);
+    expect(existsSync(missing)).toBe(false);
+  });
+
   it('other write errors are not swallowed into the fallback', () => {
     const writeFile = () => {
       throw Object.assign(new Error('disk on fire'), { code: 'EIO' });

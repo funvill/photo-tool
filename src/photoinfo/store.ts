@@ -75,9 +75,12 @@ function loadFrom(path: string, source: 'folder' | 'fallback'): Loaded | undefin
   }
 }
 
-/** The folder's own file wins; the fallback is used only when the folder has none. */
+/**
+ * A fallback file wins when it exists: it is only ever written from a load that already included the folder's own
+ * file, so it holds the full merged content. A successful folder write deletes it again.
+ */
 function load(folder: string, opts: PhotoInfoOptions): Loaded {
-  return loadFrom(folderFile(folder), 'folder') ?? loadFrom(fallbackFile(folder, opts), 'fallback') ?? { kind: 'none' };
+  return loadFrom(fallbackFile(folder, opts), 'fallback') ?? loadFrom(folderFile(folder), 'folder') ?? { kind: 'none' };
 }
 
 export function readFolderInfo(folder: string, opts: PhotoInfoOptions): FolderInfo {
@@ -106,7 +109,6 @@ export function infoFor(info: FolderInfo, fileName: string): PhotoInfo | undefin
 
 /** Writes a temp file beside the target, then renames it over the target. */
 function atomicWrite(target: string, text: string): void {
-  mkdirSync(dirname(target), { recursive: true });
   const tmp = join(dirname(target), `.${PHOTOINFO_NAME}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`);
   try {
     writeFileSync(tmp, text, 'utf8');
@@ -144,10 +146,17 @@ export function updatePhotoInfo(
   const write = opts.writeFile ?? atomicWrite;
   try {
     write(folderFile(folder), serialisePhotoInfo(file));
+    // The folder is writable again: go back to its own file.
+    try {
+      unlinkSync(fallbackFile(folder, opts));
+    } catch {
+      /* no fallback file */
+    }
   } catch (e) {
     const code = codeOf(e);
     if (!code || !FALLBACK_CODES.has(code)) throw new PhotoInfoWriteError(`Could not write ${folderFile(folder)}: ${(e as Error).message}`);
     try {
+      mkdirSync(opts.fallbackDir, { recursive: true });
       write(fallbackFile(folder, opts), serialisePhotoInfo({ ...file, folder: resolve(folder) }));
     } catch (e2) {
       throw new PhotoInfoWriteError(`Could not write the fallback file either: ${(e2 as Error).message}`);
