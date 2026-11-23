@@ -26,7 +26,7 @@ Build or update the app with `npm run launcher` (it points at this folder, so ru
 
 ### From the terminal
 
-Requires macOS (HEIC import uses the built-in `sips`) and Node 22.13+ (uses built-in `node:sqlite`).
+Runs on macOS, Windows and Linux. Requires Node 22.13+ (uses built-in `node:sqlite`). HEIC import uses the built-in `sips` on macOS and a bundled WebAssembly build of libheif on Windows and Linux.
 
 ```bash
 npm install
@@ -39,6 +39,16 @@ npm run dev
 Open http://127.0.0.1:5173. The API runs on 127.0.0.1:5174, and data lives in `./data` (override with `PHOTOBOOK_DATA_DIR`; move ports with `PHOTOBOOK_WEB_PORT` / `PHOTOBOOK_PORT`).
 
 For a single-process build: `npm run build && npm start`, then open http://127.0.0.1:5174.
+
+### Desktop app (Windows and Linux)
+
+The same editor and local server in one window, as an installed program: no terminal, no browser, and it never uses the network.
+
+- **Build the installer:** `npm run dist`. It builds for the platform it runs on, into `dist/installer`: on Windows a per-user installer (`Photobook Studio Setup <version>.exe`, no administrator prompt), on Linux a `.deb` and an AppImage (x64 only). Everything the app needs is inside; nothing is downloaded when installing or running it.
+- **Run in development:** `npm run dev:desktop` opens the desktop window on the Vite dev server. It uses the same ports and the same `./data` folder as `npm run dev`, so run one or the other, not both.
+- **Where the data lives:** the installed app keeps books, thumbnails, exports and logs in a per-user folder, `%APPDATA%\Photobook Studio\data` on Windows and `~/.config/Photobook Studio/data` on Linux (**File → Open the data folder** shows it; `PHOTOBOOK_DATA_DIR` overrides it). Uninstalling leaves it in place.
+- **Unsigned.** The installers are not code-signed, so Windows shows "Windows protected your PC" (choose **More info**, then **Run anyway**).
+- **Help → About** shows the version and the licences of the fonts and software shipped with the app (`THIRD-PARTY-NOTICES.txt`, made by `scripts/make-notices.ts`).
 
 ### Try it without your own photos
 
@@ -123,8 +133,8 @@ For books, the **Collage** style builds every multi-photo page as a mosaic, and 
 - **Layers.** At the foot of the side panel: everything on the page, top first. Click to select (Shift adds), move items up or down a layer, and lock or unlock them.
 - **Per-photo adjustments.** In the photo panel, **Adjust** has Auto-enhance (fixes exposure, adds a little contrast and colour, neutralises a colour cast), Black & white, and brightness, contrast, saturation, warmth and fade sliders. These apply before the poster's colour grade, the same way in the editor and the PDF. On posters they follow the photo through Arrange, and through swaps everywhere.
 - **Back cover and spine.** In the cover panel, **Add back-cover text** puts a blurb on the back, on a paper panel over a wraparound photo. **Spine** adds or updates a title reading top to bottom, sized to the spine. It is only offered when the printer allows spine text for this page count.
-- **Image export for posters.** The export dialog adds **Image**: JPEG or PNG at screen size (about 2400 px), 150 DPI or 300 DPI. The image is cropped to the trim and rendered from the verified print PDF by macOS.
-- **Out-of-date server.** When the app was updated but the server is still running old code, the banner now offers **Restart server now** (for servers started by the launcher or `npm start`). The server rebuilds if needed, restarts itself and the page reloads.
+- **Image export for posters.** The export dialog adds **Image**: JPEG or PNG at screen size (about 2400 px), 150 DPI or 300 DPI. The image is cropped to the trim and rendered from the verified print PDF (by macOS's own renderer on a Mac, by a bundled PDFium on Windows and Linux).
+- **Out-of-date server.** When the app was updated but the server is still running old code, the banner now offers **Restart server now** (in the desktop app, and on a Mac for servers started by the launcher or `npm start`; `npm start` on Windows and Linux has no restart, so stop it and start it again). The server rebuilds if needed, restarts itself and the page reloads.
 
 ## Opacity and deleting projects
 
@@ -136,7 +146,7 @@ For books, the **Collage** style builds every multi-photo page as a mosaic, and 
 In the export dialog, **Web flipbook** turns a book into one web page you can send to people:
 
 - It opens in any browser, offline, with nothing to install. The front cover starts closed, spreads turn like the Preview, and the back cover comes last. Use the arrow keys, swipe, click a page or drag the slider. On a phone held upright it shows one page at a time.
-- Every page and both cover boards are cut from the same verified print PDF (rendered by macOS, like poster images), so the flipbook looks exactly like the printed book, trimmed and without bleed.
+- Every page and both cover boards are cut from the same verified print PDF (rendered the same way as poster images), so the flipbook looks exactly like the printed book, trimmed and without bleed.
 - **Standard** makes pages 1400 px on the long edge; **Sharp** makes them 2200 px. Expect roughly 0.3 MB (Standard) or 0.5 MB (Sharp) per page with real photos.
 - Send the file by AirDrop, email or a shared drive, or put it on any static web host for a link. Nothing is uploaded from the app.
 

@@ -32,7 +32,7 @@ selected. Both implementations have the same methods and return the same shapes:
     (OffscreenCanvas instead of sharp) and font loading differ. Every file is re-verified with
     pdf-lib (page count, MediaBox, TrimBox, BleedBox) exactly as on the server.
   - `raster.ts` — poster PNG/JPEG and the flipbook, rendered from the verified PDF with pdf.js
-    (the server uses macOS `sips` for the same step).
+    (the server uses macOS `sips` for the same step, and a bundled PDFium on Windows and Linux).
   - `folders.ts` — folder access: `showDirectoryPicker` handles saved in IndexedDB (relink, linked
     folders, the Shelf), or a `<input webkitdirectory>` copy-in where that API does not exist.
   - `backup.ts` — one-file backup/restore of a project (document, photos, thumbnails).

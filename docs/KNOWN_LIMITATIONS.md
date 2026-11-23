@@ -3,7 +3,7 @@
 Honest list of what this version does not do, or does only partly.
 
 ## Platform
-- **macOS only for HEIC.** HEIC is converted with `/usr/bin/sips`; other platforms would need libheif with HEVC support.
+- **HEIC on Windows and Linux is decoded by a bundled WebAssembly build of libheif** (macOS uses `/usr/bin/sips`). It is slower (about a second for a 12 MP photo), HDR gain maps are ignored (the standard picture is used), and it has been tested with encoder-made files, not yet with photos straight off an iPhone.
 - **The Mac app is a launcher, not a packaged app.** `Photobook Studio.app` starts the local server from this project folder and opens the editor in your browser; it needs Node.js and this folder (rebuild it with `npm run launcher` if the folder moves). A self-contained Tauri app is still possible later; core logic is shell-independent.
 
 ## Print
@@ -47,7 +47,7 @@ The browser build (GitHub Pages) has everything above, plus these limits:
 - **Storage lives in the browser.** Books, thumbnails and copied-in photos are in the browser's site data for this site, on this device, in this browser profile. Another browser or device doesn't see them. Browsers may clear site data under storage pressure or when you clear browsing data; the app asks for persistent storage, but Safari and Firefox may not grant it. Use per-book backups (one `.photobook` file).
 - **Folders (Chrome/Edge):** photos are read in place through a folder you choose. After a browser restart, the browser asks for permission again ("Allow access" in the library); until then thumbnails and editing work, but export, linked-folder sync and missing-photo checks wait for permission. Moving or renaming the chosen folder itself breaks the link; relink by choosing it again.
 - **Safari and Firefox:** no folder access API, so imported photos are copied into browser storage (more disk use), and linked folders, the Shelf and relink-in-place aren't available. Relink copies the found files in.
-- **HEIC** imports only in Safari (which decodes it). Chrome, Edge and Firefox report "convert to JPEG first". The local app converts HEIC with macOS `sips`.
+- **HEIC** imports only in Safari (which decodes it). Chrome, Edge and Firefox report "convert to JPEG first". The local app converts HEIC itself (macOS `sips`; a bundled libheif on Windows and Linux).
 - **Photo analysis** uses the same formulas as the local app on the browser's own decode and resize, so sharpness and near-duplicate fingerprints are close but not bit-identical to the local app's. Curation compares photos within a book (percentiles, Hamming distance), so drafts behave the same; a library imported in both versions will not match hash for hash.
 - **Exports run in the browser** and are held in memory until downloaded: very large books need a lot of RAM (each photo is decoded at full size once while its pages are drawn). Export results are links valid until the page is closed. JPEGs inside the PDF are encoded by the browser (chroma subsampling may differ from the local app's 4:4:4).
 - **Poster images** are capped at about 16 megapixels (Safari's canvas limit), so large posters at 300 DPI come out at a lower DPI, and the PNG/JPEG has no DPI tag. The flipbook uses JPEG page images where the browser can't encode WebP (Safari).
