@@ -244,6 +244,14 @@ export function createApp(dataDir: string, opts: AppOptions = {}) {
     res.status(202).json(job);
   }));
 
+  // Individual files (or folders) dropped from the file manager.
+  app.post('/api/projects/:id/import-paths', wrap((req, res) => {
+    requireProject(P(req).id);
+    const { paths } = req.body ?? {};
+    if (!Array.isArray(paths) || !paths.length || !paths.every((p) => typeof p === 'string' && p)) throw new HttpError(400, 'Drop some photos to import');
+    res.status(202).json(importer.startPaths(P(req).id, paths));
+  }));
+
   app.get('/api/jobs/:id', (req, res) => {
     const job = importer.get(P(req).id);
     if (!job) return void res.status(404).json({ error: 'Job not found' });

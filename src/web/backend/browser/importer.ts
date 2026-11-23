@@ -75,7 +75,7 @@ export class BrowserImporter {
     const job: BrowserImportJob = {
       id: crypto.randomUUID(), projectId, kind, folder: folders.length === 1 ? folderDisplayName(folders[0]) : `${folders.length} linked folders`, folders,
       status: 'scanning', total: 0, processed: 0, imported: 0, alreadyInLibrary: 0, exactDuplicates: 0, moved: 0, removed: 0,
-      missingFolders: [], failed: 0, errors: [], startedAt: new Date().toISOString(),
+      missingFolders: [], failed: 0, assetIds: [], errors: [], startedAt: new Date().toISOString(),
     };
     this.jobs.set(job.id, job);
     return job;
@@ -103,13 +103,15 @@ export class BrowserImporter {
         files.push(...(await this.folders.list(folder)).map((f) => ({ folder, f })));
       }
       job.total = files.length;
+      job.assetIds = files.map(() => '');
       job.status = 'running';
       let next = 0;
       const worker = async () => {
         while (next < files.length) {
-          const { folder, f } = files[next++];
+          const at = next++;
+          const { folder, f } = files[at];
           try {
-            await this.importOne(job, folder, f);
+            job.assetIds[at] = await this.importOne(job, folder, f);
           } catch (e) {
             job.failed++;
             job.errors.push({ file: f.name, error: e instanceof Error ? e.message : String(e) });
@@ -127,7 +129,7 @@ export class BrowserImporter {
     job.finishedAt = new Date().toISOString();
   }
 
-  private async importOne(job: BrowserImportJob, folder: string, found: FoundFile) {
+  private async importOne(job: BrowserImportJob, folder: string, found: FoundFile): Promise<string> {
     const ref = parseFolder(folder)!;
     const file = await found.file();
     // A saved folder is referenced in place; files handed over by the file input are copied in.
@@ -138,7 +140,7 @@ export class BrowserImporter {
     if (existing && existing.fileSize === file.size && existing.mtimeMs === mtimeMs && (await this.store.getThumb(existing.id, 's'))) {
       await this.store.linkAsset(job.projectId, existing.id);
       job.alreadyInLibrary++;
-      return;
+      return existing.id;
     }
     const contentHash = await this.media<string>('hash', file);
     if (source.kind === 'copy') {
@@ -147,7 +149,7 @@ export class BrowserImporter {
       if (twin) {
         await this.store.linkAsset(job.projectId, twin.id);
         job.alreadyInLibrary++;
-        return;
+        return twin.id;
       }
     } else if (!existing) {
       // The same photo whose old file is gone: it was moved or renamed. Follow it, keeping its place on pages.
@@ -155,7 +157,7 @@ export class BrowserImporter {
         if (a.source.kind !== 'dir' || (await this.exists(a))) continue;
         await this.store.relocateAsset(a.id, source, found.name);
         job.moved++;
-        return;
+        return a.id;
       }
     }
     const id = existing?.id ?? crypto.randomUUID();
@@ -192,6 +194,7 @@ export class BrowserImporter {
     const turn = this.writing.then(save);
     this.writing = turn.catch(() => undefined);
     await turn;
+    return id;
   }
 
   /** Whether a photo's original can be read (unknown → assumed present). */

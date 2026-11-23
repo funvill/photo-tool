@@ -24,7 +24,7 @@ export interface ProjectSummary {
 
 export interface ImportJob {
   id: string;
-  kind: 'import' | 'sync';
+  kind: 'import' | 'sync' | 'paths';
   status: 'scanning' | 'running' | 'done' | 'failed';
   folder: string;
   total: number;
@@ -36,6 +36,8 @@ export interface ImportJob {
   removed: number;
   missingFolders: string[];
   failed: number;
+  /** Photos from a drop: the asset for each input file in order ('' for one that failed). */
+  assetIds: string[];
   errors: { file: string; error: string }[];
 }
 
@@ -168,6 +170,11 @@ export interface Backend {
   photoInfoStamp(projectId: string): Promise<string>;
   /** `folder` is a path (local server) or a folder reference from the browser's picker. */
   startImport(projectId: string, folder: string): Promise<ImportJob>;
+  /**
+   * Photos dropped onto the editor. The local server imports them by `paths` (from the desktop app);
+   * the browser version reads `files` itself. Resolves to a job whose `assetIds` lists each file's photo.
+   */
+  importDropped(projectId: string, files: File[], paths: string[] | null): Promise<ImportJob>;
   job(id: string): Promise<ImportJob>;
   listFolder(path?: string): Promise<FolderListing>;
   links(projectId: string): Promise<LinkedFolder[]>;

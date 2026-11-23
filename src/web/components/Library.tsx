@@ -74,7 +74,20 @@ export function Library() {
   const running = job && (job.status === 'scanning' || job.status === 'running');
 
   return (
-    <aside className="library">
+    <aside
+      className="library"
+      // Photo files dropped from the file manager are only imported; placing them is up to the user.
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes('Files')) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+      }}
+      onDrop={(e) => {
+        if (!e.dataTransfer.files.length) return;
+        e.preventDefault();
+        void useEditor.getState().importDropped([...e.dataTransfer.files]);
+      }}
+    >
       <div className="panel-head">
         <h2>Library</h2>
         <div className="row">

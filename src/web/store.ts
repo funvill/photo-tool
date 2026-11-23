@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { CommandError, expandGroups, findSurface, reconcileCover, refreshContents, type BookDocument, type DraftReport, type PhotoAsset } from '../core';
 import { api, ApiError, type ImportJob, type LinkedFolder } from './api';
+import { desktop } from './desktop';
 
 // Editor state. The document is immutable; every committed edit pushes the previous document onto
 // a bounded undo stack (structural sharing keeps this cheap). Drags update the document
@@ -91,6 +92,11 @@ interface EditorState {
   patchAsset(assetId: string, patch: { rating?: number; favorite?: boolean; excluded?: boolean }): Promise<void>;
   /** Import a folder; `link` also keeps it in sync from now on. */
   startImport(folder: string, opts?: { link?: boolean }): Promise<void>;
+  /**
+   * Import photos dropped from the file manager. Resolves to the ids of the photos now in the book
+   * (non-empty only), in drop order; errors are shown as a toast.
+   */
+  importDropped(files: File[]): Promise<string[]>;
   refreshLinks(): Promise<void>;
   /** Re-read the linked folders (at most every 20 s unless `force`), quietly unless something changed. */
   syncLinks(opts?: { force?: boolean }): Promise<void>;
@@ -359,6 +365,31 @@ export const useEditor = create<EditorState>((set, get) => ({
       get().toast(job.failed ? 'error' : 'success', parts.join(' · '));
     }
     setTimeout(() => set((s) => (s.importJob?.id === job.id ? { importJob: null } : {})), 2500);
+  },
+
+  async importDropped(files) {
+    const { projectId } = get();
+    if (!projectId || !files.length) return [];
+    try {
+      const dsk = desktop;
+      const paths = dsk ? files.map((f) => dsk.pathForFile(f)) : null;
+      let job = await api.importDropped(projectId, files, paths && paths.every(Boolean) ? paths : null);
+      set({ importJob: job });
+      while (job.status === 'scanning' || job.status === 'running') {
+        await new Promise((r) => setTimeout(r, 300));
+        job = await api.job(job.id);
+        set({ importJob: job });
+      }
+      await get().refreshAssets();
+      const ids = (job.assetIds ?? []).filter(Boolean);
+      if (job.status === 'failed' || job.errors.length) get().toast('error', job.errors.map((e) => e.error).slice(0, 3).join(' · ') || 'Import failed');
+      else if (!ids.length) get().toast('error', 'None of those could be read as photos');
+      setTimeout(() => set((s) => (s.importJob?.id === job.id ? { importJob: null } : {})), 2500);
+      return ids;
+    } catch (e) {
+      get().toast('error', e instanceof Error ? e.message : String(e));
+      return [];
+    }
   },
 
   async refreshLinks() {

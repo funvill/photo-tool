@@ -190,6 +190,12 @@ describe('desktop packaging', () => {
     expect(JSON.stringify(JSON.parse(read('package.json')).devDependencies)).not.toMatch(/updater/);
   });
 
+  it('exposes the path of a dropped file through the preload', () => {
+    const preload = read('electron/preload.ts');
+    expect(preload).toMatch(/pathForFile/);
+    expect(preload).toContain('webUtils.getPathForFile');
+  });
+
   it('keeps the page sandboxed', () => {
     const main = read('electron/main.ts');
     for (const setting of ['contextIsolation: true', 'nodeIntegration: false', 'sandbox: true', 'spellcheck: false', 'webviewTag: false']) expect(main).toContain(setting);

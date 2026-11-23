@@ -61,6 +61,8 @@ export function Canvas() {
   const [guides, setGuides] = useState<GuideLine[]>([]);
   const [editingText, setEditingText] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
+  /** Where files dropped from the file manager are being imported (mm on the spread). */
+  const [importing, setImporting] = useState<Pt | null>(null);
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [swapDrag, setSwapDrag] = useState<{ client: Pt; target: string | null } | null>(null);
   const [menu, setMenu] = useState<MenuTarget | null>(null);
@@ -510,7 +512,7 @@ export function Canvas() {
   };
   // ---- drag & drop from the library -------------------------------------------------------
   const onDragOver = (e: React.DragEvent) => {
-    if (!e.dataTransfer.types.includes(ASSET_MIME)) return;
+    if (!e.dataTransfer.types.includes(ASSET_MIME) && !e.dataTransfer.types.includes('Files')) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
     const hit = hitTest(toMm(e.clientX, e.clientY), (el) => el.type === 'image' && !el.locked);
@@ -518,10 +520,47 @@ export function Canvas() {
     if (id !== dropTarget) setDropTarget(id);
   };
 
+  /** Photo files dropped from the file manager: import them, then place them as one undo step. */
+  const onDropFiles = async (files: File[], p: Pt) => {
+    const hit = hitTest(p, (el) => el.type === 'image' && !el.locked);
+    if (surface.locked) return useEditor.getState().toast('error', `This ${index === COVER_INDEX ? 'cover' : 'spread'} is locked. Unlock it to change photos.`);
+    setImporting(p);
+    let ids: string[];
+    try {
+      ids = await useEditor.getState().importDropped(files);
+    } finally {
+      setImporting(null);
+    }
+    const found = ids.map((id) => useEditor.getState().assetMap.get(id)).filter((a): a is PhotoAsset => !!a);
+    if (!found.length) return;
+    let selectId = '';
+    run('Add dropped photos', (d) => {
+      let cur = d;
+      found.forEach((asset, i) => {
+        if (i === 0 && hit) {
+          cur = setFramePhoto(cur, surface.id, hit.id, asset);
+          selectId = hit.id;
+        } else {
+          const r = addPhotoAt(cur, surface.id, asset, p.x + 10 * i, p.y + 10 * i);
+          cur = r.doc;
+          if (!selectId) selectId = r.newId;
+        }
+      });
+      return cur;
+    });
+    if (selectId) select({ spreadId: surface.id, elementId: selectId });
+  };
+
   const onDrop = (e: React.DragEvent) => {
     const assetId = e.dataTransfer.getData(ASSET_MIME);
     setDropTarget(null);
-    if (!assetId) return;
+    if (!assetId) {
+      if (!e.dataTransfer.files.length) return;
+      e.preventDefault();
+      // The file list is only readable during the event.
+      void onDropFiles([...e.dataTransfer.files], toMm(e.clientX, e.clientY));
+      return;
+    }
     e.preventDefault();
     const asset = assets.get(assetId);
     if (!asset) return;
@@ -573,6 +612,7 @@ export function Canvas() {
             {sizeMatch.h && <div className="size-match size-match-v" style={{ left: (sizeMatch.h.x + b) * scale - 12, top: (sizeMatch.h.y + b) * scale, height: sizeMatch.h.h * scale }}>=</div>}
             {hovered && !gestureRef.current && <Outline el={hovered} scale={scale} offset={b} className="hover-outline" />}
             {dropTarget && <Outline el={surface.elements.find((x) => x.id === dropTarget)!} scale={scale} offset={b} className="drop-outline" />}
+            {importing && <div className="drop-importing" style={{ left: (importing.x + b) * scale, top: (importing.y + b) * scale }}>Importing…</div>}
             {swapTarget && <Outline el={swapTarget} scale={scale} offset={b} className="drop-outline" />}
             {isPosterDoc && <PinBadges elements={surface.elements} scale={scale} offset={b} />}
             {multiEls.length > 1 && !editingText && (

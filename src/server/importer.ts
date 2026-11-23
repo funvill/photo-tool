@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { basename, extname, join, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -13,7 +13,7 @@ export interface ImportJob {
   id: string;
   projectId: string;
   /** 'import' reads one folder; 'sync' re-reads the project's linked folders. */
-  kind: 'import' | 'sync';
+  kind: 'import' | 'sync' | 'paths';
   folder: string;
   folders: string[];
   status: 'scanning' | 'running' | 'done' | 'failed';
@@ -29,6 +29,8 @@ export interface ImportJob {
   /** Linked folders that weren't there (renamed, deleted, or on a drive that isn't plugged in). */
   missingFolders: string[];
   failed: number;
+  /** 'paths' jobs: the asset id for each input file in input order ('' for a file that failed). */
+  assetIds: string[];
   errors: { file: string; error: string }[];
   startedAt: string;
   finishedAt?: string;
@@ -76,6 +78,18 @@ export class Importer {
   }
 
   /**
+   * Import individual files (dropped from the file manager). A folder among them is scanned like
+   * `start` does. `assetIds` lists the asset for each file in input order, '' for one that failed.
+   */
+  startPaths(projectId: string, paths: string[]): ImportJob {
+    const inputs = paths.map(resolveFolder);
+    const job = this.newJob(projectId, 'paths', []);
+    job.folder = inputs.length === 1 ? inputs[0] : `${inputs.length} dropped items`;
+    this.enqueue(job, () => this.runPaths(job, inputs));
+    return job;
+  }
+
+  /**
    * Re-read the project's linked folders: add new photos, follow moved ones, and drop photos whose
    * file is gone — unless they're on a page (`inUse`), where they stay and show as missing.
    * A sync already queued or running for the project is returned instead of starting another.
@@ -99,7 +113,7 @@ export class Importer {
     const job: ImportJob = {
       id: randomUUID(), projectId, kind, folder: folders.length === 1 ? folders[0] : `${folders.length} linked folders`, folders,
       status: 'scanning', total: 0, processed: 0, imported: 0, alreadyInLibrary: 0, exactDuplicates: 0, moved: 0, removed: 0,
-      missingFolders: [], failed: 0, errors: [], startedAt: new Date().toISOString(),
+      missingFolders: [], failed: 0, assetIds: [], errors: [], startedAt: new Date().toISOString(),
     };
     this.jobs.set(job.id, job);
     return job;
@@ -155,7 +169,55 @@ export class Importer {
     job.finishedAt = new Date().toISOString();
   }
 
-  private async importOne(job: ImportJob, path: string) {
+  private async runPaths(job: ImportJob, inputs: string[]) {
+    try {
+      const files: string[] = [];
+      for (const input of inputs) {
+        let isDir = false;
+        try {
+          isDir = statSync(input).isDirectory();
+        } catch {
+          job.failed++;
+          job.errors.push({ file: basename(input), error: `${basename(input)}: not found` });
+          files.push('');
+          continue;
+        }
+        if (isDir) files.push(...(await scanFolder(input, true)));
+        else files.push(input);
+      }
+      job.total = files.length;
+      job.assetIds = files.map(() => '');
+      job.status = 'running';
+      let next = 0;
+      const worker = async () => {
+        while (next < files.length) {
+          const at = next++;
+          const file = files[at];
+          if (!file) {
+            job.processed++;
+            continue;
+          }
+          try {
+            if (!isSupported(file)) job.errors.push({ file: basename(file), error: `${basename(file)}: not a photo this app can read` });
+            else job.assetIds[at] = await this.importOne(job, file);
+          } catch (e) {
+            job.failed++;
+            job.errors.push({ file: basename(file), error: e instanceof Error ? e.message : String(e) });
+          }
+          job.processed++;
+        }
+      };
+      await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+      job.status = 'done';
+    } catch (e) {
+      job.status = 'failed';
+      job.errors.push({ file: job.folder, error: e instanceof Error ? e.message : String(e) });
+    }
+    job.finishedAt = new Date().toISOString();
+  }
+
+  /** Catalogue one file and add it to the project; resolves to its asset id. */
+  private async importOne(job: ImportJob, path: string): Promise<string> {
     const st = await fileStat(path);
     const existing = this.store.assetByPath(path);
     const dataDir = this.store.dataDir;
@@ -163,7 +225,7 @@ export class Importer {
     if (existing && existing.file_size === st.size && existing.mtime_ms === st.mtimeMs && existingThumb(dataDir, existing.id, 's')) {
       this.store.linkAsset(job.projectId, existing.id);
       job.alreadyInLibrary++;
-      return;
+      return existing.id;
     }
     const contentHash = await hashFile(path);
     if (!existing) {
@@ -172,7 +234,7 @@ export class Importer {
       if (moved) {
         this.store.relocateAsset(moved.id, path);
         job.moved++;
-        return;
+        return moved.id;
       }
     }
     const id = existing?.id ?? randomUUID();
@@ -206,6 +268,7 @@ export class Importer {
     });
     if (dup) job.exactDuplicates++;
     job.imported++;
+    return id;
   }
 
   private dropGone(job: ImportJob, inUse: Set<string>) {

@@ -338,6 +338,14 @@ export const browserBackend: Backend = {
     void persist();
     return c.importer.start(projectId, folder);
   },
+  async importDropped(projectId, files) {
+    const c = await ctx();
+    await requireProject(c, projectId);
+    if (!files.length) throw new ApiError(400, 'Drop some photos to import');
+    void persist();
+    // Files handed over by a drop are imported like a picked folder: copied into browser storage.
+    return c.importer.start(projectId, registerPick(files));
+  },
   async job(id) {
     const j = (await ctx()).importer.get(id);
     if (!j) throw notFound('Job not found');
