@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
   addPhotoAt, addTextAt, aspectOf, createBook, dayKey, generateDraft, isPageEdited, pageElements, relayPage, removeElements, setSpreadLocked,
-  starredPool, updateDraft, updateElement, withFingerprints,
+  distributeCounts, mulberry32, starredPool, updateDraft, updateElement, withFingerprints,
   type BookDocument, type GenerationSettings, type ImageElement, type PhotoAsset, type Spread,
 } from '../src/core';
 import { fakeAsset, resetFakeAssets } from './helpers';
@@ -261,12 +261,57 @@ describe('updateDraft', () => {
     const starred = Array.from({ length: 50 }, (_, i) => fakeAsset({ day: 1 + Math.floor(i / 30), minute: i * 7, favorite: true, ...(i % 3 === 2 ? PORT : LAND) }));
     const doc = generateDraft(createBook({ title: 'T', pages: 8 }), starred, settings).doc;
     const all = (s: Spread) => (['left', 'right'] as const).map((k) => onPage(doc, s, k).length);
-    const i = doc.spreads.findIndex((s, k) => k > 0 && s.layout?.left && s.layout?.right && Math.max(...all(s)) > 7 && all(s)[0] + all(s)[1] <= 15);
+    const i = doc.spreads.findIndex((s, k) => k > 0 && s.layout?.left && s.layout?.right && all(s)[0] + all(s)[1] === 15);
     expect(i).toBeGreaterThan(0);
+    // With seed 2 the style's own limit (9) would split the 14 remaining photos 6/8.
+    expect(distributeCounts(14, 2, 9, mulberry32(2), true)).toEqual([6, 8]);
     const gone = images(doc.spreads[i])[0].assetId!;
-    const { doc: next, report } = updateDraft(doc, unstar(starred, [gone]), settings);
+    const { doc: next, report } = updateDraft(doc, unstar(starred, [gone]), { ...settings, seed: 2 });
     expect(report.relaidPages).toEqual([{ spreadIndex: i, side: 'spread' }]);
-    for (const k of ['left', 'right'] as const) expect(onPage(next, next.spreads[i], k).length).toBeLessThanOrEqual(7);
+    expect((['left', 'right'] as const).map((k) => onPage(next, next.spreads[i], k).length)).toEqual([7, 7]);
+  });
+
+  it('a single re-laid page never exceeds the cap; the rest overflows to a new spread', () => {
+    const settings = { ...SETTINGS, stylePresetId: 'collage', targetPages: 8 };
+    const starred = Array.from({ length: 60 }, (_, i) => fakeAsset({ day: 1 + Math.floor(i / 30), minute: i * 7, favorite: true, ...(i % 3 === 2 ? PORT : LAND) }));
+    const doc = generateDraft(createBook({ title: 'T', pages: 8 }), starred, settings).doc;
+    const i = doc.spreads.findIndex((s, k) => k > 0 && s.layout?.left && s.layout?.right && onPage(doc, s, 'left').length === 9);
+    expect(i).toBeGreaterThan(0);
+    const s = doc.spreads[i];
+    const moved = onPage(doc, s, 'right')[0];
+    const edited = updateElement(doc, s.id, moved.id, { xMm: moved.xMm + 2 });
+    const rightBefore = pageElements(edited, edited.spreads[i], 'right');
+    const gone = onPage(doc, s, 'left')[0].assetId!;
+    const { doc: next, report } = updateDraft(edited, unstar(starred, [gone]), settings);
+    expect(report.relaidPages).toEqual([{ spreadIndex: i, side: 'left' }]);
+    expect(report.addedSpreads).toEqual([i + 1]);
+    expect(onPage(next, next.spreads[i], 'left').length).toBeLessThanOrEqual(7);
+    expect(pageElements(next, next.spreads[i], 'right')).toEqual(rightBefore);
+    expect(new Set(placedIds(next))).toEqual(new Set(starred.map((a) => a.id).filter((id) => id !== gone)));
+    for (const sp of report.addedSpreads.map((k) => next.spreads[k])) for (const k of ['left', 'right'] as const) expect(onPage(next, sp, k).length).toBeLessThanOrEqual(7);
+  });
+
+  it('overflowing the closing page keeps date order in book order', () => {
+    const { starred, doc } = book();
+    const last = doc.spreads.length - 1;
+    expect(onPage(doc, doc.spreads[last], 'left').length).toBe(3);
+    // Later than everything in the book: they all target the closing page.
+    const late = [0, 1, 2, 3].map((k) => fakeAsset({ day: 5, minute: 30 + k * 40, favorite: true, ...LAND }));
+    const all = byId([...starred, ...late]);
+    const { doc: next, report } = updateDraft(doc, [...starred, ...late], SETTINGS);
+    expect(report.addedSpreads.length).toBeGreaterThanOrEqual(1);
+    const closing = next.spreads.length - 1;
+    const runIdx = [...report.addedSpreads, closing].sort((a, b) => a - b);
+    expect(runIdx[runIdx.length - 2]).toBe(closing - 1);
+    const t = (e: ImageElement) => Date.parse(all.get(e.assetId!)!.capturedAt!);
+    const pages = runIdx.flatMap((k) => (k === closing ? (['left'] as const) : (['left', 'right'] as const)).map((side) => onPage(next, next.spreads[k], side)));
+    const seq = pages.flat().length;
+    expect(seq).toBe(7);
+    for (let k = 1; k < pages.length; k++) {
+      if (!pages[k - 1].length || !pages[k].length) continue;
+      expect(Math.max(...pages[k - 1].map(t))).toBeLessThanOrEqual(Math.min(...pages[k].map(t)));
+    }
+    expect(onPage(next, next.spreads[closing], 'left').map((e) => e.assetId)).toContain(late[3].id);
   });
 
   it('a hand-edited page is never re-laid; an unstarred photo on it leaves an empty frame', () => {

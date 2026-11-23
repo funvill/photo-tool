@@ -148,6 +148,13 @@ function relaySpreadSide(ctx: Ctx, spreads: Spread[], index: number, side: Side,
     stay.push(...affected.filter((e) => !e.locked && e.type === 'image' && e.assetId && extra.has(e.assetId)));
     photos = [pick];
   }
+  const limit = side === 'spread' && index > 0 && !last ? 2 * ctx.cap : ctx.cap;
+  if (photos.length > limit) {
+    // No laid-out page holds more than the cap: the latest photos beyond it stay in their frames.
+    const extra = new Set(photos.slice(limit).map((a) => a.id));
+    stay.push(...affected.filter((e) => !e.locked && e.type === 'image' && e.assetId && extra.has(e.assetId)));
+    photos = photos.slice(0, limit);
+  }
   let elements: Element[];
   let layout: Spread['layout'];
   if (side === 'spread') {
@@ -320,6 +327,44 @@ export function updateDraft(doc: BookDocument, assets: PhotoAsset[], settings: G
     const blank = (side: PageSide): Page => ({ side, auto: true, photos: [], title: false, removal: false, addition: true });
     return { spread, isNew: true, pages: [blank('left'), blank('right')], assetIds: new Set(), overflowOf: after, changed: true, replacedOn: new Set(), replaced: [], emptied: [], hadPhotos: false };
   };
+  /**
+   * Share the photos of a run out again in date order, at most `cap` a page: the page, its facing
+   * page if it takes photos, and the spreads already added after it, in book order. Spreads are
+   * added after the run (never after the closing spread) while the photos do not fit.
+   */
+  const shareOut = (w: Work, p: Page, a?: PhotoAsset) => {
+    const run: { w: Work; p: Page }[] = [
+      ...w.pages.filter((q) => q === p || takesPhotos(q)).map((q) => ({ w, p: q })),
+      ...works.filter((x) => x.overflowOf === w).flatMap((x) => x.pages.map((q) => ({ w: x, p: q }))),
+    ];
+    const photos = chronological([...run.flatMap((r) => r.p.photos), ...(a ? [a] : [])]);
+    const drafted = new Set([...(a ? [a.id] : []), ...run.flatMap((r) => r.p.photos.filter((x) => r.w.assetIds.has(x.id)).map((x) => x.id))]);
+    while (photos.length > run.length * cap) {
+      const ow = newWork(w, w.spread.chapterId);
+      const after = works.reduce((at, x, k) => (x === w || x.overflowOf === w ? k : at), -1);
+      // Never after the closing spread: its right-hand side is the inside of the back cover.
+      works.splice(Math.min(after + 1, works.length - 1), 0, ow);
+      run.push(...ow.pages.map((q) => ({ w: ow, p: q })));
+    }
+    // Book order: spreads added before the closing spread come before its page.
+    const order = (r: { w: Work; p: Page }) => works.indexOf(r.w) * 2 + r.w.pages.indexOf(r.p);
+    run.sort((x, y) => order(x) - order(y));
+    for (const r of run) for (const x of r.p.photos) r.w.assetIds.delete(x.id);
+    const base = Math.floor(photos.length / run.length);
+    const extra = photos.length % run.length;
+    let cursor = 0;
+    run.forEach((r, k) => {
+      const n = base + (Math.floor(((k + 1) * extra) / run.length) - Math.floor((k * extra) / run.length));
+      const share = photos.slice(cursor, cursor + n);
+      cursor += n;
+      if (share.map((x) => x.id).join() !== r.p.photos.map((x) => x.id).join()) {
+        r.p.addition = true;
+        r.w.changed = true;
+      }
+      r.p.photos = share;
+      for (const x of share) if (drafted.has(x.id)) r.w.assetIds.add(x.id);
+    });
+  };
   for (const a of pending) {
     const all = targets();
     let target: { w: Work; p: Page } | undefined;
@@ -355,37 +400,15 @@ export function updateDraft(doc: BookDocument, assets: PhotoAsset[], settings: G
       w.changed = true;
       continue;
     }
-    // The target is full: share the photos of the run (the target, its facing page if it takes
-    // photos, and the spreads already added after it) out again in date order, adding a spread
-    // after the run whenever they do not fit.
-    const run: { w: Work; p: Page }[] = [
-      ...w.pages.filter((q) => q === p || takesPhotos(q)).map((q) => ({ w, p: q })),
-      ...works.filter((x) => x.overflowOf === w).flatMap((x) => x.pages.map((q) => ({ w: x, p: q }))),
-    ];
-    const photos = chronological([...run.flatMap((r) => r.p.photos), a]);
-    const drafted = new Set([a.id, ...run.flatMap((r) => r.p.photos.filter((x) => r.w.assetIds.has(x.id)).map((x) => x.id))]);
-    while (photos.length > run.length * cap) {
-      const ow = newWork(w, w.spread.chapterId);
-      const after = works.reduce((at, x, k) => (x === w || x.overflowOf === w ? k : at), -1);
-      // Never after the closing spread: its right-hand side is the inside of the back cover.
-      works.splice(Math.min(after + 1, works.length - 1), 0, ow);
-      run.push(...ow.pages.map((q) => ({ w: ow, p: q })));
+    // The target is full: share out the photos of its run again in date order.
+    shareOut(w, p, a);
+  }
+
+  // ---- no re-laid page holds more than the cap (a style may have drafted pages fuller than 7)
+  for (const w of [...works]) {
+    for (const p of w.pages) {
+      if (p.auto && !p.title && p.side !== 'spread' && (p.removal || p.addition) && p.photos.length > cap) shareOut(w, p);
     }
-    for (const r of run) for (const x of r.p.photos) r.w.assetIds.delete(x.id);
-    const base = Math.floor(photos.length / run.length);
-    const extra = photos.length % run.length;
-    let cursor = 0;
-    run.forEach((r, k) => {
-      const n = base + (Math.floor(((k + 1) * extra) / run.length) - Math.floor((k * extra) / run.length));
-      const share = photos.slice(cursor, cursor + n);
-      cursor += n;
-      if (share.map((x) => x.id).join() !== r.p.photos.map((x) => x.id).join()) {
-        r.p.addition = true;
-        r.w.changed = true;
-      }
-      r.p.photos = share;
-      for (const x of share) if (drafted.has(x.id)) r.w.assetIds.add(x.id);
-    });
   }
 
   // ---- spreads emptied of photos go (never the title or closing spread, nor one holding hand work)
