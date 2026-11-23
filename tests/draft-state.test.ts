@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
-  applyPageAddon, applyStylePreset, createBook, generateDraft, handPlacedAssetIds, isPageEdited, removeElements, setFramePhoto, updateElement, updateStyle,
+  addPhotoAt, applyPageAddon, applyStylePreset, createBook, generateDraft, handPlacedAssetIds, isPageEdited, removeElements, setFramePhoto, updateElement, updateStyle,
   withFingerprints,
   type BookDocument, type ImageElement, type PhotoAsset, type Spread, type TextElement,
 } from '../src/core';
@@ -78,6 +78,22 @@ describe('draft state', () => {
     next = { ...next, spreads: next.spreads.map((x) => (x.id === s.id ? { ...x, provenance: { ...x.provenance!, fingerprints: undefined } } : x)) };
     const ns = next.spreads.find((x) => x.id === s.id)!;
     for (const k of sides(ns)) expect(isPageEdited(next, ns, k)).toBe(false);
+  });
+
+  it('something added to a page the draft left blank counts as edited; a blank page does not', () => {
+    const a = assets();
+    const doc = draft(a);
+    const title = doc.spreads[0];
+    expect(title.layout?.left).toBeUndefined();
+    expect(isPageEdited(doc, title, 'left')).toBe(false);
+    const placed = new Set(doc.spreads.flatMap((s) => s.elements.map((e) => (e.type === 'image' ? e.assetId : null))));
+    const extra = a.find((x) => !placed.has(x.id)) ?? a[0];
+    const next = addPhotoAt(doc, title.id, extra, doc.settings.trimWidthMm / 2, doc.settings.trimHeightMm / 2).doc;
+    expect(isPageEdited(next, next.spreads[0], 'left')).toBe(true);
+    expect(isPageEdited(next, next.spreads[0], 'right')).toBe(false);
+    // Without any fingerprints (old books) the same addition still counts as unedited.
+    const old = { ...next, spreads: next.spreads.map((s, i) => (i === 0 ? { ...s, provenance: { ...s.provenance!, fingerprints: undefined } } : s)) };
+    expect(isPageEdited(old, old.spreads[0], 'left')).toBe(false);
   });
 
   it('locked or provenance-less spreads count as edited', () => {

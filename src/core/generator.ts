@@ -8,6 +8,7 @@ import { chooseTemplate, coverDpi, keepSubjectOutOfGutter, layoutPage, placeSubj
 import { mulberry32, newId, type Rng } from './random';
 import { stylePreset, styleFromPreset, type StylePreset } from './styles';
 import { clamp } from './units';
+import { pageTemplatesFor } from './templates';
 import { withFingerprints } from './draftState';
 import { chooseCoverPhotos, makeCover, reconcileCover } from './cover';
 
@@ -193,12 +194,10 @@ export function generateDraft(doc: BookDocument, assets: PhotoAsset[], settings:
       elements.push(...layoutPage(base, t, 'right', used, { title: doc.title, subtitle: doc.subtitle || dateRangeOf(allPlaced) }));
       layout.right = t.id;
     } else if (u.kind === 'pair' && u.hero) {
-      const t = templateOrThrow('panorama');
       used.push(u.hero);
-      const els = layoutPage(base, t, 'spread', used, {});
-      elements.push(...els.map((el) => (el.type === 'image' ? keepSubjectOutOfGutter(el, u.hero!, base) : el)));
-      layout.spread = t.id;
-      prevTemplate = t.id;
+      elements.push(...layoutHeroSpread(base, u.hero));
+      layout.spread = 'panorama';
+      prevTemplate = 'panorama';
     } else {
       const sides: PageSide[] = u.kind === 'pair' ? ['left', 'right'] : [u.side];
       for (const side of sides) {
@@ -215,18 +214,11 @@ export function generateDraft(doc: BookDocument, assets: PhotoAsset[], settings:
           prevTemplate = t.id;
           continue;
         }
-        if (preset.layoutMode === 'mosaic' && photos.length >= 2) {
-          elements.push(...layoutCollage(base, pageContentRect(side, bookSettings, style), photos, { style: 'mosaic', gapMm: style.gapMm, seed: settings.seed }).elements);
-          used.push(...photos);
-          layout[side] = MOSAIC_LAYOUT;
-          prevTemplate = MOSAIC_LAYOUT;
-          continue;
-        }
-        const t = chooseTemplate(preset, photos, [prevTemplate, layout.left ?? ''], rng, base, side, explore ? 1.4 : 0.5);
-        elements.push(...layoutPage(base, t, side, photos, { caption: caption(photos) }));
+        const page = layoutAutoPage(base, preset, photos, side, { rng, avoid: [prevTemplate, layout.left ?? ''], explore, seed: settings.seed, caption: caption(photos) });
+        elements.push(...page.elements);
         used.push(...photos);
-        layout[side] = t.id;
-        prevTemplate = t.id;
+        layout[side] = page.layoutId;
+        prevTemplate = page.layoutId;
       }
     }
     const firstChapter = used.map((a) => chapterOf.get(a.id)).find(Boolean);
@@ -277,6 +269,36 @@ export function generateDraft(doc: BookDocument, assets: PhotoAsset[], settings:
   };
 }
 
+export interface AutoPageOptions {
+  rng: Rng;
+  /** Template ids to avoid repeating (previous page, facing page). */
+  avoid: string[];
+  /** Variations (seed ≠ 1) explore templates more widely. */
+  explore: boolean;
+  seed: number;
+  caption?: string;
+}
+
+/**
+ * One page of photos laid out the way a draft lays it out: an edge-to-edge mosaic for mosaic
+ * styles (or when no template holds that many photos), otherwise the best-fitting template.
+ */
+export function layoutAutoPage(
+  base: Pick<BookDocument, 'settings' | 'style'>, preset: StylePreset, photos: PhotoAsset[], side: PageSide, opts: AutoPageOptions,
+): { elements: Element[]; layoutId: string } {
+  if ((preset.layoutMode === 'mosaic' && photos.length >= 2) || !pageTemplatesFor(photos.length).length) {
+    const box = pageContentRect(side, base.settings, base.style);
+    return { elements: layoutCollage(base, box, photos, { style: 'mosaic', gapMm: base.style.gapMm, seed: opts.seed }).elements, layoutId: MOSAIC_LAYOUT };
+  }
+  const t = chooseTemplate(preset, photos, opts.avoid, opts.rng, base, side, opts.explore ? 1.4 : 0.5);
+  return { elements: layoutPage(base, t, side, photos, { caption: opts.caption }), layoutId: t.id };
+}
+
+/** A single panoramic photo across both pages, its subject kept out of the fold. */
+export function layoutHeroSpread(base: Pick<BookDocument, 'settings' | 'style'>, hero: PhotoAsset): Element[] {
+  const els = layoutPage(base, templateOrThrow('panorama'), 'spread', [hero], {});
+  return els.map((el) => (el.type === 'image' ? keepSubjectOutOfGutter(el, hero, base) : el));
+}
 
 export interface CuratedPool {
   /** Usable photos: not hidden, not missing, not an exact duplicate, not in `skip`. */

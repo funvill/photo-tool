@@ -53,13 +53,22 @@ export function withFingerprints(doc: BookDocument, spread: Spread): Spread {
   return provenance ? { ...spread, provenance } : spread;
 }
 
-/** True when the page was changed by hand since it was drafted (or was never drafted). */
+/**
+ * True when the page was changed by hand since it was drafted (or was never drafted).
+ * A page the draft left blank (no fingerprint) counts as edited once something is put on it;
+ * drafts made before fingerprints existed count as unedited everywhere. 'spread' (when no
+ * panorama was drafted) is edited when either page is; a page under a panorama follows the spread.
+ */
 export function isPageEdited(doc: BookDocument, spread: Spread, side: Side): boolean {
   if (spread.locked) return true;
   if (!spread.provenance) return true;
-  const stored = spread.provenance.fingerprints?.[side];
-  if (stored === undefined) return false;
-  return stored !== fingerprintPage(doc, spread, side);
+  const fps = spread.provenance.fingerprints ?? {};
+  const stored = fps[side];
+  if (stored !== undefined) return stored !== fingerprintPage(doc, spread, side);
+  if (!Object.keys(fps).length) return false;
+  if (side === 'spread') return isPageEdited(doc, spread, 'left') || isPageEdited(doc, spread, 'right');
+  if (fps.spread !== undefined) return isPageEdited(doc, spread, 'spread');
+  return pageElements(doc, spread, side).length > 0;
 }
 
 /** Photos on the spread that the generator did not place. */
