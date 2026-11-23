@@ -1,0 +1,11 @@
+# Like Dockerfile.test, for Fedora Workstation (AppImage only: there is no .rpm).
+#   docker build -f Dockerfile.test-fedora -t photobook-test-fedora .
+# The Workstation group without weak dependencies, so it has no more than a real install has;
+# added for the test only: a virtual display (Xvfb, xauth, xvfb-run), xwininfo and strace.
+FROM fedora:latest
+RUN dnf -y --setopt=install_weak_deps=False group install workstation-product-environment \
+ && rpm -qa --qf '%{NAME}\n' | sort -u > /desktop-installed.txt \
+ && dnf -y --setopt=install_weak_deps=False install xorg-x11-server-Xvfb xorg-x11-xauth xwininfo strace \
+ && rpm -qa --qf '%{NAME}\n' | sort -u | comm -13 /desktop-installed.txt - > /test-extras.txt \
+ && dnf clean all \
+ && useradd -m -s /bin/bash tester

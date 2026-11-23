@@ -1,0 +1,27 @@
+# A stand-in for a freshly installed desktop of one distribution, for testing the packages with
+# the network off (see docker-test.mjs). Baked with the network on; run with --network none.
+#
+#   docker build -f Dockerfile.test --build-arg BASE=ubuntu:24.04 --build-arg DESKTOP=ubuntu-desktop-minimal -t photobook-test-ubuntu-24.04 .
+#
+# What is in it:
+#   - the distribution's default desktop package set, WITHOUT recommended packages, so it has
+#     no more than a real install has (/desktop-full.txt lists the real, larger default set;
+#     /desktop-installed.txt what is installed here)
+#   - added for the test only (/test-extras.txt): xvfb and xauth (a display, there is no
+#     screen), x11-utils (xprop/xwininfo, to read the window's class), strace (to list the
+#     network connections the app attempts)
+ARG BASE=ubuntu:24.04
+FROM ${BASE}
+ARG DESKTOP=ubuntu-desktop-minimal
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -s ${DESKTOP} | sed -n 's/^Inst \([^ ]*\).*/\1/p' | sort > /desktop-full.txt \
+ && apt-get install -y --no-install-recommends ${DESKTOP} \
+ && dpkg-query -W -f '${Package}\n' | sort -u > /desktop-installed.txt \
+ && apt-get install -y --no-install-recommends xvfb xauth x11-utils strace \
+ && dpkg-query -W -f '${Package}\n' | sort -u | comm -13 /desktop-installed.txt - > /test-extras.txt \
+ && apt-get clean \
+ && useradd -m -s /bin/bash tester
+# xdg-utils is on every real default desktop (it is in /desktop-full.txt and in Ubuntu's ISO
+# manifests) and is missing above only because recommended packages were skipped.
+RUN apt-get update && apt-get install -y --no-install-recommends xdg-utils && apt-get clean

@@ -1,0 +1,12 @@
+# The machine that builds the Linux packages (.deb and AppImage). See docker-build.mjs.
+# bookworm's glibc (2.36) only matters for the build tools: Electron and sharp ship their own
+# prebuilt binaries, so the packages run on anything with glibc 2.28 or newer.
+FROM node:24-bookworm
+# electron-builder's fpm (for the .deb) and its AppImage tools are downloaded by electron-builder
+# itself; these are the system tools they call. gcc (already in this image), binutils and
+# patchelf are for patch-sharp.mjs.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends fakeroot dpkg-dev binutils xz-utils file desktop-file-utils patchelf \
+ && rm -rf /var/lib/apt/lists/*
+ENV ELECTRON_BUILDER_CACHE=/cache/electron-builder ELECTRON_CACHE=/cache/electron npm_config_cache=/cache/npm CI=1
+WORKDIR /build
