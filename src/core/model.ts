@@ -307,7 +307,9 @@ export interface Spread {
   layout?: SpreadLayout;
   /** Where an auto layout came from. `generatedIds`: elements the generator made besides photos
    * (e.g. a collage title band) — replaced on re-layout, unlike text the user added. */
-  provenance?: { generatedAt: string; seed: number; assetIds: ID[]; generatedIds?: ID[] };
+  provenance?: { generatedAt: string; seed: number; assetIds: ID[]; generatedIds?: ID[];
+    /** Layout hash of each page when it was drafted; a mismatch later means it was edited by hand. */
+    fingerprints?: Partial<Record<'left' | 'right' | 'spread', string>> };
   /** Painted in array order: later elements are on top. */
   elements: Element[];
 }

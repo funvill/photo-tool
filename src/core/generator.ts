@@ -8,6 +8,7 @@ import { chooseTemplate, coverDpi, keepSubjectOutOfGutter, layoutPage, placeSubj
 import { mulberry32, newId, type Rng } from './random';
 import { stylePreset, styleFromPreset, type StylePreset } from './styles';
 import { clamp } from './units';
+import { withFingerprints } from './draftState';
 import { chooseCoverPhotos, makeCover, reconcileCover } from './cover';
 
 // Deterministic first-draft generator. Stages:
@@ -230,14 +231,16 @@ export function generateDraft(doc: BookDocument, assets: PhotoAsset[], settings:
     }
     const firstChapter = used.map((a) => chapterOf.get(a.id)).find(Boolean);
     if (firstChapter) currentChapter = firstChapter;
-    spreads.push({
-      id: newId(),
-      locked: false,
-      chapterId: u.kind === 'title' ? undefined : currentChapter,
-      layout,
-      provenance: { generatedAt: now, seed: settings.seed, assetIds: used.map((a) => a.id) },
-      elements,
-    });
+    spreads.push(
+      withFingerprints(doc, {
+        id: newId(),
+        locked: false,
+        chapterId: u.kind === 'title' ? undefined : currentChapter,
+        layout,
+        provenance: { generatedAt: now, seed: settings.seed, assetIds: used.map((a) => a.id) },
+        elements,
+      }),
+    );
   }
 
   // Keep chapters still referenced by locked spreads.
