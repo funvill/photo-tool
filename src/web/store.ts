@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { CommandError, expandGroups, findSurface, reconcileCover, refreshContents, type BookDocument, type DraftReport, type PhotoAsset } from '../core';
+import { CommandError, expandGroups, findSurface, reconcileCover, refreshContents, type BookDocument, type DraftReport, type PhotoAsset, type UpdateReport } from '../core';
 import { api, ApiError, type ImportJob, type LinkedFolder } from './api';
 import { desktop } from './desktop';
 
@@ -61,6 +61,10 @@ interface EditorState {
   draftFocus: number;
   /** Result of the last book draft, shown in the Draft tab. */
   draftReport: DraftReport | null;
+  /** Result of the last "Update from stars"; null after any other draft. */
+  updateReport: UpdateReport | null;
+  /** Notes on how the last draft used the stars. */
+  draftNotes: { fellBack: boolean; addedPages: number };
   /** Photo shown in the library's preview pane. */
   previewAssetId: string | null;
   toasts: Toast[];
@@ -183,6 +187,8 @@ export const useEditor = create<EditorState>((set, get) => ({
   collageFocus: 0,
   draftFocus: 0,
   draftReport: null,
+  updateReport: null,
+  draftNotes: { fellBack: false, addedPages: 0 },
   previewAssetId: null,
   toasts: [],
   loadError: null,
@@ -205,7 +211,7 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   unload() {
     stopInfoWatch();
-    set({ projectId: null, doc: null, assets: [], assetMap: new Map(), past: [], future: [], importJob: null, links: [], syncing: false, draftReport: null });
+    set({ projectId: null, doc: null, assets: [], assetMap: new Map(), past: [], future: [], importJob: null, links: [], syncing: false, draftReport: null, updateReport: null, draftNotes: { fellBack: false, addedPages: 0 } });
   },
 
   run(label, fn) {

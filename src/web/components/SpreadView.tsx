@@ -5,6 +5,7 @@ import {
   type ShapeElement, type Spread, type TextElement, type CalendarElement, calendarLayout, calendarMark, mapPath, MM_PER_PT,
 } from '../../core';
 import { thumbUrl } from '../api';
+import { useEditor } from '../store';
 
 // Renders a spread or the cover at a given scale (px per mm). Used by the editor canvas (the
 // interactive layer is drawn on top by Canvas) and by filmstrip/overview thumbnails.
@@ -143,6 +144,7 @@ function ImageView({ el, scale, style, asset, thumbSize, filter, grade }: { el: 
   // A photo cut to a shape or to text: clip the frame to that outline (borders don't apply).
   const clip = el.mask ? maskPath(el.mask, el.widthMm * scale, el.heightMm * scale) : null;
   const border = clip ? 0 : el.borderMm;
+  const unstarred = useEditor((s) => !el.assetId && !!s.updateReport?.emptiedFrames.some((f) => f.elementId === el.id));
   const frameStyle: CSSProperties = {
     ...style,
     background: border > 0 ? el.borderColor : undefined,
@@ -151,8 +153,8 @@ function ImageView({ el, scale, style, asset, thumbSize, filter, grade }: { el: 
   };
   if (!el.assetId || !asset) {
     return (
-      <div className={`el el-image el-empty ${border > 0 ? 'el-print' : ''}`} style={frameStyle}>
-        {el.assetId && !asset ? <span>Photo not in library</span> : <span>Drop a photo here</span>}
+      <div className={`el el-image el-empty ${unstarred ? 'el-unstarred' : ''} ${border > 0 ? 'el-print' : ''}`} style={frameStyle}>
+        {el.assetId && !asset ? <span>Photo not in library</span> : unstarred ? <span>Unstarred: fill or remove</span> : <span>Drop a photo here</span>}
       </div>
     );
   }

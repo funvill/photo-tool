@@ -1,19 +1,29 @@
 import { useEffect, useState } from 'react';
 import {
-  STYLE_PRESETS, TEMPLATE_EXTRA_PAGES, binding, bookTemplate, defaultGenerationSettings, finishTemplateBook, evenPageCount, generateDraft, printer, typePack, type GenerationSettings,
-  type PhotoAsset,
+  STYLE_PRESETS, TEMPLATE_EXTRA_PAGES, binding, bookTemplate, defaultGenerationSettings, finishTemplateBook, evenPageCount, generateDraft, printer, starredPool, stylePreset, typePack,
+  updateDraft, type GenerationSettings, type PhotoAsset, type UpdateReport,
 } from '../../core';
 import { useEditor } from '../store';
 import { Icon } from './Icon';
 import { BookTemplatesSection } from './BookTemplates';
+import { pagesForStarred } from './draftPages';
+import { UpdateSummary } from './UpdateSummary';
 
 /**
  * Run the generator as one undoable step and remember its report for the panel. A book started
  * from a template keeps its template pages (front matter, chapter openers, closing pages and the
  * words typed on them) as long as its style stays the template's.
  */
-function runDraft(settings: GenerationSettings, assets: PhotoAsset[], label: string) {
+function runDraft(settings: GenerationSettings, allAssets: PhotoAsset[], label: string) {
   const st = useEditor.getState();
+  // The draft is built from the starred photos (or every photo when none is starred), and grows
+  // to as many pages as that takes.
+  const { photos: assets, fellBack } = starredPool(allAssets);
+  const maxPerPage = Math.min(7, stylePreset(settings.stylePresetId).maxPerPage);
+  const requested = evenPageCount(Math.max(4, settings.targetPages));
+  const pages = pagesForStarred(assets.length, requested, maxPerPage);
+  settings = { ...settings, targetPages: pages };
+  useEditor.setState({ updateReport: null, draftNotes: { fellBack, addedPages: pages - requested } });
   st.run(label, (d) => {
     const t = d.template ? bookTemplate(d.template) : undefined;
     if (t && settings.stylePresetId === t.stylePresetId) {
@@ -36,6 +46,18 @@ export function generateFirstDraft(assets: PhotoAsset[]) {
   st.goToSpread(1);
 }
 
+/** Bring the draft in line with the stars as one undo step, keeping pages changed by hand. */
+function runUpdate(assets: PhotoAsset[], saved: GenerationSettings) {
+  const st = useEditor.getState();
+  let report: UpdateReport | null = null;
+  const ok = st.run('Update draft', (d) => {
+    const res = updateDraft(d, assets, d.generation?.settings ?? saved);
+    report = res.report;
+    return res.doc;
+  });
+  if (ok && report) useEditor.setState({ updateReport: report, draftReport: null, draftNotes: { fellBack: starredPool(assets).fellBack, addedPages: 0 } });
+}
+
 /**
  * Auto draft in the side panel: the pages stay visible while you regenerate, and you can flip
  * through spreads between variations. Regenerating keeps you on the spread you are looking at.
@@ -44,6 +66,8 @@ export function DraftPanel() {
   const doc = useEditor((s) => s.doc)!;
   const assets = useEditor((s) => s.assets);
   const report = useEditor((s) => s.draftReport);
+  const updateReport = useEditor((s) => s.updateReport);
+  const notes = useEditor((s) => s.draftNotes);
   const saved = doc.generation?.settings ?? defaultGenerationSettings(doc, assets.length);
   const [pages, setPages] = useState(saved.targetPages);
   const [presetId, setPresetId] = useState(doc.style.presetId);
@@ -62,6 +86,7 @@ export function DraftPanel() {
     : bind.maxPages && target > bind.maxPages ? `${pr.name} ${bind.name} allows at most ${bind.maxPages} pages.` : null;
   const usable = assets.filter((a) => !a.excluded && !a.missing).length;
   const hasContent = doc.spreads.some((s) => !s.locked && s.elements.length);
+  const drafted = doc.spreads.some((s) => s.provenance);
   const settingsChanged = target !== doc.spreads.length * 2 - 2 || presetId !== (doc.generation?.settings.stylePresetId ?? doc.style.presetId) || captions !== saved.includeCaptions || openers !== !!saved.chapterOpeners;
 
   const generate = (seed: number) => {
@@ -103,22 +128,41 @@ export function DraftPanel() {
               </label>
             </div>
             <div className="btn-grid">
-              <button className="btn btn-small btn-primary" onClick={() => generate(settingsChanged || !hasContent ? 1 : saved.seed)} title="Draft the unlocked pages with these settings">
-                <Icon name="sparkle" /> {hasContent ? 'Regenerate' : 'Generate'}
-              </button>
-              <button className="btn btn-small" disabled={!hasContent} onClick={() => generate(saved.seed + 1)} title="Same settings, a different arrangement">
-                <Icon name="shuffle" /> Another variation
-              </button>
+              {drafted ? (
+                <>
+                  <button className="btn btn-small btn-primary" onClick={() => runUpdate(assets, saved)} title="Add and remove photos to match your stars">
+                    <Icon name="sparkle" /> Update from stars
+                  </button>
+                  <button className="btn btn-small" onClick={() => generate(settingsChanged ? 1 : saved.seed)} title="Draft the unlocked pages again with these settings">
+                    <Icon name="shuffle" /> Rebuild all pages
+                  </button>
+                  <button className="btn btn-small" onClick={() => generate(saved.seed + 1)} title="Same settings, a different arrangement">
+                    <Icon name="shuffle" /> Another variation
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button className="btn btn-small btn-primary" onClick={() => generate(1)} title="Draft the pages from your starred photos">
+                    <Icon name="sparkle" /> Generate
+                  </button>
+                  <button className="btn btn-small" disabled={!hasContent} onClick={() => generate(saved.seed + 1)} title="Same settings, a different arrangement">
+                    <Icon name="shuffle" /> Another variation
+                  </button>
+                </>
+              )}
             </div>
             {pageWarning && <div className="notice notice-error small"><Icon name="alert" /> {pageWarning}</div>}
             {locked > 0 && <p className="muted small"><Icon name="lock" size={11} /> {locked} locked spread{locked > 1 ? 's' : ''} kept as {locked > 1 ? 'they are' : 'it is'}{doc.cover?.locked ? ', and the locked cover' : ''}.</p>}
+            {updateReport && <UpdateSummary report={updateReport} />}
+            {notes.fellBack && (report || updateReport) && <p className="muted small">No photos are starred, so every photo was used.</p>}
+            {notes.addedPages > 0 && report && <p className="muted small">Added {notes.addedPages} pages so every starred photo fits.</p>}
             {report && (
               <p className="muted small">
                 {report.pages} pages · {report.selected} photos placed{report.heroSpreads ? ` · ${report.heroSpreads} panorama${report.heroSpreads > 1 ? 's' : ''}` : ''} · {report.nearDuplicatesSet} similar shots set aside
                 {report.exactDuplicates ? ` · ${report.exactDuplicates} duplicates skipped` : ''}{report.notes.length ? ` · ${report.notes.join(' ')}` : ''}
               </p>
             )}
-            <p className="muted small">Best frame of each burst, no duplicates or hidden photos, favourites always kept, in time order. Regenerating replaces unlocked pages — undo brings them back.</p>
+            <p className="muted small">Uses your starred photos, in time order. Update adds and removes photos to match your stars and leaves pages you changed by hand alone. Undo brings back the previous version.</p>
           </>
         )}
       </div>

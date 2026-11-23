@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  COVER_INDEX, TEXT_ROLES, addChapter, applyMosaicLayout, nearestWeight, resetTextToStyle, roleLabel, saveTextAsRoleStyle, setTextRole, weightName, addTextAt, applyTemplate, defaultCrop, duplicateElement, duplicateSpread, effectiveDpi,
+  COVER_INDEX, TEXT_ROLES, addChapter, defaultGenerationSettings, isPageEdited, relayPage, applyMosaicLayout, nearestWeight, resetTextToStyle, roleLabel, saveTextAsRoleStyle, setTextRole, weightName, addTextAt, applyTemplate, defaultCrop, duplicateElement, duplicateSpread, effectiveDpi,
   fitFrameToPhoto, fontFamily, insertSpreadAfter, isPrintable, removeElements, removeSpread, reorderElement, setFramePhoto,
   setSpreadChapter, setSpreadLocked, setSurfaceBackground, shuffleSpreadLayout, spreadPagesLabel, templateName, updateElement,
   MM_PER_PT, TEXT_QUICK_STYLES, useAsBackground, applyQuickStyle, estimateTextHeightMm, boldWeight, isBold, type BookDocument, type ImageElement, type TextElement, type TextRole,
@@ -496,6 +496,11 @@ function SpreadPanel() {
   const n = doc.spreads.length;
   const inner = i > 0 && i < n - 1;
   const [seed, setSeed] = useState(1);
+  const allAssets = useEditor((s) => s.assets);
+  // Drafted pages that were changed by hand can be laid out again from their photos.
+  const relayable = (side: 'left' | 'right' | 'spread') => !!spread.provenance && !!spread.layout?.[side] && isPageEdited(doc, spread, side);
+  const relay = (side: 'left' | 'right' | 'spread') =>
+    run('Re-lay page', (d) => relayPage(d, allAssets, i, side, d.generation?.settings ?? defaultGenerationSettings(d, allAssets.length)));
   const imagesOn = (side: 'left' | 'right') =>
     spread.elements.filter((e) => e.type === 'image' && (side === 'left' ? e.xMm + e.widthMm / 2 < doc.settings.trimWidthMm : e.xMm + e.widthMm / 2 >= doc.settings.trimWidthMm)).length;
 
@@ -567,6 +572,11 @@ function SpreadPanel() {
             <>
               <div className="section-title">Whole spread</div>
               <TemplatePicker scope="spread" current={spread.layout?.spread} onPick={(id) => run(`Layout: ${templateName(id)}`, (d) => applyTemplate(d, i, 'spread', id, assets))} />
+              {relayable('spread') && (
+                <button className="btn btn-small" onClick={() => relay('spread')} title="Lay this panorama out again, as the draft would">
+                  <Icon name="shuffle" /> Re-lay this page
+                </button>
+              )}
             </>
           )}
           {(['left', 'right'] as const).filter((side) => isPrintable(i, side, n)).map((side) => (
@@ -577,6 +587,11 @@ function SpreadPanel() {
                 onPick={(id) => run(`Layout: ${templateName(id)}`, (d) => applyTemplate(d, i, side, id, assets))}
                 onMosaic={imagesOn(side) >= 2 ? () => run('Layout: Mosaic', (d) => applyMosaicLayout(d, i, side, assets, Date.now() % 1000)) : undefined}
               />
+              {!spread.layout?.spread && relayable(side) && (
+                <button className="btn btn-small" onClick={() => relay(side)} title="Lay this page out again from its photos, as the draft would">
+                  <Icon name="shuffle" /> Re-lay this page
+                </button>
+              )}
             </div>
           ))}
           <p className="muted small">Highlighted layouts fit the number of photos already on the page. Extra photos go back to the library; extra frames start empty.</p>
