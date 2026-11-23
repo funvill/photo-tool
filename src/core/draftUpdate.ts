@@ -35,11 +35,13 @@ export function starredPool(assets: PhotoAsset[]): { photos: PhotoAsset[]; fellB
 }
 
 /** Landscape at 1.1 or wider, portrait at 0.9 or narrower, otherwise square. */
-const orientation = (a: PhotoAsset) => (aspectOf(a) >= 1.1 ? 'l' : aspectOf(a) <= 0.9 ? 'p' : 's');
+const orientationOf = (aspect: number) => (aspect >= 1.1 ? 'l' : aspect <= 0.9 ? 'p' : 's');
 
 interface Ctx {
   doc: BookDocument;
   preset: StylePreset;
+  /** Most photos a laid-out page may hold. */
+  cap: number;
   rng: Rng;
   explore: boolean;
   seed: number;
@@ -52,9 +54,11 @@ interface Ctx {
 function makeCtx(doc: BookDocument, assets: PhotoAsset[], settings: GenerationSettings): Ctx {
   const byId = new Map(assets.map((a) => [a.id, a]));
   const inBook = doc.spreads.flatMap((s) => imagesOf(s).map((e) => byId.get(e.assetId!)).filter((a): a is PhotoAsset => !!a));
+  const preset = stylePreset(settings.stylePresetId);
   return {
     doc,
-    preset: stylePreset(settings.stylePresetId),
+    preset,
+    cap: Math.min(7, preset.maxPerPage),
     rng: mulberry32(settings.seed),
     explore: settings.seed !== 1,
     seed: settings.seed,
@@ -84,9 +88,10 @@ function pagePhotos(ctx: Ctx, s: Spread, side: Side): PhotoAsset[] | null {
 /** Elements for one page laid out afresh (title page, chapter page, or photos). */
 function layoutSide(ctx: Ctx, s: Spread, index: number, side: PageSide, photos: PhotoAsset[], avoid: string[]): { elements: Element[]; layoutId: string } {
   const { doc } = ctx;
-  if (index === 0 && side === 'right' && photos.length <= 1) {
+  if (index === 0 && side === 'right') {
+    // The caller passes at most one photo here (see relaySpreadSide).
     const t = templateOrThrow(photos.length ? 'title-photo' : 'title-text');
-    return { elements: layoutPage(doc, t, 'right', photos, { title: doc.title, subtitle: ctx.subtitle }), layoutId: t.id };
+    return { elements: layoutPage(doc, t, 'right', photos.slice(0, 1), { title: doc.title, subtitle: ctx.subtitle }), layoutId: t.id };
   }
   if (!photos.length) {
     const t = templateOrThrow('chapter-divider');
@@ -99,7 +104,7 @@ function layoutSide(ctx: Ctx, s: Spread, index: number, side: PageSide, photos: 
 
 /** Both pages of a spread laid out afresh from `photos`, like a generated pair. */
 function layoutPair(ctx: Ctx, s: Spread, index: number, photos: PhotoAsset[], prev: string): { elements: Element[]; layout: Spread['layout'] } {
-  const [l, r] = distributeCounts(photos.length, 2, ctx.preset.maxPerPage, ctx.rng, ctx.explore);
+  const [l, r] = distributeCounts(photos.length, 2, ctx.cap, ctx.rng, ctx.explore);
   const left = layoutSide(ctx, s, index, 'left', photos.slice(0, l), [prev, '']);
   const right = layoutSide(ctx, s, index, 'right', photos.slice(l, l + r), [left.layoutId, left.layoutId]);
   return { elements: [...left.elements, ...right.elements], layout: { left: left.layoutId, right: right.layoutId } };
@@ -134,7 +139,15 @@ function relaySpreadSide(ctx: Ctx, spreads: Spread[], index: number, side: Side,
   const affected = pageElements(ctx.doc, s, side);
   const affectedIds = new Set(affected.map((e) => e.id));
   const kept = s.elements.filter((e) => !affectedIds.has(e.id));
-  const locked = affected.filter((e) => e.locked);
+  /** Elements that stay where they are: locked ones, and photos the title layout cannot hold. */
+  const stay = affected.filter((e) => e.locked);
+  if (index === 0 && side !== 'left' && photos.length > 1) {
+    // The title page keeps its title layout; photos it cannot hold stay in their frames.
+    const pick = photos.find((a) => aspectOf(a) >= 1.1) ?? photos[0];
+    const extra = new Set(photos.filter((a) => a !== pick).map((a) => a.id));
+    stay.push(...affected.filter((e) => !e.locked && e.type === 'image' && e.assetId && extra.has(e.assetId)));
+    photos = [pick];
+  }
   let elements: Element[];
   let layout: Spread['layout'];
   if (side === 'spread') {
@@ -154,7 +167,7 @@ function relaySpreadSide(ctx: Ctx, spreads: Spread[], index: number, side: Side,
     const { spread: _whole, ...rest } = s.layout ?? {};
     layout = { ...rest, [side]: page.layoutId };
   }
-  return { ...s, layout, elements: [...kept, ...elements, ...locked] };
+  return { ...s, layout, elements: [...kept, ...elements, ...stay] };
 }
 
 /**
@@ -203,7 +216,7 @@ interface Work {
   changed: boolean;
   /** A frame got a replacement photo on these (auto) pages. */
   replacedOn: Set<Side>;
-  replaced: { removed: string; added: string }[];
+  replaced: { removed: string; added: string; side: Side }[];
   emptied: string[];
   hadPhotos: boolean;
 }
@@ -218,9 +231,18 @@ function insertChronological(list: PhotoAsset[], a: PhotoAsset) {
   list.splice(0, list.length, ...next);
 }
 
+/** A page that can take added photos: auto, holding photos, not the title page or a panorama. */
+const takesPhotos = (p: Page) => p.auto && !p.title && p.side !== 'spread' && p.photos.length > 0;
+
+/** True when a spread holds something outside its drafted pages (e.g. text on a page the draft left blank). */
+function hasUndraftedContent(doc: BookDocument, s: Spread): boolean {
+  if (s.layout?.spread) return false;
+  return (['left', 'right'] as const).some((k) => !s.layout?.[k] && pageElements(doc, s, k).length > 0);
+}
+
 export function updateDraft(doc: BookDocument, assets: PhotoAsset[], settings: GenerationSettings): { doc: BookDocument; report: UpdateReport } {
   const ctx = makeCtx(doc, assets, settings);
-  const cap = Math.min(7, ctx.preset.maxPerPage);
+  const { cap } = ctx;
   const { photos: wantedPhotos, fellBack } = starredPool(assets);
   const wanted = new Set(wantedPhotos.map((a) => a.id));
   const placed = new Set(doc.spreads.flatMap((s) => imagesOf(s).map((e) => e.assetId!)));
@@ -242,17 +264,17 @@ export function updateDraft(doc: BookDocument, assets: PhotoAsset[], settings: G
   // ---- removals: drafted photos that are no longer starred
   const removals: { w: Work; page: Page; el: ImageElement; asset: PhotoAsset }[] = [];
   for (const w of works) {
-    if (w.spread.locked) continue;
     for (const el of imagesOf(w.spread)) {
       const id = el.assetId!;
-      if (wanted.has(id) || !w.assetIds.has(id) || el.locked) continue;
+      if (wanted.has(id) || !w.assetIds.has(id)) continue;
       if (!removedIds.includes(id)) removedIds.push(id);
       const side: Side = w.spread.layout?.spread ? 'spread' : el.xMm + el.widthMm / 2 < doc.settings.trimWidthMm ? 'left' : 'right';
       const page = w.pages.find((p) => p.side === side);
       const asset = ctx.byId.get(id);
-      if (page?.auto && asset) removals.push({ w, page, el, asset });
+      if (page?.auto && asset && !el.locked) removals.push({ w, page, el, asset });
       else {
-        // Hand work wins: the frame is left empty for the user to fill or remove.
+        // Hand work wins (locked spreads and frames count as hand work): the frame is left
+        // empty for the user to fill or remove, and nothing else on the page changes.
         w.spread = { ...w.spread, elements: w.spread.elements.map((e) => (e.id === el.id ? { ...el, assetId: null } : e)) };
         w.assetIds.delete(id);
         w.emptied.push(el.id);
@@ -269,23 +291,30 @@ export function updateDraft(doc: BookDocument, assets: PhotoAsset[], settings: G
     page.photos = page.photos.filter((a) => a.id !== asset.id);
     w.changed = true;
     const day = dayKey(asset);
-    const k = pending.findIndex((a) => day !== null && dayKey(a) === day && orientation(a) === orientation(asset));
+    // The newcomer must suit the frame's shape, so the page needs no re-layout.
+    const shape = orientationOf(el.widthMm / el.heightMm);
+    const k = pending.findIndex((a) => day !== null && dayKey(a) === day && orientationOf(aspectOf(a)) === shape);
     if (k < 0) {
       page.removal = true;
       continue;
     }
     const [a] = pending.splice(k, 1);
-    let frame: ImageElement = { ...el, assetId: a.id, crop: defaultCrop(a), fit: isCutout(a) ? 'contain' : 'cover', borderMm: isCutout(a) ? 0 : el.borderMm };
+    // As a template would lay it out: a cutout is shown whole without a border; a photo replacing
+    // a cutout gets the style's border unless the frame bleeds off the page.
+    const { trimWidthMm: tw, trimHeightMm: th } = doc.settings;
+    const bleed = el.xMm <= 0 || el.yMm <= 0 || el.xMm + el.widthMm >= tw * 2 || el.yMm + el.heightMm >= th;
+    const borderMm = isCutout(a) ? 0 : isCutout(asset) ? (bleed ? 0 : doc.style.imageBorderMm) : el.borderMm;
+    let frame: ImageElement = { ...el, assetId: a.id, crop: defaultCrop(a), fit: isCutout(a) ? 'contain' : 'cover', borderMm };
     delete frame.adjust;
     frame = keepSubjectOutOfGutter(frame, a, doc);
     w.spread = { ...w.spread, elements: w.spread.elements.map((e) => (e.id === el.id ? frame : e)) };
     w.assetIds.add(a.id);
     insertChronological(page.photos, a);
     w.replacedOn.add(page.side);
-    w.replaced.push({ removed: asset.id, added: a.id });
+    w.replaced.push({ removed: asset.id, added: a.id, side: page.side });
   }
 
-  const targets = () => works.flatMap((w) => w.pages.filter((p) => p.auto && !p.title && p.side !== 'spread' && p.photos.length > 0).map((p) => ({ w, p })));
+  const targets = () => works.flatMap((w) => w.pages.filter(takesPhotos).map((p) => ({ w, p })));
   const newWork = (after: Work, chapterId: string | undefined): Work => {
     const spread: Spread = { id: newId(), locked: false, chapterId, layout: {}, elements: [] };
     const blank = (side: PageSide): Page => ({ side, auto: true, photos: [], title: false, removal: false, addition: true });
@@ -318,33 +347,52 @@ export function updateDraft(doc: BookDocument, assets: PhotoAsset[], settings: G
       w.assetIds.add(a.id);
       continue;
     }
-    const { w } = target;
-    const other = w.pages.find((p) => p !== target!.p && p.auto && !p.title && p.side !== 'spread' && p.photos.length > 0);
-    const page = target.p.photos.length < cap ? target.p : other && other.photos.length < cap ? other : undefined;
-    w.assetIds.add(a.id);
-    if (page) {
-      insertChronological(page.photos, a);
-      page.addition = true;
+    const { w, p } = target;
+    if (p.photos.length < cap) {
+      insertChronological(p.photos, a);
+      w.assetIds.add(a.id);
+      p.addition = true;
       w.changed = true;
       continue;
     }
-    // Full: the overflow goes on a new spread right after (reusing one already added there).
-    let ow = works.find((x) => x.overflowOf === w && x.pages.some((p) => p.photos.length < cap));
-    if (!ow) {
-      ow = newWork(w, w.spread.chapterId);
+    // The target is full: share the photos of the run (the target, its facing page if it takes
+    // photos, and the spreads already added after it) out again in date order, adding a spread
+    // after the run whenever they do not fit.
+    const run: { w: Work; p: Page }[] = [
+      ...w.pages.filter((q) => q === p || takesPhotos(q)).map((q) => ({ w, p: q })),
+      ...works.filter((x) => x.overflowOf === w).flatMap((x) => x.pages.map((q) => ({ w: x, p: q }))),
+    ];
+    const photos = chronological([...run.flatMap((r) => r.p.photos), a]);
+    const drafted = new Set([a.id, ...run.flatMap((r) => r.p.photos.filter((x) => r.w.assetIds.has(x.id)).map((x) => x.id))]);
+    while (photos.length > run.length * cap) {
+      const ow = newWork(w, w.spread.chapterId);
       const after = works.reduce((at, x, k) => (x === w || x.overflowOf === w ? k : at), -1);
       // Never after the closing spread: its right-hand side is the inside of the back cover.
       works.splice(Math.min(after + 1, works.length - 1), 0, ow);
+      run.push(...ow.pages.map((q) => ({ w: ow, p: q })));
     }
-    w.assetIds.delete(a.id);
-    ow.assetIds.add(a.id);
-    insertChronological((ow.pages[0].photos.length < cap ? ow.pages[0] : ow.pages[1]).photos, a);
+    for (const r of run) for (const x of r.p.photos) r.w.assetIds.delete(x.id);
+    const base = Math.floor(photos.length / run.length);
+    const extra = photos.length % run.length;
+    let cursor = 0;
+    run.forEach((r, k) => {
+      const n = base + (Math.floor(((k + 1) * extra) / run.length) - Math.floor((k * extra) / run.length));
+      const share = photos.slice(cursor, cursor + n);
+      cursor += n;
+      if (share.map((x) => x.id).join() !== r.p.photos.map((x) => x.id).join()) {
+        r.p.addition = true;
+        r.w.changed = true;
+      }
+      r.p.photos = share;
+      for (const x of share) if (drafted.has(x.id)) r.w.assetIds.add(x.id);
+    });
   }
 
-  // ---- spreads emptied of photos go (never the title or closing spread)
+  // ---- spreads emptied of photos go (never the title or closing spread, nor one holding hand work)
   let removedSpreads = 0;
   const kept = works.filter((w, i) => {
     const empty = !w.isNew && w.hadPhotos && w.pages.length > 0 && w.pages.every((p) => p.auto && !p.photos.length)
+      && !hasUndraftedContent(doc, w.spread)
       && !w.spread.elements.some((e) => e.locked || (e.type === 'image' && e.assetId && !removedIds.includes(e.assetId)));
     if (!empty || i === 0 || i === works.length - 1) return true;
     removedSpreads++;
@@ -386,7 +434,8 @@ export function updateDraft(doc: BookDocument, assets: PhotoAsset[], settings: G
     spreads[i] = next;
     if (w.isNew) report.addedSpreads.push(i);
     else for (const side of relaid) report.relaidPages.push({ spreadIndex: i, side });
-    for (const r of w.replaced) report.replaced.push({ ...r, spreadIndex: i });
+    // A replacement on a page that was then re-laid is simply part of that re-layout.
+    for (const { side, ...r } of w.replaced) if (!relaid.includes(side) && !relaid.includes('spread')) report.replaced.push({ ...r, spreadIndex: i });
     for (const elementId of w.emptied) report.emptiedFrames.push({ spreadIndex: i, elementId });
   });
 
