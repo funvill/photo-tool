@@ -43,6 +43,7 @@ export function Canvas() {
   const doc = useEditor((s) => s.doc)!;
   const index = useEditor((s) => s.currentSpread);
   const assets = useEditor((s) => s.assetMap);
+  const emptied = useEditor((s) => s.updateReport?.emptiedFrames);
   const selection = useEditor((s) => s.selection);
   const cropId = useEditor((s) => s.cropElementId);
   const swapSource = useEditor((s) => s.swapSource);
@@ -51,6 +52,7 @@ export function Canvas() {
   const surface = surfaceAt(doc, index);
   const spreadCount = doc.spreads.length;
   const g = useMemo(() => geometryFor(doc.settings, spreadCount, index), [doc.settings, spreadCount, index]);
+  const unstarredIds = useMemo(() => (emptied?.length ? new Set(emptied.filter((f) => f.spreadIndex === index).map((f) => f.elementId)) : undefined), [emptied, index]);
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -603,7 +605,7 @@ export function Canvas() {
           </button>
         )}
         <div className="canvas-spread">
-          <SpreadView settings={doc.settings} style={doc.style} spreadCount={spreadCount} index={index} surface={surface} scale={scale} assets={assets} grade={doc.grade} hiddenElementId={editingText}>
+          <SpreadView settings={doc.settings} style={doc.style} spreadCount={spreadCount} index={index} surface={surface} scale={scale} assets={assets} grade={doc.grade} hiddenElementId={editingText} unstarredIds={unstarredIds}>
             {showGuides && <Guides g={g} scale={scale} />}
             {cropEl && cropAsset && <CropGhost el={cropEl} scale={scale} offset={b} assetId={cropAsset.id} asset={cropAsset} />}
             {guides.map((gl, i) =>

@@ -422,6 +422,31 @@ describe('relayPage', () => {
   });
 });
 
+describe('relayPage on a spread the user made', () => {
+  it('lays out a page that has no provenance and records provenance and fingerprints for it', () => {
+    const { starred, doc } = book();
+    const a = starred[0];
+    const b = starred[1];
+    const s0 = doc.spreads.findIndex((s, i) => i > 0 && i < doc.spreads.length - 1);
+    let hand = doc.spreads.map((s, i) => (i === s0 ? { ...s, elements: [], layout: undefined, provenance: undefined } : s));
+    let d: BookDocument = { ...doc, spreads: hand };
+    const sid = d.spreads[s0].id;
+    const cx = d.settings.trimWidthMm / 2;
+    d = addPhotoAt(d, sid, a, cx, d.settings.trimHeightMm / 2).doc;
+    d = addPhotoAt(d, sid, b, cx, d.settings.trimHeightMm / 4).doc;
+    const spread = d.spreads[s0];
+    expect(spread.provenance).toBeUndefined();
+    expect(isPageEdited(d, spread, 'left')).toBe(true);
+    const next = relayPage(d, starred, s0, 'left', SETTINGS);
+    const ns = next.spreads[s0];
+    expect(ns.provenance).toBeTruthy();
+    expect(ns.provenance!.assetIds).toEqual(expect.arrayContaining([a.id, b.id]));
+    expect(ns.provenance!.fingerprints?.left).toBeTruthy();
+    expect(isPageEdited(next, ns, 'left')).toBe(false);
+    expect(onPage(next, ns, 'left').map((e) => e.assetId).sort()).toEqual([a.id, b.id].sort());
+  });
+});
+
 describe('relayPage on the title page', () => {
   it('keeps the title layout', () => {
     const { starred, doc } = book();

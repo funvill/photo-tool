@@ -498,7 +498,7 @@ function SpreadPanel() {
   const [seed, setSeed] = useState(1);
   const allAssets = useEditor((s) => s.assets);
   // Drafted pages that were changed by hand can be laid out again from their photos.
-  const relayable = (side: 'left' | 'right' | 'spread') => !!spread.provenance && !!spread.layout?.[side] && isPageEdited(doc, spread, side);
+  const relayable = (side: 'left' | 'right' | 'spread') => isPageEdited(doc, spread, side);
   const relay = (side: 'left' | 'right' | 'spread') =>
     run('Re-lay page', (d) => relayPage(d, allAssets, i, side, d.generation?.settings ?? defaultGenerationSettings(d, allAssets.length)));
   const imagesOn = (side: 'left' | 'right') =>

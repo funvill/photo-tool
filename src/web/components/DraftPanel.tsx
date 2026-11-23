@@ -21,18 +21,22 @@ function runDraft(settings: GenerationSettings, allAssets: PhotoAsset[], label: 
   const { photos: assets, fellBack } = starredPool(allAssets);
   const maxPerPage = Math.min(7, stylePreset(settings.stylePresetId).maxPerPage);
   const requested = evenPageCount(Math.max(4, settings.targetPages));
-  const pages = pagesForStarred(assets.length, requested, maxPerPage);
-  settings = { ...settings, targetPages: pages };
-  useEditor.setState({ updateReport: null, draftNotes: { fellBack, addedPages: pages - requested } });
+  useEditor.setState({ updateReport: null });
   st.run(label, (d) => {
     const t = d.template ? bookTemplate(d.template) : undefined;
     if (t && settings.stylePresetId === t.stylePresetId) {
-      const res = generateDraft(d, assets, { ...settings, targetPages: Math.max(4, settings.targetPages - TEMPLATE_EXTRA_PAGES), chapterOpeners: true });
+      // The template adds its own pages, so the photos' page count is the rest.
+      const wanted = Math.max(4, requested - TEMPLATE_EXTRA_PAGES);
+      const photoPages = pagesForStarred(assets.length, wanted, maxPerPage);
+      useEditor.setState({ draftNotes: { fellBack, addedPages: photoPages - wanted } });
+      const res = generateDraft(d, assets, { ...settings, targetPages: photoPages, chapterOpeners: true });
       const doc = finishTemplateBook(res.doc, t, assets, d);
       useEditor.setState({ draftReport: { ...res.report, pages: doc.spreads.length * 2 - 2 } });
       return doc;
     }
-    const res = generateDraft(d, assets, settings);
+    const pages = pagesForStarred(assets.length, requested, maxPerPage);
+    useEditor.setState({ draftNotes: { fellBack, addedPages: pages - requested } });
+    const res = generateDraft(d, assets, { ...settings, targetPages: pages });
     useEditor.setState({ draftReport: res.report });
     return { ...res.doc, template: undefined };
   });

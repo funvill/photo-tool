@@ -5,7 +5,6 @@ import {
   type ShapeElement, type Spread, type TextElement, type CalendarElement, calendarLayout, calendarMark, mapPath, MM_PER_PT,
 } from '../../core';
 import { thumbUrl } from '../api';
-import { useEditor } from '../store';
 
 // Renders a spread or the cover at a given scale (px per mm). Used by the editor canvas (the
 // interactive layer is drawn on top by Canvas) and by filmstrip/overview thumbnails.
@@ -26,9 +25,11 @@ interface Props {
   hiddenElementId?: string | null;
   /** Colour grade for the photos (the document's). */
   grade?: ColorGrade;
+  /** Empty frames to mark "Unstarred: fill or remove" (ids of elements on this surface). */
+  unstarredIds?: ReadonlySet<string>;
 }
 
-export const SpreadView = memo(function SpreadView({ settings, style, spreadCount, index, surface, scale, assets, thumbSize = 'm', children, hiddenElementId, grade }: Props) {
+export const SpreadView = memo(function SpreadView({ settings, style, spreadCount, index, surface, scale, assets, thumbSize = 'm', children, hiddenElementId, grade, unstarredIds }: Props) {
   const filterId = `grade${useId().replace(/:/g, '')}`;
   const graded = !isNeutralGrade(grade);
   const g = useMemo(() => geometryFor(settings, spreadCount, index), [settings, spreadCount, index]);
@@ -65,7 +66,7 @@ export const SpreadView = memo(function SpreadView({ settings, style, spreadCoun
       {bgFrame && <ElementView el={bgFrame} scale={scale} offset={b} asset={assets.get(bgFrame.assetId!)} thumbSize={thumbSize} filter={graded && grade?.scope !== 'photos' ? `url(#${filterId})` : undefined} grade={grade?.scope !== 'photos' ? grade : undefined} />}
       {surface.elements.map((el) =>
         el.id === hiddenElementId ? null : (
-          <ElementView key={el.id} el={el} scale={scale} offset={b} asset={el.type === 'image' && el.assetId ? assets.get(el.assetId) : undefined} thumbSize={thumbSize} filter={graded ? `url(#${filterId})` : undefined} grade={grade} />
+          <ElementView key={el.id} el={el} scale={scale} offset={b} asset={el.type === 'image' && el.assetId ? assets.get(el.assetId) : undefined} thumbSize={thumbSize} filter={graded ? `url(#${filterId})` : undefined} grade={grade} unstarred={unstarredIds?.has(el.id)} />
         ),
       )}
       {!isCover && settings.pageNumbers &&
@@ -92,7 +93,7 @@ export const SpreadView = memo(function SpreadView({ settings, style, spreadCoun
   );
 });
 
-export const ElementView = memo(function ElementView({ el, scale, offset, asset, thumbSize, filter, grade }: { el: Element; scale: number; offset: number; asset?: PhotoAsset; thumbSize: 's' | 'm'; filter?: string; grade?: ColorGrade }) {
+export const ElementView = memo(function ElementView({ el, scale, offset, asset, thumbSize, filter, grade, unstarred }: { unstarred?: boolean; el: Element; scale: number; offset: number; asset?: PhotoAsset; thumbSize: 's' | 'm'; filter?: string; grade?: ColorGrade }) {
   const style: CSSProperties = {
     left: (el.xMm + offset) * scale,
     top: (el.yMm + offset) * scale,
@@ -100,7 +101,7 @@ export const ElementView = memo(function ElementView({ el, scale, offset, asset,
     height: el.heightMm * scale,
     transform: el.rotationDeg ? `rotate(${el.rotationDeg}deg)` : undefined,
   };
-  if (el.type === 'image') return <ImageView el={el} scale={scale} style={style} asset={asset} thumbSize={thumbSize} filter={filter} grade={grade} />;
+  if (el.type === 'image') return <ImageView el={el} scale={scale} style={style} asset={asset} thumbSize={thumbSize} filter={filter} grade={grade} unstarred={unstarred} />;
   if (el.type === 'shape') return <ShapeView el={el} scale={scale} style={style} />;
   if (el.type === 'calendar') return <CalendarView el={el} scale={scale} style={style} />;
   return <TextView el={el} scale={scale} style={style} />;
@@ -136,7 +137,7 @@ function CalendarView({ el, scale, style }: { el: CalendarElement; scale: number
   );
 }
 
-function ImageView({ el, scale, style, asset, thumbSize, filter, grade }: { el: ImageElement; scale: number; style: CSSProperties; asset?: PhotoAsset; thumbSize: 's' | 'm'; filter?: string; grade?: ColorGrade }) {
+function ImageView({ el, scale, style, asset, thumbSize, filter, grade, unstarred }: { unstarred?: boolean; el: ImageElement; scale: number; style: CSSProperties; asset?: PhotoAsset; thumbSize: 's' | 'm'; filter?: string; grade?: ColorGrade }) {
   // A photo with its own adjustments gets its own filter: its adjustment, then the document's grade.
   const ownId = `adj${useId().replace(/:/g, '')}`;
   const own = !isNeutralGrade(el.adjust);
@@ -144,7 +145,6 @@ function ImageView({ el, scale, style, asset, thumbSize, filter, grade }: { el: 
   // A photo cut to a shape or to text: clip the frame to that outline (borders don't apply).
   const clip = el.mask ? maskPath(el.mask, el.widthMm * scale, el.heightMm * scale) : null;
   const border = clip ? 0 : el.borderMm;
-  const unstarred = useEditor((s) => !el.assetId && !!s.updateReport?.emptiedFrames.some((f) => f.elementId === el.id));
   const frameStyle: CSSProperties = {
     ...style,
     background: border > 0 ? el.borderColor : undefined,
