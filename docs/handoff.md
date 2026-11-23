@@ -4,7 +4,7 @@ For whoever picks this up next, person or agent. Read this first, then [electron
 
 ## In one paragraph
 
-This repo is a fork of [photobook_studio](https://github.com/jkw2lo/photobook_studio) (MIT). In one day it was turned from a Mac-only "run a server, open a browser" tool into an Electron desktop app for Windows and Linux that non-technical users install with a double-click and use with no network. A Windows installer, a `.deb` and an AppImage exist, were built from the current tree, and pass an automated self-test. **None of it is committed, none of the code has been reviewed by a person, and it has not been run on a clean machine, a network-off machine, or a real Linux desktop.**
+This repo is a fork of [photobook_studio](https://github.com/jkw2lo/photobook_studio) (MIT). In one day it was turned from a Mac-only "run a server, open a browser" tool into an Electron desktop app for Windows and Linux that non-technical users install with a double-click and use with no network. A Windows installer, a `.deb` and an AppImage exist, were built from the current tree, and pass an automated self-test. **It is committed on `main` (four commits after `97460b2`) but not pushed, and there is no GitHub copy. None of the code has been reviewed by a person, and it has not been run on a clean machine, a network-off machine, or a real Linux desktop.**
 
 ## The requirements (from Steven)
 
@@ -16,7 +16,7 @@ This repo is a fork of [photobook_studio](https://github.com/jkw2lo/photobook_st
 
 ## State of the working tree
 
-Nothing below is committed. The last commit is `97460b2` (research, plan, draft script). `git status` shows about 30 changed files and about 20 new files or folders.
+Everything below is committed on `main` in four commits after `97460b2`: portable server with HEIC and PDF rendering; Electron shell and installer build; Linux packaging; docs. The split is by file, and the first commit carries several features because the same files hold them, so the intermediate commits were not built or tested on their own. Nothing is pushed.
 
 Checked by the lead agent after all subagent work landed: `npm run typecheck` is clean and `npm test` gives **441 passed, 2 skipped, 0 failed**. The two skips are a 500-photo scale test that needs extra fixtures and one folder test that only runs off Windows.
 
@@ -122,7 +122,7 @@ The generated notices file covers 135 packages. Before giving the app to anyone:
 ## Next steps, in order
 
 1. **Read the diff.** Roughly 4,000 added lines were written by subagents. The lead checked reports, tests and built artefacts, not the code. The riskiest pieces to read first: `scripts/desktop/linux/patch-sharp.mjs` and `sharp-glib-shim.c` (binary patching), `electron/main.ts` (security settings), `src/server/heic.ts` (worker pool).
-2. **Commit**, in reviewable pieces: portable server; Electron shell and build; HEIC and rasteriser; Linux packaging; notices, About and docs. Commits are authored as `SWS-Chipkin <sws-dev@chipkin.com>` per the global instructions.
+2. **Committed 2026-11-22** in four pieces (see above). Agent commits are authored as `SWS-Chipkin <sws-dev@chipkin.com>` per the global instructions.
 3. **Click through the installed app by hand** on Windows.
 4. **Test on a clean, network-off Windows.** Windows Sandbox is the easy route but the feature is disabled on this PC; enabling it needs an administrator (`Enable-WindowsOptionalFeature -FeatureName "Containers-DisposableClientVM" -All -Online`) and maybe a restart. Then a `.wsb` file with `<Networking>Disable</Networking>` and the installer folder mapped read-only. Hyper-V is already enabled as an alternative. Take a net log (`--log-net-log`) while there.
 5. **Test on a real Ubuntu 24.04 desktop** in a VM: double-click the `.deb`, launch from the menu, confirm the sandbox starts.
