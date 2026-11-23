@@ -123,7 +123,9 @@ input[type='checkbox'] { accent-color: var(--accent); width: 15px; height: 15px;
 .save-error, .save-conflict { color: var(--error); }
 .zoom { display: inline-flex; align-items: center; }
 .zoom-label { border: 0; background: none; color: var(--muted); width: 46px; cursor: pointer; font-size: 12px; }
-.workspace { flex: 1; display: grid; grid-template-columns: 264px 1fr 292px; min-height: 0; }
+.workspace { flex: 1; display: grid; grid-template-columns: var(--library-width, 264px) 1fr 292px; min-height: 0; position: relative; }
+.panel-resizer { position: absolute; top: 0; bottom: 0; width: 6px; z-index: 12; cursor: col-resize; touch-action: none; }
+.panel-resizer:hover, .panel-resizer:focus-visible, .panel-resizer:active { background: var(--accent); opacity: 0.5; outline: none; }
 .stage { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--stage); }
 
 /* ---- library */
@@ -135,11 +137,10 @@ input[type='checkbox'] { accent-color: var(--accent); width: 15px; height: 15px;
 .import-progress-label { font-size: 11.5px; color: var(--muted); margin-bottom: 4px; }
 .bar { height: 4px; background: var(--panel-3); border-radius: 2px; overflow: hidden; }
 .bar-fill { height: 100%; background: var(--accent); transition: width 0.3s; }
-/* Rows get an explicit height from the library's width: square tiles via aspect-ratio collapse to
-   zero-height rows when combined with content-visibility (which keeps 1000s of tiles cheap). */
+/* Tiles are square via aspect-ratio; the column count follows the library's width. */
 .library { container-type: inline-size; }
-.grid { flex: 1; overflow-y: auto; display: grid; grid-template-columns: repeat(2, 1fr); grid-auto-rows: calc((100cqi - 30px) / 2); gap: 6px; padding: 0 12px 12px; align-content: start; }
-.tile { position: relative; height: 100%; border-radius: 6px; overflow: hidden; background: var(--panel-2); cursor: pointer; content-visibility: auto; contain-intrinsic-size: auto 117px; outline: 1px solid var(--line-soft); }
+.grid { flex: 1; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 6px; padding: 0 12px 12px; align-content: start; }
+.tile { position: relative; aspect-ratio: 1; align-self: start; border-radius: 6px; overflow: hidden; background: var(--panel-2); cursor: pointer; content-visibility: auto; contain-intrinsic-size: auto 117px; outline: 1px solid var(--line-soft); }
 .tile img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
 .tile-hidden img { opacity: 0.3; filter: grayscale(1); }
 .tile-used { outline: 2px solid rgba(231, 166, 95, 0.55); outline-offset: -2px; }
@@ -156,6 +157,14 @@ input[type='checkbox'] { accent-color: var(--accent); width: 15px; height: 15px;
 .library-hint { padding: 8px 12px; margin: 0; font-size: 11px; border-top: 1px solid var(--line-soft); }
 .empty { padding: 24px 16px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
 .empty p { margin: 0; }
+
+/* Large preview beside the library while the pointer rests on a tile. Never takes the pointer. */
+.hover-preview { position: fixed; top: 24px; bottom: 24px; right: 24px; z-index: 40; pointer-events: none; display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 10px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55); }
+.hover-preview-img { flex: 1; min-height: 0; border-radius: 6px; overflow: hidden; background: var(--panel-2); }
+.hover-preview-img img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.hover-preview-meta { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+.hover-preview-meta strong { color: var(--text); font-size: 13px; }
+.preview-description { white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* ---- canvas */
 .canvas { flex: 1; position: relative; overflow: auto; min-height: 0; }
@@ -712,6 +721,7 @@ input[type='checkbox'] { accent-color: var(--accent); width: 15px; height: 15px;
   .topbar { height: auto; flex-wrap: wrap; padding: 6px 10px; row-gap: 6px; position: sticky; top: 0; z-index: 20; }
   .book-title { max-width: 150px; }
   .workspace { display: flex; flex-direction: column; min-height: 0; }
+  .panel-resizer { display: none; }
   .stage { order: -1; height: 64vh; min-height: 340px; flex: none; }
   .library { height: 72vh; flex: none; border-right: 0; border-top: 1px solid var(--line); }
   .inspector { height: 80vh; flex: none; border-left: 0; border-top: 1px solid var(--line); }

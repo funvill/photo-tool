@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { findSurface, innerBox, issueCounts, moveElements, panCrop, updateElement, zoomCropAt } from '../../core';
 import { isBrowserBackend } from '../api';
 import { isDemoProject } from '../demo/status';
@@ -12,6 +12,7 @@ import { Inspector } from './Inspector';
 import { Library } from './Library';
 import { Navigator } from './Navigator';
 import { Overview } from './Overview';
+import { PanelResizer, loadLibraryWidth } from './PanelResizer';
 import { usePreflight } from './PreflightPanel';
 import { generateFirstCollage } from './PosterUI';
 import { generateFirstDraft } from './DraftPanel';
@@ -41,6 +42,7 @@ export function Editor({ projectId }: { projectId: string }) {
   const loadError = useEditor((s) => s.loadError);
   const view = useEditor((s) => s.view);
   const [dialog, setDialog] = useState<'export' | 'preview' | null>(null);
+  const [libraryWidth, setLibraryWidth] = useState(loadLibraryWidth);
   const issues = usePreflight();
   const counts = issueCounts(issues);
   const assetsCount = useEditor((s) => s.assets.length);
@@ -71,8 +73,9 @@ export function Editor({ projectId }: { projectId: string }) {
   return (
     <div className="editor">
       <TopBar onGenerate={poster ? focusAutoCollage : focusAutoDraft} onExport={() => setDialog('export')} onPreview={() => setDialog('preview')} />
-      <div className="workspace">
+      <div className="workspace" style={{ '--library-width': `${libraryWidth}px` } as CSSProperties}>
         <Library />
+        <PanelResizer width={libraryWidth} onChange={setLibraryWidth} />
         <main className="stage">
           {view === 'overview' ? <Overview /> : <Canvas />}
           {isEmpty && view === 'spread' && (

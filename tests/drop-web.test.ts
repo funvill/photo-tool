@@ -7,7 +7,7 @@ import type { ImportJob } from '../src/web/backend/types';
 const file = (name: string) => new File(['x'], name);
 const job = (assetIds: string[], errors: ImportJob['errors'] = []): ImportJob => ({
   id: 'j', kind: 'import', status: 'done', folder: 'f', total: assetIds.length, processed: assetIds.length, imported: assetIds.length, alreadyInLibrary: 0,
-  exactDuplicates: 0, moved: 0, removed: 0, missingFolders: [], failed: 0, assetIds, errors,
+  exactDuplicates: 0, moved: 0, removed: 0, missingFolders: [], failed: 0, assetIds, errors, startedAt: new Date(0).toISOString(),
 });
 
 describe('web drop bookkeeping', () => {

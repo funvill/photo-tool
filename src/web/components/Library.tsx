@@ -1,10 +1,12 @@
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { chronological, groupSimilar, type BookDocument, type ImageElement, type PhotoAsset } from '../../core';
 import { api, isBrowserBackend, thumbUrl } from '../api';
 import { useEditor } from '../store';
 import { ASSET_MIME } from './Canvas';
 import { FolderPicker } from './FolderPicker';
 import { Icon } from './Icon';
+import { HoverPreview, formatTaken } from './HoverPreview';
+import { estimateRemaining, formatRemaining } from '../eta';
 import { CleanupDialog } from './CleanupDialog';
 import { Shelf, tildePath } from './Shelf';
 
@@ -23,6 +25,7 @@ export function Library() {
   const previewId = useEditor((s) => s.previewAssetId);
 
   const usage = useMemo(() => parseUsage(usageKey), [usageKey]);
+  const hover = useHoverPreview(assets);
 
   // Web version: after a browser restart, folders read in place need permission again.
   const [needAccess, setNeedAccess] = useState(0);
@@ -76,6 +79,7 @@ export function Library() {
   return (
     <aside
       className="library"
+      ref={hover.asideRef}
       // Photo files dropped from the file manager are only imported; placing them is up to the user.
       onDragOver={(e) => {
         if (!e.dataTransfer.types.includes('Files')) return;
@@ -106,7 +110,7 @@ export function Library() {
       {job && (
         <div className="import-progress">
           <div className="import-progress-label">
-            {job.status === 'scanning' ? 'Scanning folder…' : job.status === 'running' ? `Importing ${job.processed} / ${job.total}` : `Done — ${job.imported} new`}
+            {job.status === 'scanning' ? 'Scanning folder…' : job.status === 'running' ? importLabel(job) : `Done — ${job.imported} new`}
           </div>
           <div className="bar">
             <div className="bar-fill" style={{ width: `${job.total ? (job.processed / job.total) * 100 : 5}%` }} />
@@ -159,14 +163,15 @@ export function Library() {
           <button className="btn" onClick={() => setPicker('import')}>Choose a folder…</button>
         </div>
       ) : (
-        <div className="grid">
+        <div className="grid" onScroll={hover.hide}>
           {visible.map((a) => (
-            <Tile key={a.id} asset={a} used={usage.get(a.id) ?? 0} similar={similarCount.get(a.id) ?? 1} previewed={a.id === previewId} />
+            <Tile key={a.id} asset={a} used={usage.get(a.id) ?? 0} similar={similarCount.get(a.id) ?? 1} previewed={a.id === previewId} onHoverStart={hover.start} onHoverEnd={hover.hide} />
           ))}
           {visible.length === 0 && <p className="muted pad">Nothing here.</p>}
         </div>
       )}
       <PreviewPane usage={usage} />
+      {hover.shown && <HoverPreview asset={hover.shown.asset} left={hover.shown.left} />}
       {cleanup && <CleanupDialog usage={usage} onClose={() => setCleanup(false)} />}
       {picker && (
         <FolderPicker
@@ -243,6 +248,8 @@ function PreviewPane({ usage }: { usage: Map<string, number> }) {
               <strong className="ellipsis" title={asset.fileName}>{asset.fileName}</strong>
               <span className="muted small">{asset.capturedAt ? formatTaken(asset.capturedAt) : 'No capture date'}</span>
               <span className="muted small">{asset.widthPx} × {asset.heightPx} · {((asset.widthPx * asset.heightPx) / 1e6).toFixed(1)} MP{asset.missing ? ' · original missing' : ''}</span>
+              {asset.people && asset.people.length > 0 && <span className="muted small">{asset.people.join(', ')}</span>}
+              {asset.description && <span className="small preview-description">{asset.description}</span>}
             </div>
             <div className="row preview-actions">
               <button className={`icon-btn ${asset.favorite ? 'on' : ''}`} title={asset.favorite ? 'Unfavourite' : 'Favourite: always included in drafts'} onClick={() => patch(asset.id, { favorite: !asset.favorite })}><Icon name="star" /></button>
@@ -258,12 +265,7 @@ function PreviewPane({ usage }: { usage: Map<string, number> }) {
   );
 }
 
-function formatTaken(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
-}
-
-const Tile = memo(function Tile({ asset, used, similar, previewed }: { asset: PhotoAsset; used: number; similar: number; previewed: boolean }) {
+const Tile = memo(function Tile({ asset, used, similar, previewed, onHoverStart, onHoverEnd }: { asset: PhotoAsset; used: number; similar: number; previewed: boolean; onHoverStart: (id: string) => void; onHoverEnd: () => void }) {
   const patch = useEditor((s) => s.patchAsset);
   return (
     <div
@@ -273,11 +275,13 @@ const Tile = memo(function Tile({ asset, used, similar, previewed }: { asset: Ph
         useEditor.setState({ previewAssetId: asset.id });
       }}
       draggable={!asset.missing}
+      onPointerEnter={(e) => e.pointerType === 'mouse' && onHoverStart(asset.id)}
+      onPointerLeave={onHoverEnd}
       onDragStart={(e) => {
+        onHoverEnd();
         e.dataTransfer.setData(ASSET_MIME, asset.id);
         e.dataTransfer.effectAllowed = 'copy';
       }}
-      title={`${asset.fileName}\n${asset.widthPx}×${asset.heightPx}${asset.capturedAt ? `\n${asset.capturedAt.replace('T', ' ')}` : '\nNo capture date'}`}
     >
       <img src={thumbUrl(asset.id)} alt={asset.fileName} loading="lazy" decoding="async" draggable={false} />
       <div className="tile-badges">
@@ -298,5 +302,61 @@ const Tile = memo(function Tile({ asset, used, similar, previewed }: { asset: Ph
     </div>
   );
 });
+
+function importLabel(job: { processed: number; total: number; startedAt: string }): string {
+  const base = `Importing ${job.processed} / ${job.total}`;
+  const left = estimateRemaining(job.processed, job.total, Date.parse(job.startedAt), Date.now());
+  return left === null ? base : `${base} · ${formatRemaining(left)}`;
+}
+
+const HOVER_DELAY_MS = 400;
+
+/**
+ * Rest the pointer on a tile for a moment and a large preview opens beside the library. It closes
+ * when the pointer leaves, a drag starts, the list scrolls or Esc is pressed, and never opens mid-drag.
+ */
+function useHoverPreview(assets: PhotoAsset[]) {
+  const asideRef = useRef<HTMLElement>(null);
+  const timer = useRef<number | undefined>(undefined);
+  const dragging = useRef(false);
+  const [shown, setShown] = useState<{ asset: PhotoAsset; left: number } | null>(null);
+  const assetsRef = useRef(assets);
+  assetsRef.current = assets;
+
+  const hide = useCallback(() => {
+    window.clearTimeout(timer.current);
+    setShown(null);
+  }, []);
+  const start = useCallback((id: string) => {
+    window.clearTimeout(timer.current);
+    if (dragging.current) return;
+    timer.current = window.setTimeout(() => {
+      const asset = assetsRef.current.find((a) => a.id === id);
+      const el = asideRef.current;
+      // Not on phones: the library is full width there and there is no room beside it.
+      if (!asset || !el || dragging.current || window.matchMedia('(max-width: 700px)').matches) return;
+      setShown({ asset, left: el.getBoundingClientRect().right });
+    }, HOVER_DELAY_MS);
+  }, []);
+
+  useEffect(() => {
+    const onDragStart = () => { dragging.current = true; hide(); };
+    const onDragEnd = () => { dragging.current = false; };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && hide();
+    window.addEventListener('dragstart', onDragStart, true);
+    window.addEventListener('dragend', onDragEnd, true);
+    window.addEventListener('drop', onDragEnd, true);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('dragstart', onDragStart, true);
+      window.removeEventListener('dragend', onDragEnd, true);
+      window.removeEventListener('drop', onDragEnd, true);
+      window.removeEventListener('keydown', onKey);
+      window.clearTimeout(timer.current);
+    };
+  }, [hide]);
+
+  return { asideRef, shown, start, hide };
+}
 
 export type { BookDocument, ImageElement };
