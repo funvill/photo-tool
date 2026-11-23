@@ -29,6 +29,9 @@ Checked by the lead agent after all subagent work landed: `npm run typecheck` is
 | Linux packages | `dist/installer/photobook-studio-0.1.0-amd64.deb` (137 MB), `...-x86_64.AppImage` (151 MB), built 18:04 | **Current and verified in containers only.** See "Linux". |
 | HEIC import, image export, flipbook off macOS | `src/server/heic.ts`, `src/server/pdfRaster.ts`, edits to `media.ts`, `shelf.ts`, `imageExport.ts`, `flipbook.ts` | Done, verified on Windows and in Linux containers. Not tried with a real iPhone photo. |
 | Third-party notices | `scripts/make-notices.ts`, generated into the packaged resources by `collect-resources` | Done; 135 packages. **Six licence texts are missing** and must be added by hand. See "Licences". |
+| Stars and photoinfo.json | `src/photoinfo/`, `src/server/photoInfoIndex.ts`, `src/server/app.ts`, `src/web/store.ts` | Done on branch `editor-photoinfo`, not merged. A per-folder `photoinfo.json` (star, people, date, location, description, notes; unknown fields kept; read-only folders fall back to `<dataDir>/photoinfo/`). The server overlays it on the library and writes the star on PATCH; the editor polls `/photoinfo-stamp` every 3 s. The web (browser) version ignores it. Design: `docs/superpowers/specs/2026-11-23-gallery-and-photo-info-design.md`. |
+| Draft from stars, update in place | `src/core/draftUpdate.ts` (`updateDraft`, `relayPage`), `src/core/draftState.ts` (page fingerprints), `src/web/components/DraftPanel.tsx`, `UpdateSummary.tsx` | Done on the same branch. Auto draft panel: Generate, Update from stars, Rebuild all pages, Another variation; Re-lay this page; unstarred empty frames marked. Hand-edited pages are never re-laid. |
+| Drag in from Explorer | `POST /import-paths`, `src/web/` library and frames | Done on the same branch: drop onto a frame, empty space or the library; import ETA, resizable library, hover preview. Desktop and local app only. |
 | End-to-end tests | `playwright.config.ts` | Now run on Windows. Both milestone tests pass. The 500-photo drag performance test failed (11.8 ms per step against a limit of 8) on a busy PC; not known to be a real regression. |
 | README and docs | `README.md`, `docs/WEB_VERSION.md` | Corrected; desktop section added. |
 | CI | `.github/workflows/test.yml` (matrix), `.github/workflows/desktop.yml` (installers and self-tests) | **Written, never run.** There is no GitHub copy of this fork. |
@@ -121,6 +124,7 @@ The generated notices file covers 135 packages. Before giving the app to anyone:
 
 ## Next steps, in order
 
+0. **Check the photoinfo branch by hand.** The self-test and unit tests cover it, but nobody has driven it with a mouse: edit `photoinfo.json` in Notepad and watch the star appear within 3 s, drop a JPEG from Explorer onto a frame, an empty page and the library, and run Update from stars on a real book (the 2023 photos).
 1. **Read the diff.** Roughly 4,000 added lines were written by subagents. The lead checked reports, tests and built artefacts, not the code. The riskiest pieces to read first: `scripts/desktop/linux/patch-sharp.mjs` and `sharp-glib-shim.c` (binary patching), `electron/main.ts` (security settings), `src/server/heic.ts` (worker pool).
 2. **Committed 2026-11-22** in four pieces (see above). Agent commits are authored as `SWS-Chipkin <sws-dev@chipkin.com>` per the global instructions.
 3. **Click through the installed app by hand** on Windows.

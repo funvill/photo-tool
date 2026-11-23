@@ -27,7 +27,7 @@ The tool should:
 
 ## Not goals
 
-- Replacing Google Photos for choosing favourites. That stays where it is.
+- Replacing Google Photos for choosing favourites. Choosing can still happen there, but stars can now also be set in the editor or by a gallery program, and are kept in a `photoinfo.json` beside the photos (see the 2026-11-23 design in `docs/superpowers/specs/`). No Google Photos library access is built.
 - A general design tool with free-form drawing, shapes and effects.
 - A product for other people. One user, one machine, no accounts.
 - Ordering from the printer automatically. The tool stops at the PDF.
@@ -140,6 +140,7 @@ Each phase ends with something usable.
 | 0b. Fork and run on Windows. **Done 2026-11-22.** | This folder is now a git repo holding photobook_studio's code and history (remote `upstream`), with the 2023 photos drafted into an 86-page book that opens in the editor | The base works on his machine. |
 | 1. Blurb profile and reproduce 2023 | Correct the Blurb Large Square preset to the calculator's figures. Import `2023.blurb` into a book and export it. | The PDF matches Blurb's spec and the printed book on the shelf. The importer also yields the template files. |
 | 2. Steven's templates and density | His grids (3×2 and 2×3, 2 large + 3 small, 2×2, 7-up, 5×5, with and without caption strip), and a draft style that averages 5 to 7 photos a page | An auto-draft of the 2023 and 2022 favourites looks like the books he actually made. |
+| 2b. Stars and draft updates. **Done 2026-11-23** (not yet tried on the real 2023 photos). | Stars, dates, places and people read from `photoinfo.json`; star a photo in the editor and it is written back; draft from the starred photos, then **Update from stars** to follow later changes without losing hand edits; drag photos in from Explorer | Choosing favourites no longer needs Google Photos or a re-download, and a changed star does not mean redoing the book. |
 | 3. Events and captions | Group by event instead of by day; date and place captions; people where available; Year in Review draft | Caption strips get filled. |
 | 4. Cover and fixed pages | His cover design (sunset back, six-photo front, places on the spine), Year in Review opener | A complete, orderable book. |
 | 5. Takeout import | Read a year's Takeout directly and keep the favourites, if 0a proved it out | No manual download step. |

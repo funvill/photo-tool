@@ -58,6 +58,34 @@ npm run fixtures
 
 This writes 21 synthetic trip photos to `fixtures/generated/trip`: mixed orientations, a panorama, a burst, an exact duplicate, a blurry frame, a low-res image, a HEIC file, an EXIF-rotated file and an undated PNG. Import that folder in the app.
 
+## Stars and photoinfo.json
+
+In the desktop and local app, a photo's star, date, place, people and notes live in a small file called `photoinfo.json` in the same folder as the photo. Starring a photo in the editor writes it there, and a star added by another program (or by hand in Notepad) shows up in the editor within about 3 seconds. The file is the only thing ever written beside your photos; the photos themselves are never changed, renamed or moved.
+
+```json
+{
+  "format": "photoinfo/1",
+  "photos": {
+    "IMG_0042.jpg": { "star": true, "people": ["Ana"], "date": "2023-08-12T14:30:00", "location": { "lat": 49.15, "lon": -125.9, "name": "Tofino" }, "description": "Low tide", "notes": "" }
+  }
+}
+```
+
+- Photos are keyed by file name only. Every field is optional. Fields the editor does not know, and entries for photos that are not there, are kept every time it writes.
+- A date, place, people or description in the file wins over what the photo itself says. The star in the file wins over the one stored in the library.
+- If the folder cannot be written (a read-only drive), the editor keeps the file in its data folder instead, under `photoinfo/`, and nothing is lost.
+- If the file cannot be read as JSON, the editor leaves it alone and says so when you try to star something. Fix or delete the file.
+- **The web version ignores `photoinfo.json`.** A browser cannot write beside your photos, so stars there stay in the browser.
+
+**Drafting from stars.** In the Draft tab, **Generate** makes a book from the starred photos (every photo, if none is starred). Once a draft exists, **Update from stars** brings it in line with your stars without starting over:
+
+- Pages you edited by hand are never re-laid, and photos you placed yourself are never removed. An unstarred photo on a page you edited leaves an empty frame marked "Unstarred: fill or remove".
+- Pages nothing happened to stay exactly as they were. Newly starred photos are added to pages with room (up to 7 a page, or the printer's limit if lower), and new pages are added where needed.
+- A summary lists what was added, removed, replaced and re-laid, with a link to each page it touched. It is one undo step.
+- **Rebuild all pages** starts the draft again and **Another variation** gives a different layout. **Re-lay this page** (in the page's side panel) redoes one page.
+
+**Dragging in from Explorer.** Drop JPEGs or folders from Explorer or Finder onto a frame (replaces it), onto empty space on a page (adds it) or onto the library (imports it). Imports show the time left, the library can be widened by dragging its edge, and hovering a photo shows a larger preview. Only the desktop and local app do this.
+
 ## Using it
 
 1. **New book** → choose a printer (Lulu, Blurb, or custom), binding, size and style.
