@@ -101,6 +101,41 @@ interface EditorState {
 
 let toastId = 0;
 let lastSyncAt = 0;
+
+// Photo info (stars, dates, people) lives in photoinfo.json files that other programs may edit:
+// while a book is open, look for changes every few seconds and reload the photos when one is seen.
+const INFO_POLL_MS = 3000;
+let infoTimer: ReturnType<typeof setInterval> | null = null;
+function stopInfoWatch() {
+  if (infoTimer) clearInterval(infoTimer);
+  infoTimer = null;
+}
+function startInfoWatch(projectId: string) {
+  stopInfoWatch();
+  let last: string | null = null;
+  let busy = false;
+  infoTimer = setInterval(() => {
+    const st = useEditor.getState();
+    if (busy || st.projectId !== projectId) return;
+    busy = true;
+    void (async () => {
+      try {
+        const stamp = await api.photoInfoStamp(projectId);
+        const job = useEditor.getState().importJob;
+        const importing = !!job && (job.status === 'scanning' || job.status === 'running');
+        if (last === null) last = stamp;
+        else if (stamp !== last && !importing) {
+          last = stamp;
+          await st.refreshAssets();
+        }
+      } catch {
+        /* the server may be restarting: try again next time */
+      } finally {
+        busy = false;
+      }
+    })();
+  }, INFO_POLL_MS);
+}
 const SYNC_INTERVAL_MS = 20_000;
 
 /** Photos placed anywhere in the document (kept in the library even if their file disappears). */
@@ -156,12 +191,14 @@ export const useEditor = create<EditorState>((set, get) => ({
       });
       await get().refreshLinks();
       void get().syncLinks({ force: true });
+      startInfoWatch(projectId);
     } catch (e) {
       set({ loadError: e instanceof Error ? e.message : String(e) });
     }
   },
 
   unload() {
+    stopInfoWatch();
     set({ projectId: null, doc: null, assets: [], assetMap: new Map(), past: [], future: [], importJob: null, links: [], syncing: false, draftReport: null });
   },
 

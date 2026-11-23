@@ -38,6 +38,7 @@ export const httpBackend: Backend = {
   revision: (id, rev) => call<{ doc: BookDocument }>('GET', `/api/projects/${id}/revisions/${rev}`),
   assets: (id) => call<PhotoAsset[]>('GET', `/api/projects/${id}/assets`),
   patchAsset: (projectId, assetId, patch) => call<PhotoAsset>('PATCH', `/api/projects/${projectId}/assets/${assetId}`, patch),
+  photoInfoStamp: async (projectId) => (await call<{ stamp: string }>('GET', `/api/projects/${projectId}/photoinfo-stamp`)).stamp,
   startImport: (projectId, folder) => call<ImportJob>('POST', `/api/projects/${projectId}/import`, { folder }),
   job: (id) => call<ImportJob>('GET', `/api/jobs/${id}`),
   listFolder: (path) => call<FolderListing>('GET', `/api/fs${path ? `?path=${encodeURIComponent(path)}` : ''}`),

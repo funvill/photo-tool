@@ -411,6 +411,9 @@ export interface PhotoAsset {
   rating: number;
   favorite: boolean;
   tags: string[];
+  /** From the folder's photoinfo.json (desktop editor only). */
+  people?: string[];
+  description?: string;
   contentHash: string;
   exactDuplicateOf: ID | null;
   analysis: PhotoAnalysis | null;

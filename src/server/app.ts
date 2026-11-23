@@ -1,7 +1,7 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { existsSync, statSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { API_VERSION, SCHEMA_VERSION, UnknownSizeError, createBook, createPoster, posterSize, migrateDocument, type BookDocument, type PhotoAnalysis, type PhotoAsset } from '../core';
 import { Store, toPhotoAsset, type AssetRow } from './db';
 import { DRIVES, DRIVES_LABEL, browseParent, browsePath, listDrives } from './folders';
@@ -14,6 +14,8 @@ import { exportPosterImage } from './imageExport';
 import { ALPHA_FORMATS, colorFeatures, existingThumb, hashFile, hasTransparency, isSupported, makeThumbnails, THUMB_SIZES, type ThumbSize } from './media';
 import { exportCoverPdf, exportPdf, exportPosterPdf, type ExportAsset, type ExportOptions } from './pdf';
 import { setResourceRoot } from './resources';
+import { PhotoInfoWriteError } from '../photoinfo';
+import { PhotoInfoIndex } from './photoInfoIndex';
 
 // HTTP API. Bound to 127.0.0.1 by main.ts — never reachable from the network.
 
@@ -31,12 +33,15 @@ export interface AppOptions {
   restart?: () => void;
   /** A packaged app's resource folder (see resources.ts). Leave it out when running from source. */
   resourceRoot?: string;
+  /** Where photoinfo files for read-only photo folders are kept. Defaults to `<dataDir>/photoinfo`. */
+  photoInfoFallbackDir?: string;
 }
 
 export function createApp(dataDir: string, opts: AppOptions = {}) {
   if (opts.resourceRoot) setResourceRoot(opts.resourceRoot);
   const store = new Store(dataDir);
   const importer = new Importer(store);
+  const photoInfo = new PhotoInfoIndex({ fallbackDir: opts.photoInfoFallbackDir ?? join(dataDir, 'photoinfo') });
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '20mb' }));
@@ -54,7 +59,7 @@ export function createApp(dataDir: string, opts: AppOptions = {}) {
     Promise.resolve(fn(req, res)).catch(next);
 
   const isMissing = (r: AssetRow) => !existsSync(r.original_path);
-  const projectAssets = (projectId: string): PhotoAsset[] => store.projectAssetRows(projectId).map((r) => toPhotoAsset(r, isMissing(r)));
+  const projectAssets = (projectId: string): PhotoAsset[] => store.projectAssetRows(projectId).map((r) => photoInfo.apply(toPhotoAsset(r, isMissing(r)), r.original_path));
   const requireProject = (id: string) => {
     const p = store.getProject(id);
     if (!p) throw new HttpError(404, 'Project not found');
@@ -172,11 +177,28 @@ export function createApp(dataDir: string, opts: AppOptions = {}) {
 
   app.patch('/api/projects/:id/assets/:assetId', wrap((req, res) => {
     const { rating, favorite, tags, excluded } = req.body ?? {};
-    store.updateAssetUserFields(P(req).assetId, { rating, favorite, tags });
+    const existing = store.projectAssetRows(P(req).id).find((r) => r.id === P(req).assetId);
+    if (!existing) throw new HttpError(404, 'Photo not in project');
+    // The star lives in the photo's folder (photoinfo.json), not in the library.
+    if (favorite !== undefined) {
+      try {
+        photoInfo.setStar(existing.original_path, !!favorite);
+      } catch (e) {
+        if (e instanceof PhotoInfoWriteError) throw new HttpError(409, `Can't save the star: photoinfo.json in ${dirname(existing.original_path)} can't be read. Fix or delete it.`);
+        throw e;
+      }
+    }
+    store.updateAssetUserFields(P(req).assetId, { rating, tags });
     if (excluded !== undefined) store.setExcluded(P(req).id, P(req).assetId, !!excluded);
     const row = store.projectAssetRows(P(req).id).find((r) => r.id === P(req).assetId);
     if (!row) throw new HttpError(404, 'Photo not in project');
-    res.json(toPhotoAsset(row, isMissing(row)));
+    res.json(photoInfo.apply(toPhotoAsset(row, isMissing(row)), row.original_path));
+  }));
+
+  // Changes whenever a photoinfo.json beside one of the book's photos changes (the editor polls this).
+  app.get('/api/projects/:id/photoinfo-stamp', wrap((req, res) => {
+    requireProject(P(req).id);
+    res.json({ stamp: photoInfo.stampFor(store.projectAssetRows(P(req).id).map((r) => r.original_path)) });
   }));
 
   app.get('/api/assets/:id/thumb', wrap((req, res) => {

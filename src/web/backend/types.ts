@@ -164,6 +164,8 @@ export interface Backend {
   revision(id: string, rev: number): Promise<{ doc: BookDocument }>;
   assets(id: string): Promise<PhotoAsset[]>;
   patchAsset(projectId: string, assetId: string, patch: { rating?: number; favorite?: boolean; excluded?: boolean }): Promise<PhotoAsset>;
+  /** Changes when a photoinfo.json beside the book's photos changes. The browser version has none: always ''. */
+  photoInfoStamp(projectId: string): Promise<string>;
   /** `folder` is a path (local server) or a folder reference from the browser's picker. */
   startImport(projectId: string, folder: string): Promise<ImportJob>;
   job(id: string): Promise<ImportJob>;

@@ -326,6 +326,10 @@ export const browserBackend: Backend = {
     return toPhotoAsset(row, (await missingMap(c, [row])).get(row.id) ?? false);
   },
 
+  async photoInfoStamp() {
+    return '';
+  },
+
   // ---- import, links, relink
   async startImport(projectId, folder) {
     const c = await ctx();
