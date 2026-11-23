@@ -15,6 +15,7 @@ import { createApp } from '../src/server/app';
 import { Store } from '../src/server/db';
 
 const FIXTURES = join(process.cwd(), 'fixtures', 'generated', 'trip');
+const PHOTOS = 21;
 let dataDir: string;
 let photoDir: string;
 let server: Server;
@@ -97,19 +98,19 @@ describe('milestone 1: import → draft → edit → reopen → export', () => {
       status = (await api('GET', `/api/jobs/${job.body.id}`)).body;
     }
     expect(status.errors).toEqual([]);
-    expect(status.total).toBe(21);
-    expect(status.imported).toBe(21);
+    expect(status.total).toBe(PHOTOS);
+    expect(status.imported).toBe(PHOTOS);
     expect(status.exactDuplicates).toBe(1);
 
     assets = (await api<PhotoAsset[]>('GET', `/api/projects/${projectId}/assets`)).body;
-    expect(assets).toHaveLength(21);
+    expect(assets).toHaveLength(PHOTOS);
     const byName = (n: string) => assets.find((a) => a.fileName === n)!;
     // Exact duplicate flagged, not deleted.
     expect(byName('day1-03-market-copy.jpg').exactDuplicateOf ?? byName('day1-03-market.jpg').exactDuplicateOf).toBeTruthy();
     // EXIF orientation applied: stored 3000×2000, displayed portrait.
     expect([byName('day2-05-rotated.jpg').widthPx, byName('day2-05-rotated.jpg').heightPx]).toEqual([2000, 3000]);
-    // HEIC decoded via sips.
-    expect(byName('day2-06-heic-sunset.heic').widthPx).toBe(3000);
+    // HEIC decoded (sips on macOS, the bundled libheif elsewhere).
+    expect([byName('day2-06-heic-sunset.heic').widthPx, byName('day2-06-heic-sunset.heic').heightPx]).toEqual([3000, 2000]);
     // Dates and GPS from EXIF; the PNG has none.
     expect(byName('day1-01-arrival.jpg').capturedAt).toBe('2026-03-14T09:05:00');
     expect(byName('day1-01-arrival.jpg').gpsLat).toBeCloseTo(36.6667, 3);
@@ -139,7 +140,7 @@ describe('milestone 1: import → draft → edit → reopen → export', () => {
     let status = job.body;
     while (status.status !== 'done') status = (await api('GET', `/api/jobs/${job.body.id}`)).body;
     expect(status.imported).toBe(0);
-    expect(status.alreadyInLibrary).toBe(21);
+    expect(status.alreadyInLibrary).toBe(PHOTOS);
   });
 
   it('generates a complete 16-page draft from the imported photos (AC-06)', async () => {

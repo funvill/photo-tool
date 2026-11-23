@@ -264,7 +264,8 @@ describe('architecture boundaries', () => {
   });
 
   it('no source file references a remote URL (local-first guarantee)', () => {
-    for (const f of files('src')) {
+    // electron/ is the desktop shell, scripts/desktop builds it: neither may reach out either.
+    for (const f of [...files('src'), ...files('electron'), ...files('scripts/desktop'), 'electron-builder.config.cjs']) {
       // Comments may cite documentation; code may not contain remote URLs.
       const src = readFileSync(f, 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
       const urls = src.match(/https?:\/\/[^\s'"`)]+/g) ?? [];

@@ -74,6 +74,10 @@ export interface ShelfListing {
 
 export interface FolderListing {
   path: string;
+  /** Windows, at the list of drives: what the path box shows in place of `path`. */
+  label?: string;
+  /** Windows: this is the list of drives, not a folder, so it cannot be chosen. */
+  drives?: boolean;
   parent: string | null;
   folders: string[];
   photos: number;

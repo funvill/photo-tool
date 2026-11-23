@@ -9,7 +9,7 @@ const OPEN_KEY = 'photobook:shelfOpen';
 /** Home folder shown as ~ (macOS paths); the web version's folder references as plain names. */
 export const tildePath = (p: string) => p.replace(/^\/Users\/[^/]+(?=\/|$)/, '~').replace(/^(dir|pick):[\w-]+:/, '');
 
-const inside = (path: string, folder: string) => path === folder || path.startsWith(folder.endsWith('/') ? folder : `${folder}/`);
+const inside = (path: string, folder: string) => path === folder || ['/', '\\'].some((sep) => path.startsWith(folder.endsWith(sep) ? folder : folder + sep));
 
 /**
  * The Shelf: subfolders of one shared folder (where Background Studio sorts and cuts out to),

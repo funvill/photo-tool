@@ -1,6 +1,5 @@
 import { createWriteStream } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import sharp, { type Sharp } from 'sharp';
 import { printablePages, type BookDocument, type PhotoAsset, type PreflightIssue } from '../core';
@@ -8,12 +7,11 @@ import {
   renderCover, renderInterior, renderPoster, verifyPdf as verifyBytes,
   type ExportOptions, type ExportVerification, type ImageCut, type PageSpec, type PdfEnv, type PdfOutput,
 } from '../shared/pdfWriter';
+import { fontFile } from './resources';
 
 // Print export on the local server. The drawing lives in src/shared/pdfWriter.ts (shared with the
 // web version); this module supplies sharp for the photos, the font files from disk, and writes
 // each PDF to a file. Every export is re-opened from disk and verified.
-
-const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
 export type { ExportOptions, ExportVerification };
 
@@ -37,7 +35,7 @@ export interface ExportAsset {
 }
 
 const env: PdfEnv<ExportAsset> = {
-  font: (file) => readFile(join(ROOT, file)),
+  font: (file) => readFile(fontFile(file)),
   async image(entry, cut: ImageCut) {
     let img = sharp(entry.workPath, { failOn: 'none' })
       .rotate() // EXIF orientation first, so extract() works in the same oriented space as the preview

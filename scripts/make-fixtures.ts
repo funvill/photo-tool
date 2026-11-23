@@ -6,9 +6,9 @@
 //   npm run fixtures            → fixtures/generated/trip  (20 photos)
 //   npm run fixtures -- 500     → fixtures/generated/large-500
 
-import { copyFileSync, mkdirSync, rmSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { ensureInitialized, jsEncodeImage } from 'elheif';
 import sharp from 'sharp';
 import { mulberry32 } from '../src/core/random';
 
@@ -111,12 +111,14 @@ async function trip(dir: string) {
   await writeJpeg(dir, sc('day3-05-lowres', { w: 640, h: 480 }, 3, '19:00', 7, 0.5, 0.5, 'Low res'));
   // Undated PNG (no EXIF at all).
   await sharp(Buffer.from(sceneSvg(sc('undated-scan', { w: 2400, h: 2400 }, 0, '00:00', 2, 0.5, 0.5, 'Undated scan')))).png().toFile(join(dir, 'undated-scan.png'));
-  // HEIC via macOS sips (skipped elsewhere).
-  if (process.platform === 'darwin') {
-    const tmp = await writeJpeg(dir, sc('day2-06-heic-sunset', L, 2, '19:40', 4, 0.6, 0.35, 'HEIC sunset'));
-    execFileSync('/usr/bin/sips', ['-s', 'format', 'heic', tmp, '--out', join(dir, 'day2-06-heic-sunset.heic')], { stdio: 'ignore' });
-    rmSync(tmp);
-  }
+  // HEIC (HEVC), encoded with elheif: libheif + kvazaar as WebAssembly, so it is made the same way
+  // on every platform with nothing installed. Pixels only: the file carries no EXIF date or GPS.
+  const heic = sc('day2-06-heic-sunset', L, 2, '19:40', 4, 0.6, 0.35, 'HEIC sunset');
+  const { data, info } = await sharp(Buffer.from(sceneSvg(heic))).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+  await ensureInitialized();
+  const encoded = jsEncodeImage(new Uint8Array(data), info.width, info.height);
+  if (encoded.err) throw new Error(`Could not encode the HEIC fixture: ${encoded.err}`);
+  writeFileSync(join(dir, `${heic.name}.heic`), encoded.data);
 }
 
 async function large(dir: string, count: number) {

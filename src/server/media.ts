@@ -7,10 +7,16 @@ import { basename, extname, join } from 'node:path';
 import sharp from 'sharp';
 import exifr from 'exifr';
 import type { PhotoAnalysis } from '../core';
+import { heicToJpeg } from './heic';
 
 // Media pipeline: everything runs locally. Originals are only ever read.
 
 const run = promisify(execFile);
+
+// libvips keeps the files it has read open for reuse. On Windows an open file can't be moved,
+// renamed or deleted, which would lock the user's originals (and our thumbnails) while the server
+// runs. Applies to every use of sharp in this process.
+if (process.platform === 'win32') sharp.cache({ files: 0 });
 
 export const SUPPORTED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.heic', '.heif', '.webp']);
 const HEIC = new Set(['.heic', '.heif']);
@@ -59,14 +65,15 @@ export async function hashFile(path: string): Promise<string> {
 
 /**
  * The file sharp should decode. HEIC (HEVC) is not decodable by the bundled libvips, so it is
- * converted once with macOS `sips` into the data directory. The original is untouched.
+ * converted once into the data directory: with macOS `sips`, elsewhere with the bundled libheif
+ * (see heic.ts). The original is untouched.
  */
 export async function workingFile(originalPath: string, dataDir: string, contentHash: string): Promise<{ path: string; derived: string | null }> {
   if (!HEIC.has(extname(originalPath).toLowerCase())) return { path: originalPath, derived: null };
   const out = join(dataDir, 'derived', `${contentHash}.jpg`);
   if (!existsSync(out)) {
-    if (process.platform !== 'darwin') throw new Error('HEIC import needs macOS (sips) in this version');
-    await run('/usr/bin/sips', ['-s', 'format', 'jpeg', '-s', 'formatOptions', '95', originalPath, '--out', out]);
+    if (process.platform === 'darwin') await run('/usr/bin/sips', ['-s', 'format', 'jpeg', '-s', 'formatOptions', '95', originalPath, '--out', out]);
+    else await heicToJpeg(originalPath, out);
   }
   return { path: out, derived: out };
 }

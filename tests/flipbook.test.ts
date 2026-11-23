@@ -23,7 +23,7 @@ describe('web flipbook', () => {
     expect(html).not.toMatch(/\b(src|href)=["']https?:/);
   });
 
-  it.runIf(process.platform === 'darwin')('embeds every printed page and both cover boards, trimmed, in spread order', async () => {
+  it('embeds every printed page and both cover boards, trimmed, in spread order', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'flip-'));
     const colours = [[200, 60, 50], [40, 120, 200], [60, 160, 90], [220, 180, 40]];
     const assets: PhotoAsset[] = [];

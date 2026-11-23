@@ -3,6 +3,7 @@ import { readdir } from 'node:fs/promises';
 import { basename, extname, join, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Store } from './db';
+import { expandHome } from './folders';
 import { analyze, existingThumb, fileStat, hashFile, isSupported, makeThumbnails, orientedSize, readMetadata, workingFile } from './media';
 
 // Background import jobs. The HTTP request returns immediately with a job id; the UI polls progress
@@ -50,7 +51,7 @@ export async function scanFolder(folder: string, recursive: boolean): Promise<st
   return out.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
 }
 
-export const resolveFolder = (input: string) => resolve(input.replace(/^~(?=$|\/)/, process.env.HOME ?? '~'));
+export const resolveFolder = (input: string) => resolve(expandHome(input));
 
 /** Whether `path` is inside `folder` (or is it). */
 export const isInside = (path: string, folder: string) => path === folder || path.startsWith(folder.endsWith(sep) ? folder : folder + sep);

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { binding, coverGeometry, issueCounts, printablePages, printer, updateSettings, type BleedMode } from '../../core';
 import { api, downloadUrl, isBrowserBackend, type ExportResponse, type FileVerification, type FlipbookResponse, type ImageExportResponse } from '../api';
+import { desktop } from '../desktop';
 import { useEditor } from '../store';
 import { Icon } from './Icon';
 import { Modal } from './Modal';
@@ -175,7 +176,7 @@ function ImageExport() {
         <div className="row">
           <Icon name="check" size={16} />
           <span className="small">{res.format.toUpperCase()} · {res.widthPx} × {res.heightPx} px · {res.dpi} DPI · {(res.bytes / 1e6).toFixed(1)} MB</span>
-          <a className="btn btn-small" href={res.url} target="_blank" rel="noreferrer">Open</a>
+          <OpenExport className="btn btn-small" url={res.url} file={res.file} />
           <a className="btn btn-small btn-primary" href={downloadUrl(res.url)} download={res.file}><Icon name="download" /> Download</a>
         </div>
       )}
@@ -224,7 +225,7 @@ function FlipbookExport() {
         <div className="row">
           <Icon name="check" size={16} />
           <span className="small">{res.pages} pages{res.hasCover ? ' + cover' : ''} · {(res.bytes / 1e6).toFixed(1)} MB</span>
-          <a className="btn btn-small" href={res.url} target="_blank" rel="noreferrer">Open</a>
+          <OpenExport className="btn btn-small" url={res.url} file={res.file} />
           <a className="btn btn-small btn-primary" href={downloadUrl(res.url)} download={res.file}><Icon name="download" /> Download</a>
         </div>
       )}
@@ -246,9 +247,23 @@ function FileCard({ title, v, url, file, bytes, extra }: { title: string; v: Fil
       {v.problems.map((p) => <p key={p} className="small error-text">{p}</p>)}
       {extra.map((p) => <p key={p} className="small muted">{p}</p>)}
       <div className="row">
-        <a className="btn btn-small btn-primary" href={url} target="_blank" rel="noreferrer">Open</a>
+        <OpenExport className="btn btn-small btn-primary" url={url} file={file} />
         <a className="btn btn-small" href={downloadUrl(url)} download={file}><Icon name="download" /> Download</a>
       </div>
     </div>
+  );
+}
+
+/**
+ * "Open" for an exported file. In a browser: a new tab. In the desktop app (which opens no extra
+ * windows): the system's default app for the file, plus "Show in folder".
+ */
+function OpenExport({ url, file, className }: { url: string; file: string; className: string }) {
+  if (!desktop) return <a className={className} href={url} target="_blank" rel="noreferrer">Open</a>;
+  return (
+    <>
+      <button className={className} onClick={() => void desktop!.openFile(file)}>Open</button>
+      <button className="btn btn-small" onClick={() => void desktop!.showInFolder(file)}><Icon name="folder" /> Show in folder</button>
+    </>
   );
 }

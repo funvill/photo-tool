@@ -3,8 +3,8 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import type { Rect } from '../../../core';
 
 // Turning the verified print PDF into pictures (poster PNG/JPEG, flipbook pages), with pdf.js.
-// The server does the same step with macOS `sips`; rendering the PDF rather than redrawing the
-// page means the images show exactly what will be printed.
+// The server does the same step with macOS `sips` or PDFium (src/server/pdfRaster.ts); rendering
+// the PDF rather than redrawing the page means the images show exactly what will be printed.
 
 GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 

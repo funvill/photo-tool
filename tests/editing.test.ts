@@ -195,7 +195,7 @@ describe('restart and image export (server)', () => {
     rmSync(data, { recursive: true, force: true });
   });
 
-  it.runIf(process.platform === 'darwin')('exports a poster as JPEG and PNG at the asked resolution, trimmed', async () => {
+  it('exports a poster as JPEG and PNG at the asked resolution, trimmed', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'img-'));
     const photo = join(dir, 'p.jpg');
     await sharp({ create: { width: 3000, height: 2000, channels: 3, background: { r: 30, g: 120, b: 200 } } }).jpeg().toFile(photo);
@@ -211,6 +211,16 @@ describe('restart and image export (server)', () => {
       const meta = await sharp(out).metadata();
       expect(meta.format).toBe(format);
       expect(meta.density).toBe(100);
+      expect(meta.hasAlpha).toBe(false);
+      // The picture itself: the photo's blue where it was placed, paper white in the corner.
+      const { data, info } = await sharp(out).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+      const px = (xMm: number, yMm: number) => {
+        const i = (Math.round((yMm / 25.4) * 100) * info.width + Math.round((xMm / 25.4) * 100)) * 3;
+        return [data[i], data[i + 1], data[i + 2]];
+      };
+      const [red, green, blue] = px(140, 180);
+      expect(Math.abs(red - 30) + Math.abs(green - 120) + Math.abs(blue - 200)).toBeLessThan(format === 'jpeg' ? 24 : 12);
+      expect(px(3, 3)).toEqual([255, 255, 255]);
     }
     writeFileSync(join(dir, 'done'), '');
     rmSync(dir, { recursive: true, force: true });

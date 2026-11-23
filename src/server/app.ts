@@ -1,9 +1,10 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { existsSync, statSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, join } from 'node:path';
 import { API_VERSION, SCHEMA_VERSION, UnknownSizeError, createBook, createPoster, posterSize, migrateDocument, type BookDocument, type PhotoAnalysis, type PhotoAsset } from '../core';
 import { Store, toPhotoAsset, type AssetRow } from './db';
+import { DRIVES, DRIVES_LABEL, browseParent, browsePath, listDrives } from './folders';
 import { Importer, isInside, resolveFolder, scanFolder } from './importer';
 import { createShelf, folderName, listShelf, setShelfRoot, shelfPreview, shelfRoot } from './shelf';
 import { textOutline } from './textOutline';
@@ -12,6 +13,7 @@ import { exportFlipbook, type FlipbookSize } from './flipbook';
 import { exportPosterImage } from './imageExport';
 import { ALPHA_FORMATS, colorFeatures, existingThumb, hashFile, hasTransparency, isSupported, makeThumbnails, THUMB_SIZES, type ThumbSize } from './media';
 import { exportCoverPdf, exportPdf, exportPosterPdf, type ExportAsset, type ExportOptions } from './pdf';
+import { setResourceRoot } from './resources';
 
 // HTTP API. Bound to 127.0.0.1 by main.ts — never reachable from the network.
 
@@ -20,7 +22,19 @@ export interface AppContext {
   importer: Importer;
 }
 
-export function createApp(dataDir: string, opts: { staticDir?: string; devWebUrl?: string; restart?: () => void } = {}) {
+export interface AppOptions {
+  /** The built editor to serve at `/` (production). */
+  staticDir?: string;
+  /** Development: where the Vite dev server shows the editor. */
+  devWebUrl?: string;
+  /** Restart onto the latest code. Leave it out where that cannot work: the editor then hides the button. */
+  restart?: () => void;
+  /** A packaged app's resource folder (see resources.ts). Leave it out when running from source. */
+  resourceRoot?: string;
+}
+
+export function createApp(dataDir: string, opts: AppOptions = {}) {
+  if (opts.resourceRoot) setResourceRoot(opts.resourceRoot);
   const store = new Store(dataDir);
   const importer = new Importer(store);
   const app = express();
@@ -297,19 +311,20 @@ export function createApp(dataDir: string, opts: { staticDir?: string; devWebUrl
 
   /** Minimal folder browser so import works with real paths (originals are referenced, not copied). */
   app.get('/api/fs', wrap(async (req, res) => {
-    const raw = typeof req.query.path === 'string' && req.query.path ? req.query.path : (process.env.HOME ?? '/');
-    const path = resolve(raw.replace(/^~(?=$|\/)/, process.env.HOME ?? '~'));
+    const path = browsePath(typeof req.query.path === 'string' ? req.query.path : '');
+    // Windows: above the drives is the list of them. It is not a folder, so nothing there can be chosen.
+    if (process.platform === 'win32' && path === DRIVES) return void res.json({ path, label: DRIVES_LABEL, drives: true, parent: null, folders: await listDrives(), photos: 0 });
     if (!existsSync(path) || !statSync(path).isDirectory()) throw new HttpError(404, 'Folder not found');
     const entries = await readdir(path, { withFileTypes: true });
     const folders = entries.filter((e) => e.isDirectory() && !e.name.startsWith('.')).map((e) => e.name).sort((a, b) => a.localeCompare(b));
     const photos = entries.filter((e) => e.isFile() && isSupported(e.name)).length;
-    res.json({ path, parent: dirname(path) === path ? null : dirname(path), folders, photos });
+    res.json({ path, parent: browseParent(path), folders, photos });
   }));
 
   // ---- relink missing originals
   app.post('/api/projects/:id/relink', wrap(async (req, res) => {
     requireProject(P(req).id);
-    const folder = resolve(String(req.body?.folder ?? '').replace(/^~(?=$|\/)/, process.env.HOME ?? '~'));
+    const folder = resolveFolder(String(req.body?.folder ?? ''));
     if (!existsSync(folder)) throw new HttpError(400, 'Folder not found');
     const missing = store.projectAssetRows(P(req).id).filter(isMissing);
     const files = await scanFolder(folder, true);

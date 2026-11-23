@@ -1,14 +1,13 @@
-import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
 import * as shared from '../shared/places';
+import { worldAtlasFile } from './resources';
 
 // Place outlines (logic in src/shared/places.ts), from the bundled world-atlas topology.
-
-const require = createRequire(import.meta.url);
 
 let places: shared.Place[] | null = null;
 
 /** Detailed outlines (for drawing). */
-const detailed = () => (places ??= shared.placesFromTopology(require('world-atlas/countries-10m.json') as shared.PlacesTopology));
+const detailed = () => (places ??= shared.placesFromTopology(JSON.parse(readFileSync(worldAtlasFile(), 'utf8')) as shared.PlacesTopology));
 
 export const listPlaces = () => shared.listPlaces(detailed());
 export const placeOutline = (id: string) => shared.placeOutline(detailed(), id);

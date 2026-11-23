@@ -1,4 +1,5 @@
-# Unit and integration tests. macOS: the local app's HEIC import and fixtures use the built-in sips.
+# Unit and integration tests, on every platform the local app runs on. HEIC import, image export
+# and the flipbook use the built-in sips, so those tests (and the HEIC fixture) are macOS-only.
 name: Tests
 
 on:
@@ -8,7 +9,11 @@ on:
 
 jobs:
   test:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5

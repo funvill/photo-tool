@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import sharp from 'sharp';
+import { heicImage } from './heic';
 import { isInside, resolveFolder, scanFolder } from './importer';
 import type { Store } from './db';
 
@@ -35,8 +36,9 @@ export interface ShelfListing {
 
 const PREVIEW_COUNT = 3;
 const PREVIEW_PX = 160;
-// sharp's bundled libvips can't decode HEIC; those still import (via sips), they just aren't previewed.
-const PREVIEWABLE = /\.(jpe?g|png|webp)$/i;
+const PREVIEWABLE = /\.(jpe?g|png|webp|heic|heif)$/i;
+// sharp's bundled libvips can't decode HEIC: those are decoded with the bundled libheif first.
+const HEIC = /\.hei[cf]$/i;
 
 export function shelfRoot(store: Store): string {
   return resolveFolder(store.getSetting('shelf_root') ?? process.env.PHOTOBOOK_SHELF_DIR ?? DEFAULT_SHELF);
@@ -93,7 +95,8 @@ export async function shelfPreview(store: Store, dataDir: string, pathInput: str
   const out = join(dir, `${key}.webp`);
   if (!existsSync(out)) {
     mkdirSync(dir, { recursive: true });
-    await sharp(path, { failOn: 'none' }).rotate().resize(PREVIEW_PX, PREVIEW_PX, { fit: 'inside', withoutEnlargement: true }).webp({ quality: 72, alphaQuality: 80 }).toFile(out);
+    const img = HEIC.test(path) ? await heicImage(path) : sharp(path, { failOn: 'none' }).rotate();
+    await img.resize(PREVIEW_PX, PREVIEW_PX, { fit: 'inside', withoutEnlargement: true }).webp({ quality: 72, alphaQuality: 80 }).toFile(out);
   }
   return out;
 }

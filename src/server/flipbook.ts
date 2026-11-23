@@ -1,19 +1,15 @@
-import { execFile } from 'node:child_process';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import { promisify } from 'node:util';
 import { PDFDocument } from 'pdf-lib';
-import sharp from 'sharp';
 import { coverDims, coverGeometry, printablePages, type BookDocument, type Rect } from '../core';
 import { flipbookHtml, type FlipbookData } from './flipbookViewer';
 import { exportCoverPdf, exportPdf, type ExportAsset } from './pdf';
+import { rasterPdf } from './pdfRaster';
 
 // Books as a shareable web flipbook. Every page is cut from the same verified print PDF (rendered
-// by macOS, like poster images), so the flipbook shows exactly what will be printed: fonts,
+// like poster images, see pdfRaster.ts), so the flipbook shows exactly what will be printed: fonts,
 // cut-outs, transparency, colour grade. Pages are trimmed (no bleed), saved as WebP and embedded
 // in one HTML file with the viewer (see flipbookViewer.ts).
-
-const run = promisify(execFile);
 
 /** Long edge of each page image, in pixels. */
 export const FLIPBOOK_SIZES = { standard: 1400, sharp: 2200 } as const;
@@ -30,32 +26,30 @@ export interface FlipbookResult {
 }
 
 /**
- * Render a one-page PDF with the system renderer and cut out each rect (mm) as WebP. The render is
- * scaled so a rect (not the whole page with its bleed) gets `longPx` on its long edge.
+ * Render a one-page PDF and cut out each rect (mm) as WebP. The render is scaled so a rect (not
+ * the whole page with its bleed) gets `longPx` on its long edge.
  */
 async function renderCrops(pdfPath: string, pageMm: { w: number; h: number }, rects: Rect[], longPx: number, quality: number): Promise<{ buf: Buffer; w: number; h: number }[]> {
-  const png = `${pdfPath}.png`;
   const renderPx = Math.round(longPx * (Math.max(pageMm.w, pageMm.h) / Math.max(rects[0].w, rects[0].h)));
-  await run('/usr/bin/sips', ['-s', 'format', 'png', '-Z', String(renderPx), pdfPath, '--out', png]);
+  const raster = await rasterPdf(pdfPath, pageMm, renderPx);
   try {
-    const meta = await sharp(png).metadata();
-    const k = (meta.width ?? 1) / pageMm.w;
+    const k = raster.pxPerMm;
     return await Promise.all(rects.map(async (rect) => {
       const left = Math.round(rect.x * k);
       const top = Math.round(rect.y * k);
-      const w = Math.min((meta.width ?? 0) - left, Math.round(rect.w * k));
-      const h = Math.min((meta.height ?? 0) - top, Math.round(rect.h * k));
-      const buf = await sharp(png).extract({ left, top, width: w, height: h }).flatten({ background: '#ffffff' }).webp({ quality }).toBuffer();
+      const w = Math.min(raster.width - left, Math.round(rect.w * k));
+      const h = Math.min(raster.height - top, Math.round(rect.h * k));
+      const buf = await raster.image().extract({ left, top, width: w, height: h }).flatten({ background: '#ffffff' }).webp({ quality }).toBuffer();
       return { buf, w, h };
     }));
   } finally {
-    await rm(png, { force: true });
+    await raster.dispose();
   }
 }
 
 const dataUri = (buf: Buffer) => `data:image/webp;base64,${buf.toString('base64')}`;
 
-/** Run `fn` over `items`, a few at a time (sips is single-threaded). */
+/** Run `fn` over `items`, a few at a time (each render is single-threaded). */
 async function pool<T, R>(items: T[], n: number, fn: (item: T, i: number) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
   let next = 0;
@@ -69,7 +63,6 @@ async function pool<T, R>(items: T[], n: number, fn: (item: T, i: number) => Pro
 }
 
 export async function exportFlipbook(doc: BookDocument, assets: Map<string, ExportAsset>, outPath: string, opts: { size: FlipbookSize }): Promise<FlipbookResult> {
-  if (process.platform !== 'darwin') throw new Error('The flipbook needs macOS (it uses the system PDF renderer) in this version.');
   if (doc.settings.product === 'poster') throw new Error('The flipbook is for books — export a poster as an image instead.');
   const started = Date.now();
   const s = doc.settings;
@@ -85,7 +78,8 @@ export async function exportFlipbook(doc: BookDocument, assets: Map<string, Expo
     const trim: Rect = { x: b, y: b, w: s.trimWidthMm, h: s.trimHeightMm };
     const src = await PDFDocument.load(await readFile(interior));
     const printable = printablePages(doc);
-    // sips renders only the first page of a PDF: split it into one file per page.
+    // One file per page: sips renders only a PDF's first page, and PDFium then only ever holds
+    // one page's photos in memory, however large the book.
     const files: string[] = [];
     for (let i = 0; i < src.getPageCount(); i++) {
       const one = await PDFDocument.create();
