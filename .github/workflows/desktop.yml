@@ -1,0 +1,96 @@
+# Builds the desktop app's installers, each on its own platform (sharp's native part is chosen by
+# `npm ci` for the machine it runs on): the Windows .exe on Windows, the .deb and AppImage on Linux.
+# The installers are unsigned and are kept as workflow artifacts; nothing is published.
+name: Desktop installers
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      # Builds the editor, bundles the app, fetches the Electron program, then packages.
+      - run: npm run dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: photobook-studio-windows-x64
+          path: dist/installer/*.exe
+          if-no-files-found: error
+      # The packaged app tests itself: makes a book from the fixture photos, exports the PDFs,
+      # loads the editor, and fails if anything tried to reach a host other than 127.0.0.1.
+      - run: npm run fixtures
+      - name: Self-test the packaged app
+        shell: pwsh
+        run: |
+          $env:PHOTOBOOK_DATA_DIR = "$env:RUNNER_TEMP\selftest\data"
+          $exe = (Get-ChildItem dist\installer\win-unpacked\*.exe | Where-Object Name -notlike 'Uninstall*' | Select-Object -First 1).FullName
+          $p = Start-Process -FilePath $exe -ArgumentList '--self-test', "`"$PWD\fixtures\generated\trip`"", '--self-test-out', "`"$env:RUNNER_TEMP\selftest\out`"" -Wait -PassThru
+          Get-Content "$env:RUNNER_TEMP\selftest\data\logs\desktop.log" -ErrorAction SilentlyContinue
+          exit $p.ExitCode
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: photobook-studio-windows-self-test
+          path: |
+            ${{ runner.temp }}/selftest/out/result.json
+            ${{ runner.temp }}/selftest/out/*.png
+            ${{ runner.temp }}/selftest/data/logs/desktop.log
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      # patchelf (with the runner's own gcc) is for scripts/desktop/linux/patch-sharp.mjs.
+      - run: sudo apt-get update && sudo apt-get install -y patchelf
+      - run: npm run dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: photobook-studio-linux-x64
+          path: |
+            dist/installer/*.deb
+            dist/installer/*.AppImage
+          if-no-files-found: error
+      # The same self-test as on Windows, on the app as a user gets it: installed from the .deb
+      # (whose install script sets up what Chromium's sandbox needs on Ubuntu 24.04), then the
+      # AppImage. There is no screen on the runner, so xvfb provides one.
+      - run: npm run fixtures
+      - name: Install the .deb and self-test the installed app
+        run: |
+          sudo apt-get install -y xvfb ./dist/installer/*.deb
+          export PHOTOBOOK_DATA_DIR="$RUNNER_TEMP/selftest-deb/data"
+          xvfb-run -a -s '-screen 0 1600x1000x24' photobook-studio --self-test "$PWD/fixtures/generated/trip" --self-test-out "$RUNNER_TEMP/selftest-deb/out"
+      - name: Self-test the AppImage
+        if: always()
+        run: |
+          # The runner lacks the libfuse2 the AppImage mounts itself with; unpack-and-run instead.
+          export PHOTOBOOK_DATA_DIR="$RUNNER_TEMP/selftest-appimage/data" APPIMAGE_EXTRACT_AND_RUN=1
+          chmod +x dist/installer/*.AppImage
+          xvfb-run -a -s '-screen 0 1600x1000x24' dist/installer/*.AppImage --self-test "$PWD/fixtures/generated/trip" --self-test-out "$RUNNER_TEMP/selftest-appimage/out"
+      # The self-test passes even while sharp is mixing up two copies of glib and leaking memory
+      # (see patch-sharp.mjs); these log lines are how that shows.
+      - name: sharp must not be using the wrong glib
+        run: |
+          ! grep -l 'GLib-GObject-CRITICAL' "$RUNNER_TEMP"/selftest-*/data/logs/desktop.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: photobook-studio-linux-self-test
+          path: |
+            ${{ runner.temp }}/selftest-*/out/result.json
+            ${{ runner.temp }}/selftest-*/out/*.png
+            ${{ runner.temp }}/selftest-*/data/logs/desktop.log

@@ -1,0 +1,7 @@
+{
+  "productName": "Photobook Studio",
+  "appId": "app.photobookstudio.desktop",
+  "description": "Make a photobook from a folder of photos and export print-ready PDFs. Works offline.",
+  "maintainer": "Photobook Studio <photobook-studio@localhost>",
+  "repository": "github:jkw2lo/photobook_studio"
+}
