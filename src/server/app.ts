@@ -40,8 +40,9 @@ export interface AppOptions {
 export function createApp(dataDir: string, opts: AppOptions = {}) {
   if (opts.resourceRoot) setResourceRoot(opts.resourceRoot);
   const store = new Store(dataDir);
-  const importer = new Importer(store);
-  const photoInfo = new PhotoInfoIndex({ fallbackDir: opts.photoInfoFallbackDir ?? join(dataDir, 'photoinfo') });
+  const photoInfoOptions = { fallbackDir: opts.photoInfoFallbackDir ?? join(dataDir, 'photoinfo') };
+  const importer = new Importer(store, photoInfoOptions);
+  const photoInfo = new PhotoInfoIndex(photoInfoOptions);
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '20mb' }));

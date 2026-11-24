@@ -1,9 +1,12 @@
 import { existsSync, statSync } from 'node:fs';
-import { readdir } from 'node:fs/promises';
-import { basename, extname, join, resolve, sep } from 'node:path';
+import { readdir, rm } from 'node:fs/promises';
+import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { editKey, isIdentityEdit, parseEdit, type PhotoEdit } from '../core';
+import { infoFor, readFolderInfo, type FolderInfo, type PhotoInfoOptions } from '../photoinfo';
 import type { Store } from './db';
 import { expandHome } from './folders';
+import { renderEdited } from './photoEditRender';
 import { analyze, existingThumb, fileStat, hashFile, isSupported, makeThumbnails, orientedSize, readMetadata, workingFile } from './media';
 
 // Background import jobs. The HTTP request returns immediately with a job id; the UI polls progress
@@ -66,7 +69,23 @@ export class Importer {
   private queues = new Map<string, Promise<void>>();
   private syncing = new Map<string, ImportJob>();
 
-  constructor(private store: Store) {}
+  /** Each job reads a folder's photoinfo.json once. */
+  private infoCache = new WeakMap<ImportJob, Map<string, FolderInfo>>();
+
+  /** `photoInfo` is where photoinfo.json is read from; leave it out and saved edits are not applied. */
+  constructor(private store: Store, private photoInfo?: PhotoInfoOptions) {}
+
+  /** The edit saved for this photo in its folder's photoinfo.json, or null (an identity edit counts as none). */
+  private editFor(job: ImportJob, path: string): PhotoEdit | null {
+    if (!this.photoInfo) return null;
+    let folders = this.infoCache.get(job);
+    if (!folders) this.infoCache.set(job, (folders = new Map()));
+    const folder = dirname(path);
+    let info = folders.get(folder);
+    if (!info) folders.set(folder, (info = readFolderInfo(folder, this.photoInfo)));
+    const edit = parseEdit(infoFor(info, basename(path))?.edit);
+    return edit && !isIdentityEdit(edit) ? edit : null;
+  }
 
   get(id: string) {
     return this.jobs.get(id);
@@ -233,8 +252,13 @@ export class Importer {
     const st = await fileStat(path);
     const existing = this.store.assetByPath(path);
     const dataDir = this.store.dataDir;
+    const edit = this.editFor(job, path);
+    const key = edit ? editKey(edit) : null;
+    // The saved edit is part of "unchanged": the derived file must be the one this edit makes (or none, without an edit).
+    const derivedName = existing?.derived_path ? basename(existing.derived_path) : '';
+    const sameEdit = key ? derivedName.endsWith(`-edit-${key}.jpg`) && existsSync(existing!.derived_path!) : !derivedName.includes('-edit-');
     // Unchanged file already catalogued: just add it to this project.
-    if (existing && existing.file_size === st.size && existing.mtime_ms === st.mtimeMs && existingThumb(dataDir, existing.id, 's')) {
+    if (existing && existing.file_size === st.size && existing.mtime_ms === st.mtimeMs && sameEdit && existingThumb(dataDir, existing.id, 's')) {
       this.store.linkAsset(job.projectId, existing.id);
       job.alreadyInLibrary++;
       return existing.id;
@@ -251,8 +275,15 @@ export class Importer {
     }
     const id = existing?.id ?? randomUUID();
     const work = await workingFile(path, dataDir, contentHash);
-    const [size, meta, analysis] = await Promise.all([orientedSize(work.path), readMetadata(path), analyze(work.path)]);
-    await makeThumbnails(work.path, dataDir, id, !!analysis.transparent);
+    let derived = work.derived;
+    if (edit && key) {
+      // Everything below reads the edited picture; the original stays untouched.
+      derived = join(dataDir, 'derived', `${contentHash}-edit-${key}.jpg`);
+      if (!existsSync(derived)) await renderEdited(work.path, edit, derived, 'jpeg', { keepMetadata: true });
+    }
+    const read = derived ?? work.path;
+    const [size, meta, analysis] = await Promise.all([orientedSize(read), readMetadata(path), analyze(read)]);
+    await makeThumbnails(read, dataDir, id, !!analysis.transparent);
     const dup = this.store.firstAssetWithHash(contentHash, id);
     this.store.tx(() => {
       this.store.upsertAsset({
@@ -272,12 +303,15 @@ export class Importer {
         favorite: existing?.favorite ?? 0,
         tags: existing?.tags ?? '[]',
         analysis: JSON.stringify(analysis),
-        derived_path: work.derived,
+        derived_path: derived,
         exact_duplicate_of: dup?.id ?? null,
         imported_at: existing?.imported_at ?? new Date().toISOString(),
       });
       this.store.linkAsset(job.projectId, id);
     });
+    // An earlier edit's file is of no use now.
+    const old = existing?.derived_path;
+    if (old && old !== derived && basename(old).includes('-edit-') && dirname(old) === join(dataDir, 'derived')) await rm(old, { force: true });
     if (dup) job.exactDuplicates++;
     job.imported++;
     return id;
