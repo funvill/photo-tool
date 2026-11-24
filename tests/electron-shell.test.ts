@@ -458,6 +458,8 @@ describe('Help > About', () => {
     const a = describeAbout({ ...base, productName: GALLERY_PRODUCT_NAME, mode: 'gallery' });
     expect(a.detail).toContain(`Its thumbnails and recent folders are kept in:\n${base.dataDir}`);
     expect(a.detail).not.toMatch(/\bbooks?\b/i);
+    expect(a.detail).toContain('uses the network only for OpenStreetMap map tiles, and only after you choose Load maps');
+    expect(a.detail).not.toContain('never uses the network');
   });
 
   it('has no addresses in it: the app opens no links', () => {

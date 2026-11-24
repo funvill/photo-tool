@@ -95,22 +95,43 @@ Drop photos from Explorer or Finder onto a frame (replaces it), onto empty space
 
 ## Photobook Gallery
 
-A second program in the desktop app, for looking through a folder of photos and starring the best ones. It is installed with the editor and runs beside it. It never changes, renames or moves a photo, and it never uses the network. Windows and Linux only; there is no web version.
+A second program in the desktop app, for looking through a folder of photos and starring the best ones. It is installed with the editor and runs beside it. It never changes, renames or moves a photo (the one exception is **Delete**, which sends a photo to the Recycle Bin). It uses the network only for OpenStreetMap map tiles, and only after you choose **Load maps** on the Map tab; the editor never uses the network. Windows and Linux only; there is no web version.
 
 **Starting it.** On Windows the installer adds **Photobook Gallery** to the Start menu and the desktop. On Linux the `.deb` adds it to the applications menu. In the editor, **File → Open Gallery** starts it. From a command line, run the app with `--gallery`, or `--gallery <folder>` to open that folder straight away.
 
 **Opening a folder.** Click **Open folder**, or use **File → Open folder…** (Ctrl+O). Tick **Include subfolders** first to see the photos in every folder below it. The start screen lists recent folders; one that can't be found (a drive that isn't plugged in) is greyed out. Photos appear while the folder is read, and a bar shows how far along it is. A folder opened before is quick: its thumbnails are kept.
 
-**The grid.** Drag the size slider to make thumbnails bigger or smaller. Click a photo to see its details on the right. Ctrl-click adds or removes a photo, and Shift-click selects a range. Hover a photo and click its star to star it. Double-click a photo, or press Enter, to view it full screen.
+**Three panes.** The thumbnails are on the left, a large preview of the selected photo is in the middle, and its details are on the right. Drag the two dividers to change the widths; they are remembered. Click a photo to see it in the preview. Ctrl-click adds or removes a photo, and Shift-click selects a range. Drag the size slider to make thumbnails bigger or smaller. Double-click a photo or the preview, or press Enter, to view it full screen.
 
-**The viewer keys:**
+**Keys.** They work in the grid, the preview and the full-screen viewer, and are ignored while you type in a field.
 
-- **Left** and **Right**: the previous or next photo.
-- **S**: star or unstar the photo.
-- **I**: show or hide its details.
-- **Esc**: close the viewer.
+- **F**: favourite (star) the photo, or unfavourite it. With several photos selected, they all take the opposite of the first one's state.
+- **H**: hide the photo, or show it again. Hidden photos are left out of the grid until you change the **Hidden** filter. After H, the selection moves on to the next photo, so you can press H down a run of bad shots.
+- **Left**, **Right**, **Up** and **Down**: move to the previous, next, upper or lower photo.
+- **Home** and **End**: the first or last photo.
+- **Enter** (or **Space**): view the photo full screen. **Esc** closes the viewer.
+- In the full-screen viewer, **Left** and **Right** step through the photos, **S** stars the photo, and **I** shows or hides its details.
 
-**Details.** The panel shows the date, camera, size and folder. You can type people, a date and time, a place, a description and notes. Each is saved when you leave the field.
+**Stacks.** Near-duplicates are folded into one tile with a "x N" badge, showing the favourite or else the best of the group. Click the badge to unfold the stack, and click it again to fold it. Untick **Stack near-duplicates** to see every photo on its own.
+
+**Hidden.** The **Hidden** filter leaves hidden photos out (the default), shows them dimmed, or shows only them.
+
+**Info sections.** The right-hand pane has sections you can fold, and it remembers which are open:
+
+- **Photo**: date, size, megapixels, shape, format and folder.
+- **Camera**: camera, lens, focal length, aperture, shutter speed, ISO, exposure compensation and flash, when the file has them.
+- **Histogram**: red, green, blue and brightness, with the share of clipped shadows and highlights.
+- **Place**, **People**, **Date and time**, and **Description and notes**: the fields you can type. Each is saved when you leave the field.
+
+**Right-click menu.** Right-click a photo, or the preview, for:
+
+- **Copy to clipboard**: the photo itself, to paste into a chat, a document or an image editor.
+- **Copy path to clipboard**: the file's full path (every selected path, one per line).
+- **Show in file explorer**: opens the folder with the photo selected.
+- **Delete**: asks first, then moves the photo to the Recycle Bin (the Trash on Linux), so it can be restored. If the bin is not available, the delete fails instead of erasing the file.
+- **Favourite** and **Hide**, with their keys shown.
+
+**Map tab.** The **Grid | Map** switch above the thumbnails shows the photos that have a location (from the camera's GPS or a place you typed) as small round pictures on an OpenStreetMap map. Photos close together merge into a bubble with a count; click it to zoom in. Click a photo to select it. The first time you open the Map tab it asks whether to load maps from the internet. **Load maps** downloads map tiles from OpenStreetMap, and nothing else leaves your computer: the requests carry no cookies, no referrer and no personal details. **Not now** keeps the markers on a plain background and makes no request. You can change your answer with the **Map: online** link on the map. With no connection, the markers still show, with "Map unavailable offline" over them.
 
 **Sorting and filters.** Sort by **Date taken** (the default), **Most interesting**, **Main colour** or **File name**. Filters can be combined:
 
@@ -119,6 +140,7 @@ A second program in the desktop app, for looking through a folder of photos and 
 - portrait or landscape;
 - **Low quality** (blurry, too dark, too bright or low resolution, by the same rules as the editor's Clean up);
 - **Near-duplicates**;
+- **Hidden**: leave out, show or only;
 - **Has location** and **Has people**;
 - one subfolder;
 - a search of descriptions and notes.

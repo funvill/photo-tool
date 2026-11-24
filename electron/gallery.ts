@@ -10,7 +10,7 @@ import { dragFiles, dragRequest, preparedDragFor, sameDragList, type DragCheck, 
 import { copyTextRequest, trashConfirm, trashPhotos, type TrashResult } from './fileActions';
 import { readMapConsent, writeMapConsent } from './mapTiles';
 
-export const GALLERY_DESCRIPTION = 'Look through a folder of photos, star the best ones and drag them into other programs. Works offline.';
+export const GALLERY_DESCRIPTION = 'Look through a folder of photos, star the best ones and drag them into other programs. Uses the network only for map tiles, and only if you choose Load maps.';
 
 /** The gallery's page on the server (or, in development, the Vite dev server) at `base`. */
 export function galleryPage(base: string): string {

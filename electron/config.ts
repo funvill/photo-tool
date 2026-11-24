@@ -243,7 +243,7 @@ export function describeAbout(o: { productName: string; version: string; descrip
   return {
     title: `About ${o.productName}`,
     message: `${o.productName} ${o.version}`,
-    detail: [o.description, `Everything stays on this computer. ${o.productName} never uses the network.`, o.mode === 'gallery' ? `Its thumbnails and recent folders are kept in:\n${o.dataDir}` : `Your books are kept in:\n${o.dataDir}`, credit.join('\n')].filter(Boolean).join('\n\n'),
+    detail: [o.description, o.mode === 'gallery' ? `Everything stays on this computer. ${o.productName} uses the network only for OpenStreetMap map tiles, and only after you choose Load maps on the Map tab.` : `Everything stays on this computer. ${o.productName} never uses the network.`, o.mode === 'gallery' ? `Its thumbnails and recent folders are kept in:\n${o.dataDir}` : `Your books are kept in:\n${o.dataDir}`, credit.join('\n')].filter(Boolean).join('\n\n'),
     buttons: o.hasNotices ? ['OK', NOTICES_BUTTON] : ['OK'],
   };
 }

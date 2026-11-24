@@ -81,6 +81,25 @@ Built 2026-11-23 on branch `gallery` (eight tasks, branched from `main` at `27b3
 4. **A folder of several thousand photos:** first scan time, scrolling, sorting by Most interesting and Main colour, and a second opening from the cache.
 5. **A read-only folder:** a star set in the gallery shows the read-only badge and reaches the editor (kept in the editor's `photoinfo/` folder).
 
+**Review pane (branch `gallery-review`, built 2026-11-24, branched from `gallery`; not merged, not pushed).** Design: `docs/superpowers/specs/2026-11-23-gallery-review-pane-design.md`. Adds the preview pane and two draggable dividers, review keys (F, H, arrows, Home, End, Enter), hidden photos, stacks, the info sections with camera details and a histogram, the right-click menu, and the Map tab. The gallery now uses the network once: OpenStreetMap tiles, only after the user chooses Load maps (the editor is unchanged and never uses the network). Only Playwright in Chrome and unit tests have run; nobody has used it in the real window.
+
+**More checks only a person can do (none done yet):**
+
+1. **Splitters and badges** in the desktop window: drag both dividers, check the widths survive a restart, and look at the favourite, hidden and "x N" stack badges.
+2. **Real-camera details:** open a camera photo and a phone photo; Flash, ISO, lens, aperture and shutter speed match what Explorer's Properties shows. A file with no EXIF says "No camera details in this file".
+3. **Histogram** looks right (colours and contrast) in the dark theme, on a dark and a bright photo.
+4. **Copy to clipboard** pastes an image into another app (Paint, Word, a chat), for a JPEG and for a HEIC photo.
+5. **Copy path to clipboard** works in the desktop app (the page's own clipboard is blocked there; the main process does it), with one photo and with several.
+6. **Show in file explorer** opens the folder with the photo selected.
+7. **Delete** asks first, sends the photo to the Recycle Bin, and it can be restored from there. After restoring and reopening the folder the gallery is consistent: the photo is back, and nothing odd shows (its old stars and notes were removed with the delete).
+8. **A photo from a folder that is no longer open** (open folder A, then B, then act on a photo of A through an old selection or drag) is refused by Delete, Copy and Show.
+9. **Map consent:** the prompt shows the first time the Map tab opens. **Not now** shows markers on a plain background and the DevTools network tab (dev build) shows no request. **Load maps** shows tiles and the OpenStreetMap credit; after a restart Map opens online without asking. "Map: online" turns it off again.
+10. **Map unavailable offline:** with Wi-Fi off and maps on, the markers still show with "Map unavailable offline" over them.
+11. **Markers for real GPS photos** land in the right place; bubbles split when clicked; arrow keys, F and H still work with the map shown, and switching back to Grid scrolls the selection into view.
+12. **Proxy check on tile requests** (for example Fiddler or mitmproxy): they carry only Accept and `User-Agent: PhotobookGallery/<version>`, plus Chromium's own Host, Connection and Accept-Encoding. No Referer, Cookie, Sec-CH-UA or Accept-Language. Every other https request is still cancelled in the log, and the editor window is unchanged.
+13. **Windows certificate checks** (OCSP/CRL) for the tile connection happen in the OS, outside the app's request filter. They only happen after Load maps. Worth knowing when reading a packet capture.
+14. **A selected photo that a filter leaves out:** the preview goes empty while the details still show it. A known small inconsistency; decide if it matters.
+
 ## Linux
 
 Built and tested by a subagent; the lead agent checked that the packages exist and that the tests pass on Windows, but did not rerun the container tests. Evidence is in `%TEMP%\photobook-linux\test\<name>\` (`test.log`, `result.json`, screenshots); build logs are `%TEMP%\photobook-linux-build*.log`.
