@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GalleryItem } from '../src/gallery/server/app';
 
-const { useGallery, connectDesktop, selectVisible, selectStackInfo, selectFiltered, selectFacts, selectStackPlace, menuTargets, shownEdit } = await import('../src/gallery/web/store');
+const { useGallery, connectDesktop, guardUnload, selectVisible, selectStackInfo, selectFiltered, selectFacts, selectStackPlace, menuTargets, shownEdit } = await import('../src/gallery/web/store');
 const { IDENTITY_EDIT } = await import('../src/core/photoEdit');
 
 function item(over: Partial<GalleryItem> = {}): GalleryItem {
@@ -771,15 +771,367 @@ describe('gallery store: edits', () => {
 
 describe('gallery store: edit mode follows the selection', () => {
   const g = () => useGallery.getState();
-  it('selecting another photo leaves edit mode; the same photo keeps it', () => {
-    useGallery.setState({ items: [item(), item({ path: 'b', fileName: 'b.jpg', key: 'k2' })], sort: 'name', filter: {}, stacked: false, selected: 'b', selection: ['b'], anchor: 'b', editing: 'b' });
+  const A = 'D:\\Trip\\a.jpg';
+  const cropped = { rotate: 0 as const, straighten: 0, crop: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 } };
+  const turned = { rotate: 270 as const, straighten: 0, crop: { x: 0, y: 0, w: 1, h: 1 } };
+  const two = () => [item(), item({ path: 'b', fileName: 'b.jpg', key: 'k2' })];
+
+  it('selecting another photo leaves edit mode as Done: the edit in progress becomes the unsaved edit', () => {
+    useGallery.setState({ items: two(), sort: 'name', filter: {}, stacked: false, selected: 'b', selection: ['b'], anchor: 'b' });
+    g().startEdit('b');
     g().clickSelect('b', {});
     expect(g().editing).toBe('b');
-    g().clickSelect('D:\\Trip\\a.jpg', {});
+    g().setEditDraft(cropped);
+    g().clickSelect(A, {});
     expect(g().editing).toBeNull();
-    useGallery.setState({ editing: 'D:\\Trip\\a.jpg' });
+    expect(g().pendingEdits).toEqual({ b: cropped });
+
+    g().startEdit(A);
+    g().setEditDraft(turned);
     g().select('b');
     expect(g().editing).toBeNull();
+    expect(g().pendingEdits).toEqual({ b: cropped, [A]: turned });
+  });
+
+  it('as with Done, an edit in progress equal to the saved state leaves nothing unsaved', () => {
+    useGallery.setState({ items: two(), sort: 'name', filter: {}, stacked: false, selected: A, selection: [A], anchor: A, pendingEdits: { [A]: cropped } });
+    g().startEdit(A);
+    g().setEditDraft(null);
+    g().select('b');
+    expect(g().pendingEdits).toEqual({});
+  });
+
+  it('without a reported edit in progress the unsaved edits stay as they were', () => {
+    useGallery.setState({ items: two(), sort: 'name', filter: {}, stacked: false, selected: A, selection: [A], anchor: A, pendingEdits: { [A]: cropped } });
+    g().startEdit(A);
+    g().select('b');
+    expect(g().editing).toBeNull();
+    expect(g().pendingEdits).toEqual({ [A]: cropped });
+  });
+
+  it('an edit in progress reported for another photo, or after Cancel, is not applied', () => {
+    useGallery.setState({ items: two(), sort: 'name', filter: {}, stacked: false, selected: A, selection: [A], anchor: A });
+    g().startEdit(A);
+    g().setEditDraft(cropped);
+    g().cancelEdit();
+    g().select('b');
+    expect(g().pendingEdits).toEqual({});
+  });
+
+  it("a deleted photo's edit in progress goes with it", () => {
+    useGallery.setState({ items: two(), sort: 'name', filter: {}, stacked: false, selected: A, selection: [A], anchor: A });
+    g().startEdit(A);
+    g().setEditDraft(cropped);
+    g().removeItems([A]);
+    expect(g().selected).toBe('b');
+    expect(g().editing).toBeNull();
+    expect(g().pendingEdits).toEqual({});
+  });
+});
+
+describe('gallery store: saving edits', () => {
+  const g = () => useGallery.getState();
+  const A = 'D:\\Trip\\a.jpg';
+  const B = 'D:\\Trip\\b.jpg';
+  const H = 'D:\\Trip\\c.heic';
+  const cropped = { rotate: 0 as const, straighten: 0, crop: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 } };
+  const turned = { rotate: 270 as const, straighten: 0, crop: { x: 0, y: 0, w: 1, h: 1 } };
+  const items = () => [item(), item({ path: B, fileName: 'b.jpg', key: 'k2' }), item({ path: H, fileName: 'c.heic', key: 'k3', format: 'heif' })];
+  let disconnect: (() => void) | null = null;
+  /** The desktop app, faked: the store reaches it through connectDesktop. */
+  function desktopWith(api: Record<string, unknown>) {
+    disconnect = connectDesktop(api);
+  }
+  /** The server saves whatever patch it is sent into the photo's info. */
+  function echoInfo() {
+    routes['PATCH /api/gallery/info'] = (body) => {
+      const { path, patch } = body as { path: string; patch: Record<string, unknown> };
+      const old = g().items.find((i) => i.path === path)!;
+      const info = { ...old.info };
+      for (const [k, v] of Object.entries(patch)) if (v === null) delete info[k]; else info[k] = v;
+      return { json: { ...old, info } };
+    };
+  }
+  const patches = () => calls.filter((c) => c.method === 'PATCH').map((c) => c.body);
+
+  afterEach(() => {
+    disconnect?.();
+    disconnect = null;
+    useGallery.setState({ editTarget: 'info' });
+  });
+
+  it('info-file mode: Save writes the edit into the photo info and the unsaved edit goes', async () => {
+    echoInfo();
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: items(), pendingEdits: { [A]: cropped, [B]: turned } });
+    expect(await g().saveEdit(A)).toBe(true);
+    expect(patches()).toEqual([{ path: A, patch: { edit: cropped }, job: 'j1' }]);
+    expect(g().pendingEdits).toEqual({ [B]: turned });
+    expect(g().items[0].info.edit).toEqual(cropped);
+    expect(shownEdit(g(), g().items[0])).toEqual(cropped);
+  });
+
+  it('info-file mode: saving "no edit" removes the field', async () => {
+    echoInfo();
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: [item({ info: { edit: cropped, star: true } })], pendingEdits: { [A]: IDENTITY_EDIT } });
+    expect(await g().saveEdit(A)).toBe(true);
+    expect(patches()).toEqual([{ path: A, patch: { edit: null }, job: 'j1' }]);
+    expect(g().items[0].info).toEqual({ star: true });
+    expect(g().pendingEdits).toEqual({});
+  });
+
+  it('info-file mode: a refused save keeps the unsaved edit and shows the error', async () => {
+    routes['PATCH /api/gallery/info'] = () => ({ status: 409, json: { error: 'photoinfo.json is in use' } });
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: items(), pendingEdits: { [A]: cropped } });
+    expect(await g().saveEdit(A)).toBe(false);
+    expect(g().pendingEdits).toEqual({ [A]: cropped });
+    expect(g().toasts).toEqual([expect.objectContaining({ kind: 'error', text: 'photoinfo.json is in use' })]);
+  });
+
+  it('an edit changed again while its save was on its way stays unsaved', async () => {
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    routes['PATCH /api/gallery/info'] = async () => {
+      await held;
+      return { json: item({ info: { edit: cropped } }) };
+    };
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: items(), pendingEdits: { [A]: cropped } });
+    const saving = g().saveEdit(A);
+    useGallery.setState({ pendingEdits: { [A]: turned } });
+    release();
+    expect(await saving).toBe(true);
+    expect(g().pendingEdits).toEqual({ [A]: turned });
+  });
+
+  it('photo-file mode: Save hands the edit to the desktop app and takes the photo it read again', async () => {
+    const reread = item({ size: 2222, key: 'k-new', width: 150, height: 150 });
+    const saveEditToFile = vi.fn(async () => ({ ok: true, item: reread }));
+    desktopWith({ saveEditToFile });
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: items(), editTarget: 'file', pendingEdits: { [A]: cropped } });
+    expect(await g().saveEdit(A)).toBe(true);
+    expect(saveEditToFile).toHaveBeenCalledWith(A, cropped);
+    expect(patches()).toEqual([]);
+    expect(g().items[0]).toEqual(reread);
+    expect(g().pendingEdits).toEqual({});
+  });
+
+  it('photo-file mode: a failed save keeps the unsaved edit and shows the error', async () => {
+    desktopWith({ saveEditToFile: async () => ({ ok: false, error: "Couldn't move the original to the Recycle Bin." }) });
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: items(), editTarget: 'file', pendingEdits: { [A]: cropped } });
+    expect(await g().saveEdit(A)).toBe(false);
+    expect(g().pendingEdits).toEqual({ [A]: cropped });
+    expect(g().items[0]).toEqual(items()[0]);
+    expect(g().toasts).toEqual([expect.objectContaining({ kind: 'error', text: "Couldn't move the original to the Recycle Bin." })]);
+  });
+
+  it('photo-file mode: a file replaced although a later step failed drops the unsaved edit and reloads the photos', async () => {
+    const reread = item({ size: 3333, key: 'k-new' });
+    routes['GET /api/gallery/items'] = () => ({ json: [reread, items()[1], items()[2]] });
+    desktopWith({ saveEditToFile: async () => ({ ok: false, saved: true, error: "Saved, but couldn't read the photo again." }) });
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: items(), editTarget: 'file', pendingEdits: { [A]: cropped } });
+    await g().saveEdit(A);
+    expect(g().pendingEdits).toEqual({});
+    expect(count('GET', '/api/gallery/items')).toBe(1);
+    expect(g().items[0]).toEqual(reread);
+    expect(g().toasts).toEqual([expect.objectContaining({ kind: 'error', text: "Saved, but couldn't read the photo again." })]);
+  });
+
+  it('photo-file mode: a HEIC photo is not saved over (only as a copy)', async () => {
+    const saveEditToFile = vi.fn();
+    desktopWith({ saveEditToFile });
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: items(), editTarget: 'file', pendingEdits: { [H]: cropped } });
+    expect(await g().saveEdit(H)).toBe(false);
+    expect(saveEditToFile).not.toHaveBeenCalled();
+    expect(g().pendingEdits).toEqual({ [H]: cropped });
+    expect(g().toasts).toEqual([expect.objectContaining({ kind: 'error', text: 'HEIC photos can only be saved as a copy' })]);
+  });
+
+  it('Save all saves each photo one after another, then says so once', async () => {
+    echoInfo();
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: items(), pendingEdits: { [A]: cropped, [B]: turned } });
+    await g().saveAllEdits();
+    expect(patches().map((p) => (p as { path: string }).path)).toEqual([A, B]);
+    expect(g().pendingEdits).toEqual({});
+    expect(g().toasts).toEqual([expect.objectContaining({ kind: 'success', text: 'Saved 2 photos' })]);
+  });
+
+  it('Save all with failures: one toast naming them; their unsaved edits stay', async () => {
+    routes['PATCH /api/gallery/info'] = (body) => {
+      const { path, patch } = body as { path: string; patch: Record<string, unknown> };
+      if (path !== A) return { status: 409, json: { error: 'in use' } };
+      return { json: item({ info: patch }) };
+    };
+    const more = [...items(), item({ path: 'D:\\Trip\\d.jpg', fileName: 'd.jpg', key: 'k4' }), item({ path: 'D:\\Trip\\e.jpg', fileName: 'e.jpg', key: 'k5' }), item({ path: 'D:\\Trip\\f.jpg', fileName: 'f.jpg', key: 'k6' })];
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: more, pendingEdits: { [A]: cropped, [B]: turned, 'D:\\Trip\\d.jpg': turned, 'D:\\Trip\\e.jpg': turned, 'D:\\Trip\\f.jpg': turned } });
+    await g().saveAllEdits();
+    expect(g().toasts).toEqual([expect.objectContaining({ kind: 'error', text: 'Saved 1, 4 failed: b.jpg, d.jpg, e.jpg…' })]);
+    expect(Object.keys(g().pendingEdits)).toEqual([B, 'D:\\Trip\\d.jpg', 'D:\\Trip\\e.jpg', 'D:\\Trip\\f.jpg']);
+  });
+
+  it('Save all in photo-file mode skips HEIC photos and names them', async () => {
+    const saveEditToFile = vi.fn(async (path: string) => ({ ok: true, item: items().find((i) => i.path === path) }));
+    desktopWith({ saveEditToFile });
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: items(), editTarget: 'file', pendingEdits: { [A]: cropped, [H]: turned } });
+    await g().saveAllEdits();
+    expect(saveEditToFile.mock.calls.map((c) => c[0])).toEqual([A]);
+    expect(g().pendingEdits).toEqual({ [H]: turned });
+    expect(g().toasts).toEqual([expect.objectContaining({ text: 'Saved 1 photo. Skipped c.heic: HEIC photos can only be saved as a copy' })]);
+  });
+
+  it('Save as hands the edit and the info to the desktop app; the unsaved edit stays; a copy in the folder joins the grid', async () => {
+    const copy = item({ path: 'D:\\Trip\\a-edited.jpg', fileName: 'a-edited.jpg', key: 'k-copy', info: { star: true } });
+    const saveEditAs = vi.fn(async () => ({ ok: true, savedPath: copy.path, item: copy }));
+    desktopWith({ saveEditAs });
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: [item({ info: { star: true, notes: 'n' } })], pendingEdits: { [A]: cropped } });
+    expect(await g().saveEditAs(A)).toBe(true);
+    expect(saveEditAs).toHaveBeenCalledWith(A, cropped, { star: true, notes: 'n' });
+    expect(g().pendingEdits).toEqual({ [A]: cropped });
+    expect(g().items.map((i) => i.path)).toEqual([A, copy.path]);
+    expect(g().toasts).toEqual([expect.objectContaining({ kind: 'success', text: 'Saved a copy as a-edited.jpg' })]);
+  });
+
+  it('Save as: cancelled does nothing; an error is shown; no desktop app, no Save as', async () => {
+    desktopWith({ saveEditAs: async () => ({ ok: false, cancelled: true }) });
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: [item()], pendingEdits: { [A]: cropped } });
+    expect(await g().saveEditAs(A)).toBe(false);
+    expect(g().toasts).toEqual([]);
+    disconnect!();
+    desktopWith({ saveEditAs: async () => ({ ok: false, error: 'That is the original.' }) });
+    expect(await g().saveEditAs(A)).toBe(false);
+    expect(g().toasts).toEqual([expect.objectContaining({ kind: 'error', text: 'That is the original.' })]);
+    disconnect!();
+    disconnect = null;
+    useGallery.setState({ toasts: [] });
+    expect(await g().saveEditAs(A)).toBe(false);
+    expect(g().toasts).toEqual([expect.objectContaining({ kind: 'error', text: 'Save as needs the desktop app' })]);
+    expect(g().pendingEdits).toEqual({ [A]: cropped });
+  });
+
+  it('Revert to original removes the saved edit from the photo info', async () => {
+    echoInfo();
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: [item({ info: { edit: cropped } })] });
+    expect(await g().revertEdit(A)).toBe(true);
+    expect(patches()).toEqual([{ path: A, patch: { edit: null }, job: 'j1' }]);
+    expect(g().items[0].info.edit).toBeUndefined();
+  });
+
+  it('tells the desktop app how many photos have unsaved edits, whenever that changes', () => {
+    const setUnsavedEdits = vi.fn();
+    desktopWith({ setUnsavedEdits });
+    expect(setUnsavedEdits).toHaveBeenLastCalledWith(0);
+    useGallery.setState({ pendingEdits: { [A]: cropped, [B]: turned } });
+    expect(setUnsavedEdits).toHaveBeenLastCalledWith(2);
+    g().discardEdit(A);
+    expect(setUnsavedEdits).toHaveBeenLastCalledWith(1);
+    g().close();
+    expect(setUnsavedEdits).toHaveBeenLastCalledWith(0);
+  });
+
+  it('leaving the page asks first only while there are unsaved edits', () => {
+    const e = { preventDefault: vi.fn(), returnValue: undefined as unknown };
+    guardUnload(e);
+    expect(e.preventDefault).not.toHaveBeenCalled();
+    useGallery.setState({ pendingEdits: { [A]: cropped } });
+    guardUnload(e);
+    expect(e.preventDefault).toHaveBeenCalledTimes(1);
+    expect(e.returnValue).toBe('');
+  });
+
+  it('loads where edits go at startup; a plain browser always keeps them in the info file', async () => {
+    desktopWith({ getEditTarget: async () => 'file', setEditTarget: async () => {}, saveEditToFile: async () => ({ ok: true }) });
+    await g().loadEditTarget();
+    expect(g().editTarget).toBe('file');
+    disconnect!();
+    disconnect = null;
+    vi.stubGlobal('localStorage', { getItem: () => 'file', setItem: () => {} });
+    await g().loadEditTarget();
+    expect(g().editTarget).toBe('info');
+    await g().setEditTarget('file');
+    expect(g().editTarget).toBe('info');
+  });
+
+  it('setEditTarget saves the choice through the desktop app at once', async () => {
+    const setEditTarget = vi.fn(async () => {});
+    desktopWith({ setEditTarget, saveEditToFile: async () => ({ ok: true }) });
+    await g().setEditTarget('file');
+    expect(g().editTarget).toBe('file');
+    expect(setEditTarget).toHaveBeenCalledWith('file');
+  });
+});
+
+describe('gallery store: leaving a folder with unsaved edits', () => {
+  const g = () => useGallery.getState();
+  const A = 'D:\\Trip\\a.jpg';
+  const cropped = { rotate: 0 as const, straighten: 0, crop: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 } };
+
+  function routesForOther() {
+    routes['POST /api/gallery/open'] = () => ({ status: 202, json: { jobId: 'j2' } });
+    routes['GET /api/gallery/recent'] = () => ({ json: [] });
+    routes['GET /api/gallery/jobs/j2'] = () => ({ json: { total: 1, processed: 1, startedAt: 0, done: true, errors: [], items: [item()] } });
+    routes['GET /api/gallery/stamp'] = () => ({ json: { stamp: 's' } });
+    routes['GET /api/gallery/items'] = () => ({ json: [item()] });
+  }
+
+  it('with nothing unsaved, opening and closing go ahead at once', async () => {
+    routesForOther();
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: [item()] });
+    await g().requestOpen('D:\\Other', false);
+    expect(g().root).toBe('D:\\Other');
+    expect(g().leaving).toBeNull();
+    g().requestClose();
+    expect(g().root).toBeNull();
+  });
+
+  it('with unsaved edits, opening asks first; Cancel keeps the folder and its edits', async () => {
+    routesForOther();
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: [item()], pendingEdits: { [A]: cropped } });
+    await g().requestOpen('D:\\Other', false);
+    expect(g().root).toBe('D:\\Trip');
+    expect(g().leaving).toEqual({ folder: 'D:\\Other', recursive: false });
+    g().cancelLeave();
+    expect(g().leaving).toBeNull();
+    expect(g().root).toBe('D:\\Trip');
+    expect(g().pendingEdits).toEqual({ [A]: cropped });
+    expect(count('POST', '/api/gallery/open')).toBe(0);
+
+    await g().requestOpen('D:\\Other', false);
+    await g().confirmLeave();
+    expect(g().leaving).toBeNull();
+    expect(g().root).toBe('D:\\Other');
+    expect(g().pendingEdits).toEqual({});
+  });
+
+  it('with unsaved edits, closing asks first', async () => {
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: [item()], pendingEdits: { [A]: cropped } });
+    g().requestClose();
+    expect(g().root).toBe('D:\\Trip');
+    expect(g().leaving).toBe('close');
+    await g().confirmLeave();
+    expect(g().root).toBeNull();
+    expect(g().leaving).toBeNull();
+  });
+
+  it('an edit in progress counts: it becomes an unsaved edit first', async () => {
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: [item()], selected: A, selection: [A] });
+    g().startEdit(A);
+    g().setEditDraft(cropped);
+    g().requestClose();
+    expect(g().editing).toBeNull();
+    expect(g().pendingEdits).toEqual({ [A]: cropped });
+    expect(g().leaving).toBe('close');
+  });
+
+  it('a folder handed over by the desktop app asks first too', () => {
+    let deliver: (folder: string) => void = () => {};
+    const stop = connectDesktop({ onOpenFolder: (cb: (f: string) => void) => ((deliver = cb), () => {}) });
+    try {
+      useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: [item()], pendingEdits: { [A]: cropped }, recursive: true });
+      deliver('D:\\Other');
+      expect(g().leaving).toEqual({ folder: 'D:\\Other', recursive: true });
+      expect(g().root).toBe('D:\\Trip');
+    } finally {
+      g().cancelLeave();
+      stop();
+    }
   });
 });
 

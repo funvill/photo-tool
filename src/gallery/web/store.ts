@@ -3,7 +3,8 @@ import type { DesktopApi } from '../../shared/desktopApi';
 import { filterItems, galleryFacts, sortItems, type GalleryFacts, type GalleryFilter, type GallerySortKey } from '../../core/gallerySort';
 import { clickSelect, dragPaths, flagTargets, nextAfterRemoval } from '../../core/galleryViewer';
 import { stackItems, type StackInfo } from '../../core/galleryStacks';
-import { IDENTITY_EDIT, parseEdit, type PhotoEdit } from '../../core/photoEdit';
+import { IDENTITY_EDIT, isIdentityEdit, parseEdit, type PhotoEdit } from '../../core/photoEdit';
+import { loadEditTarget, saveEditTarget, type EditTarget } from './editSettings';
 import { galleryApi, type GalleryItem, type JobUpdate, type RecentFolder } from './api';
 
 // The gallery's state: the open folder, its photos (filled in while the folder is read), the
@@ -53,8 +54,12 @@ export interface GalleryState {
   editing: string | null;
   /** Edits made in the page and not saved yet, by photo path. IDENTITY_EDIT here means "remove the saved edit". */
   pendingEdits: Record<string, PhotoEdit>;
-  /** Where a saved edit goes: the photo's info file (photoinfo.json's `edit`) or the photo file itself. */
-  editTarget: 'info' | 'file';
+  /** Where a saved edit goes: the photo's info file (photoinfo.json's `edit`) or the photo file itself. Always 'info' without the desktop app. */
+  editTarget: EditTarget;
+  /** A save of edits is on its way (the save buttons wait for it). */
+  saving: boolean;
+  /** Opening another folder (or closing this one) waits for "without saving?": what was asked for. */
+  leaving: { folder: string; recursive: boolean } | 'close' | null;
 
   loadRecent(): Promise<void>;
   open(folder: string, recursive: boolean): Promise<void>;
@@ -62,7 +67,7 @@ export interface GalleryState {
    * Save fields of a photo's info (a null value deletes the field). Resolves false, after an error toast
    * with the server's message, when it could not be saved; nothing is applied then.
    */
-  saveInfo(path: string, patch: Record<string, unknown>): Promise<boolean>;
+  saveInfo(path: string, patch: Record<string, unknown>, opts?: { quiet?: boolean }): Promise<boolean>;
   setStar(path: string, star: boolean): Promise<boolean>;
   /** Reload every photo's info (after another program changed a photoinfo.json). */
   refreshInfo(): Promise<void>;
@@ -106,6 +111,33 @@ export interface GalleryState {
   cancelEdit(): void;
   /** Drop a photo's unsaved edit. */
   discardEdit(path: string): void;
+  /**
+   * Edit mode reports the edit in progress (null: none) as it changes. Selecting another photo while
+   * editing is Done with it, as if Done had been pressed.
+   */
+  setEditDraft(edit: PhotoEdit | null): void;
+  /** Read where edits are saved (the desktop app's setting, else localStorage). */
+  loadEditTarget(): Promise<void>;
+  /** Change where edits are saved; kept at once. 'file' needs the desktop app. */
+  setEditTarget(target: EditTarget): Promise<void>;
+  /**
+   * Save a photo's unsaved edit: into its info file, or (photo-file mode) into the photo file itself through
+   * the desktop app. Resolves false, after an error toast, when it was not saved; the unsaved edit stays then.
+   */
+  saveEdit(path: string): Promise<boolean>;
+  /** Save the photo with its unsaved edit as a new file (desktop app). The original and its unsaved edit stay. */
+  saveEditAs(path: string): Promise<boolean>;
+  /** Save every unsaved edit, one after another, then say how it went in one toast. */
+  saveAllEdits(): Promise<void>;
+  /** Revert to original: remove the edit saved in the photo's info file. */
+  revertEdit(path: string): Promise<boolean>;
+  /** Open another folder, asking first (`leaving`) while there are unsaved edits. */
+  requestOpen(folder: string, recursive: boolean): Promise<void>;
+  /** Close the folder, asking first while there are unsaved edits. */
+  requestClose(): void;
+  /** "Without saving?" answered yes: open or close as asked. */
+  confirmLeave(): Promise<void>;
+  cancelLeave(): void;
   toast(kind: Toast['kind'], text: string): void;
   dismissToast(id: number): void;
 }
@@ -142,6 +174,17 @@ const withoutRelDir = ({ relDir: _dropped, ...rest }: GalleryFilter): GalleryFil
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+const baseName = (path: string) => path.split(/[\\/]/).pop() ?? path;
+/** Up to three names, then "…". */
+const someNames = (paths: string[]) => `${paths.slice(0, 3).map(baseName).join(', ')}${paths.length > 3 ? '…' : ''}`;
+
+/** HEIC can't be written: in photo-file mode such a photo is saved only as a copy (JPEG). */
+export const isHeic = (path: string) => /\.(heic|heif)$/i.test(path);
+export const HEIC_SAVE_NOTE = 'HEIC photos can only be saved as a copy';
+
+/** A GalleryItem from the desktop app (it hands back the server's reply untyped). */
+const asItem = (v: unknown): GalleryItem | null =>
+  v && typeof v === 'object' && typeof (v as GalleryItem).path === 'string' && typeof (v as GalleryItem).key === 'string' ? (v as GalleryItem) : null;
 
 let toastId = 0;
 // Each open() gets a new generation; timers of an older one stop at their next tick.
@@ -163,6 +206,14 @@ interface SaveQueue {
   latest: GalleryItem | null;
 }
 const saveQueues = new Map<string, SaveQueue>();
+// The desktop app's extras, as connectDesktop was handed them (undefined in a plain browser).
+let host: Partial<DesktopApi> | undefined;
+// The edit in progress in edit mode, as edit mode last reported it, for the photo being edited.
+let draft: { path: string; edit: PhotoEdit | null } | null = null;
+// Saves of edits on their way (the store's `saving` is true while any is).
+let savingCount = 0;
+/** Saving into the photo file needs the desktop app. */
+const canSaveToFile = () => !!host?.saveEditToFile;
 
 /** The list as it was before a change: its paths, and the stack whose face was the selected photo (null: none). */
 interface Before {
@@ -172,7 +223,12 @@ interface Before {
 
 const noSelection: Pick<GalleryState, 'selected' | 'selection' | 'anchor' | 'viewing'> = { selected: null, selection: [], anchor: null, viewing: null };
 /** A folder opened or closed: its unsaved edits, and edit mode, go with it. */
-const noEdits: Pick<GalleryState, 'editing' | 'pendingEdits'> = { editing: null, pendingEdits: {} };
+const noEdits: Pick<GalleryState, 'editing' | 'pendingEdits' | 'leaving'> = { editing: null, pendingEdits: {}, leaving: null };
+
+const without = (edits: Record<string, PhotoEdit>, path: string) => {
+  const { [path]: _dropped, ...others } = edits;
+  return others;
+};
 
 /** The same edit, to 1e-4 (null is no edit). */
 function sameEdit(a: PhotoEdit | null, b: PhotoEdit | null): boolean {
@@ -202,6 +258,59 @@ export function shownEdit(s: Pick<GalleryState, 'pendingEdits' | 'editTarget'>, 
   return s.pendingEdits[item.path] ?? savedEdit(s, item);
 }
 
+/** What can be done with a photo's edit now: the preview caption and the photo menu offer the same. */
+export interface EditActions {
+  /** It has an unsaved edit: Save and Save as… are offered. */
+  save: boolean;
+  /** Why Save is greyed out (a HEIC photo in photo-file mode), or null. */
+  saveBlocked: string | null;
+  saveTitle: string;
+  /** Why Save as… is greyed out (no desktop app), or null. */
+  saveAsBlocked: string | null;
+  /** Photos with an unsaved edit: Save all (N) while above 0. */
+  saveAll: number;
+  /** Revert to original: an edit saved in the info file (info-file mode), with nothing unsaved over it. */
+  revert: boolean;
+}
+
+export function editActions(s: Pick<GalleryState, 'pendingEdits' | 'editTarget'>, item: GalleryItem): EditActions {
+  const pending = item.path in s.pendingEdits;
+  const file = s.editTarget === 'file';
+  return {
+    save: pending,
+    saveBlocked: file && isHeic(item.path) ? HEIC_SAVE_NOTE : null,
+    saveTitle: file ? 'Save the edit into the photo file (the original goes to the Recycle Bin)' : "Save the edit in the photo's info file",
+    saveAsBlocked: host?.saveEditAs ? null : 'Save as needs the desktop app',
+    saveAll: Object.keys(s.pendingEdits).length,
+    revert: !pending && !file && parseSaved(item.info.edit) !== null,
+  };
+}
+
+/**
+ * The unsaved edits after Done on `path` with `edit` (null: none): it becomes the photo's unsaved edit,
+ * unless it is what is saved already, which clears any unsaved edit instead. A photo no longer in the
+ * list keeps none.
+ */
+function afterDone(s: GalleryState, path: string, edit: PhotoEdit | null): Record<string, PhotoEdit> {
+  const item = s.items.find((i) => i.path === path);
+  const others = without(s.pendingEdits, path);
+  if (!item || sameEdit(edit, savedEdit(s, item))) return others;
+  return { ...others, [path]: edit ?? IDENTITY_EDIT };
+}
+
+/**
+ * Leave edit mode as Done does, with the edit in progress edit mode last reported (when it reported
+ * none, the unsaved edits stay as they were). Nothing when not editing.
+ */
+function endEditAsDone(s: GalleryState): Partial<GalleryState> {
+  const path = s.editing;
+  if (path === null) return {};
+  const d = draft?.path === path ? draft : null;
+  draft = null;
+  if (d) return { editing: null, pendingEdits: afterDone(s, path, d.edit) };
+  return { editing: null, pendingEdits: s.items.some((i) => i.path === path) ? s.pendingEdits : without(s.pendingEdits, path) };
+}
+
 function stopTimers() {
   generation++;
   if (jobTimer) clearTimeout(jobTimer);
@@ -209,6 +318,7 @@ function stopTimers() {
   jobTimer = stampTimer = null;
   lastStamp = null;
   saved = [];
+  draft = null;
 }
 
 export const useGallery = create<GalleryState>()((set, get) => {
@@ -324,6 +434,65 @@ export const useGallery = create<GalleryState>()((set, get) => {
     }, STAMP_POLL_MS);
   };
 
+  /** Run a save of edits, with `saving` true while any is on its way. */
+  const busy = async <T,>(fn: () => Promise<T>): Promise<T> => {
+    if (savingCount++ === 0) set({ saving: true });
+    try {
+      return await fn();
+    } finally {
+      if (--savingCount === 0) set({ saving: false });
+    }
+  };
+
+  /** Put the server's new reading of a photo in the list (kept over a reload that was already on its way). */
+  const applyItem = (path: string, updated: GalleryItem) => {
+    set((s) => ({ items: s.items.map((i) => (i.path === path ? updated : i)) }));
+    saveSeq++;
+    if (reloading > 0) saved.push({ seq: saveSeq, item: updated });
+  };
+
+  /** Save one photo's unsaved edit (see saveEdit). Quiet: no error toast (Save all says it once). */
+  const saveOne = async (path: string, quiet: boolean): Promise<boolean> => {
+    const s = get();
+    const edit = s.pendingEdits[path];
+    if (!edit) return true;
+    const fail = (text: string) => {
+      if (!quiet) get().toast('error', text);
+      return false;
+    };
+    if (s.editTarget === 'info') {
+      const ok = await get().saveInfo(path, { edit: isIdentityEdit(edit) ? null : edit }, { quiet });
+      // Changed again while the save was on its way: that newer edit is still unsaved.
+      if (ok && get().pendingEdits[path] === edit) set((x) => ({ pendingEdits: without(x.pendingEdits, path) }));
+      return ok;
+    }
+    if (isHeic(path)) return fail(HEIC_SAVE_NOTE);
+    // No edit, in photo-file mode: the file is as it should be already.
+    if (isIdentityEdit(edit)) {
+      set((x) => ({ pendingEdits: without(x.pendingEdits, path) }));
+      return true;
+    }
+    const saveToFile = host?.saveEditToFile;
+    if (!saveToFile) return fail('Saving into the photo file needs the desktop app');
+    const gen = generation;
+    let r: Awaited<ReturnType<typeof saveToFile>>;
+    try {
+      r = await saveToFile(path, edit);
+    } catch (e) {
+      return fail(`Couldn't save the photo: ${message(e)}`);
+    }
+    if (!r.ok && !r.saved) return fail(r.error ?? "Couldn't save the photo.");
+    if (gen !== generation) return true;
+    // The file now carries the edit: an unsaved edit left on it (even one changed meanwhile) would be applied twice.
+    set((x) => ({ pendingEdits: without(x.pendingEdits, path) }));
+    const updated = r.ok ? asItem(r.item) : null;
+    if (updated) applyItem(path, updated);
+    else await get().refreshInfo();
+    // Replaced, but a later step failed (reading it again, say): said even in Save all, as the photo was saved.
+    if (!r.ok) get().toast('error', r.error ?? 'The photo was saved, but the gallery could not read it again.');
+    return true;
+  };
+
   return {
     job: null,
     root: null,
@@ -343,6 +512,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
     view: 'grid',
     ...noEdits,
     editTarget: 'info',
+    saving: false,
 
     async loadRecent() {
       try {
@@ -374,7 +544,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
       await pollJob(gen, job);
     },
 
-    async saveInfo(path, patch) {
+    async saveInfo(path, patch, opts) {
       const job = get().job;
       const gen = generation;
       let queue = saveQueues.get(path);
@@ -391,7 +561,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
           if (job && current(gen, job) && stamp && lastStamp !== null && stamp.before === lastStamp) lastStamp = stamp.after;
           return true;
         } catch (e) {
-          get().toast('error', message(e));
+          if (!opts?.quiet) get().toast('error', message(e));
           return false;
         }
       };
@@ -435,16 +605,17 @@ export const useGallery = create<GalleryState>()((set, get) => {
       }
     },
 
-    // Another photo selected while one is being edited (a click on a tile, the photo deleted or filtered
-    // out) ends edit mode as Cancel does: the preview moves on to the new photo.
+    // Another photo selected while one is being edited (a click on a tile or a marker, the photo menu, the
+    // photo deleted or filtered out) ends edit mode as Done does: what was done is kept as an unsaved edit,
+    // and the preview moves on to the new photo.
     select(path) {
-      set((s) => ({ selected: path, selection: path === null ? [] : [path], anchor: path, editing: s.editing === path ? s.editing : null }));
+      set((s) => ({ selected: path, selection: path === null ? [] : [path], anchor: path, ...(s.editing === path ? {} : endEditAsDone(s)) }));
     },
 
     clickSelect(path, mods) {
       const s = get();
       const next = clickSelect(selectVisible(s).map((i) => i.path), s, path, mods);
-      set({ ...next, editing: s.editing !== null && next.selected === s.editing ? s.editing : null });
+      set({ ...next, ...(next.selected === s.editing ? {} : endEditAsDone(s)) });
     },
 
     openViewer(path) {
@@ -542,6 +713,32 @@ export const useGallery = create<GalleryState>()((set, get) => {
       set({ job: null, root: null, items: [], openStacks: [], progress: null, ...noSelection, ...noEdits, tidyOpen: false });
     },
 
+    async requestOpen(folder, recursive) {
+      set((s) => endEditAsDone(s));
+      if (Object.keys(get().pendingEdits).length) {
+        set({ leaving: { folder, recursive } });
+        return;
+      }
+      await get().open(folder, recursive);
+    },
+
+    requestClose() {
+      set((s) => endEditAsDone(s));
+      if (Object.keys(get().pendingEdits).length) set({ leaving: 'close' });
+      else get().close();
+    },
+
+    async confirmLeave() {
+      const leaving = get().leaving;
+      set({ leaving: null });
+      if (leaving === 'close') get().close();
+      else if (leaving) await get().open(leaving.folder, leaving.recursive);
+    },
+
+    cancelLeave() {
+      set({ leaving: null });
+    },
+
     setTidyOpen(tidyOpen) {
       set({ tidyOpen });
     },
@@ -563,26 +760,109 @@ export const useGallery = create<GalleryState>()((set, get) => {
     },
 
     startEdit(path) {
-      set({ editing: path });
+      // Editing another photo: that one is Done first.
+      set((s) => (s.editing === path ? {} : { ...endEditAsDone(s), editing: path }));
     },
 
     finishEdit(edit) {
       const s = get();
       const path = s.editing;
       if (path === null) return;
-      const item = s.items.find((i) => i.path === path);
-      const { [path]: _old, ...others } = s.pendingEdits;
-      const unchanged = sameEdit(edit, item ? savedEdit(s, item) : null);
-      set({ editing: null, pendingEdits: unchanged ? others : { ...others, [path]: edit ?? IDENTITY_EDIT } });
+      draft = null;
+      set({ editing: null, pendingEdits: afterDone(s, path, edit) });
     },
 
     cancelEdit() {
+      draft = null;
       set({ editing: null });
     },
 
     discardEdit(path) {
-      const { [path]: dropped, ...others } = get().pendingEdits;
-      if (dropped) set({ pendingEdits: others });
+      if (path in get().pendingEdits) set((s) => ({ pendingEdits: without(s.pendingEdits, path) }));
+    },
+
+    setEditDraft(edit) {
+      const path = get().editing;
+      if (path !== null) draft = { path, edit };
+    },
+
+    async loadEditTarget() {
+      const target = await loadEditTarget(host);
+      set({ editTarget: canSaveToFile() ? target : 'info' });
+    },
+
+    async setEditTarget(target) {
+      const editTarget = target === 'file' && canSaveToFile() ? 'file' : 'info';
+      set({ editTarget });
+      try {
+        await saveEditTarget(host, editTarget);
+      } catch (e) {
+        get().toast('error', `Couldn't keep the setting: ${message(e)}`);
+      }
+    },
+
+    saveEdit(path) {
+      return busy(() => saveOne(path, false));
+    },
+
+    async saveEditAs(path) {
+      const saveAs = host?.saveEditAs;
+      if (!saveAs) {
+        get().toast('error', 'Save as needs the desktop app');
+        return false;
+      }
+      const s = get();
+      const item = s.items.find((i) => i.path === path);
+      const edit = item ? shownEdit(s, item) : null;
+      if (!item || !edit) return false;
+      const gen = generation;
+      return busy(async () => {
+        let r: Awaited<ReturnType<typeof saveAs>>;
+        try {
+          r = await saveAs(path, edit, item.info);
+        } catch (e) {
+          get().toast('error', `Couldn't save the copy: ${message(e)}`);
+          return false;
+        }
+        if (r.cancelled) return false;
+        // A copy inside the open folder joins the grid (the original, and its unsaved edit, stay as they are).
+        const copy = asItem(r.item);
+        if (copy && gen === generation) set((x) => ({ items: x.items.some((i) => i.path === copy.path) ? x.items.map((i) => (i.path === copy.path ? copy : i)) : [...x.items, copy] }));
+        if (r.ok) {
+          get().toast('success', `Saved a copy as ${baseName(r.savedPath ?? copy?.path ?? '')}`);
+          return true;
+        }
+        // Written, but a later step failed (its info, reading it): show the folder as it is now.
+        if (r.saved && gen === generation) await get().refreshInfo();
+        get().toast('error', r.error ?? "Couldn't save the copy.");
+        return false;
+      });
+    },
+
+    async saveAllEdits() {
+      const s = get();
+      const paths = Object.keys(s.pendingEdits);
+      if (!paths.length) return;
+      const gen = generation;
+      const skipped = s.editTarget === 'file' ? paths.filter(isHeic) : [];
+      let ok = 0;
+      const failed: string[] = [];
+      await busy(async () => {
+        for (const path of paths) {
+          if (gen !== generation) return;
+          if (skipped.includes(path)) continue;
+          if (await saveOne(path, true)) ok++;
+          else failed.push(path);
+        }
+      });
+      if (gen !== generation) return;
+      let text = failed.length ? `Saved ${ok}, ${failed.length} failed: ${someNames(failed)}` : `Saved ${plural(ok, 'photo')}`;
+      if (skipped.length) text += `. Skipped ${someNames(skipped)}: ${HEIC_SAVE_NOTE}`;
+      get().toast(failed.length ? 'error' : skipped.length ? 'info' : 'success', text);
+    },
+
+    revertEdit(path) {
+      return busy(() => get().saveInfo(path, { edit: null }));
     },
 
     toast(kind, text) {
@@ -743,11 +1023,33 @@ export const useFilteredItems = (): GalleryItem[] => useGallery((s) => selectFil
  * Open folder), with the current "Include subfolders" choice, and show a drag that could not start
  * as an error. Returns a function that stops listening.
  */
-export function connectDesktop(d: Pick<DesktopApi, 'onOpenFolder' | 'onDragFailed'> | undefined): () => void {
-  const stopFolders = d?.onOpenFolder?.((folder) => void useGallery.getState().open(folder, useGallery.getState().recursive));
+export function connectDesktop(d: Partial<DesktopApi> | undefined): () => void {
+  host = d;
+  // A folder from outside asks first, as Open folder does, while there are unsaved edits.
+  const stopFolders = d?.onOpenFolder?.((folder) => void useGallery.getState().requestOpen(folder, useGallery.getState().recursive));
   const stopDrags = d?.onDragFailed?.((message) => useGallery.getState().toast('error', message));
+  // The desktop app asks before the window closes while this count is above 0.
+  const report = () => d?.setUnsavedEdits?.(Object.keys(useGallery.getState().pendingEdits).length);
+  report();
+  const stopCount = d?.setUnsavedEdits ? useGallery.subscribe((s, prev) => void (s.pendingEdits !== prev.pendingEdits && report())) : undefined;
+  const win = typeof window === 'undefined' ? undefined : window;
+  win?.addEventListener('beforeunload', guardUnload);
   return () => {
     stopFolders?.();
     stopDrags?.();
+    stopCount?.();
+    win?.removeEventListener('beforeunload', guardUnload);
+    if (host === d) host = undefined;
   };
+}
+
+/**
+ * The page's `beforeunload`: held back while there are unsaved edits. A browser then asks; the desktop
+ * app (which sees the page held back) asks "Close without saving?" in its own dialog.
+ */
+export function guardUnload(e: { preventDefault(): void; returnValue?: unknown }) {
+  if (Object.keys(useGallery.getState().pendingEdits).length === 0) return;
+  e.preventDefault();
+  // Some browsers ask only when this is set.
+  e.returnValue = '';
 }
