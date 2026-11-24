@@ -51,7 +51,9 @@ export function CleanupDialog({ onClose, usage }: { onClose: () => void; usage: 
     const st = useEditor.getState();
     try {
       for (let i = 0; i < changes.length; i += 8) {
-        await Promise.all(changes.slice(i, i + 8).map((id) => st.patchAsset(id, { excluded: hide.has(id) })));
+        const saved = await Promise.all(changes.slice(i, i + 8).map((id) => st.patchAsset(id, { excluded: hide.has(id) })));
+        // A refused change has already been shown as an error: stay open so it can be tried again.
+        if (saved.includes(false)) return;
       }
       st.toast('success', `${toHide ? `Hid ${toHide} photo${toHide === 1 ? '' : 's'}` : ''}${toHide && toShow ? ' · ' : ''}${toShow ? `brought back ${toShow}` : ''}. Hidden photos stay in the library (Hidden filter) and on any page they are already on.`);
       onClose();

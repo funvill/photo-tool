@@ -93,7 +93,8 @@ interface EditorState {
   setCrop(id: string | null): void;
   setSwapSource(sel: Selection | null): void;
   refreshAssets(): Promise<void>;
-  patchAsset(assetId: string, patch: { rating?: number; favorite?: boolean; excluded?: boolean }): Promise<void>;
+  /** Resolves false (after an error toast with the server's message) when the change could not be saved. */
+  patchAsset(assetId: string, patch: { rating?: number; favorite?: boolean; excluded?: boolean }): Promise<boolean>;
   /** Import a folder; `link` also keeps it in sync from now on. */
   startImport(folder: string, opts?: { link?: boolean }): Promise<void>;
   /**
@@ -335,12 +336,20 @@ export const useEditor = create<EditorState>((set, get) => ({
 
   async patchAsset(assetId, patch) {
     const { projectId } = get();
-    if (!projectId) return;
-    const updated = await api.patchAsset(projectId, assetId, patch);
+    if (!projectId) return false;
+    let updated: PhotoAsset;
+    try {
+      updated = await api.patchAsset(projectId, assetId, patch);
+    } catch (e) {
+      // e.g. the star can't be saved to photoinfo.json: say why and leave the photo as it was.
+      get().toast('error', e instanceof Error ? e.message : String(e));
+      return false;
+    }
     set((s) => {
       const assets = s.assets.map((a) => (a.id === assetId ? updated : a));
       return { assets, assetMap: new Map(assets.map((a) => [a.id, a])) };
     });
+    return true;
   },
 
   async startImport(folder, opts) {
