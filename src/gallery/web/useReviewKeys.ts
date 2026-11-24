@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { gridStep } from '../../core/galleryViewer';
-import { selectFiltered, selectVisible, useGallery } from './store';
+import { selectablePaths, selectFiltered, selectVisible, useGallery } from './store';
 
 /** Where keys belong to what has focus (typing, a menu, a dialog), not to the review. */
 const TYPING = 'input, textarea, select, [contenteditable="true"], [role="dialog"]';
@@ -44,7 +44,8 @@ export function useReviewKeys(onOpen: (path: string) => void) {
 
       if (e.key === 'Enter' || e.key === ' ') {
         if (e.repeat || !s.selected || inside(e, PRESSABLE)) return;
-        if (!selectVisible(s).some((i) => i.path === s.selected)) return;
+        // On the map the selected photo may be folded into a stack: the viewer unfolds it.
+        if (!selectablePaths(s).includes(s.selected)) return;
         e.preventDefault();
         onOpen(s.selected);
         return;

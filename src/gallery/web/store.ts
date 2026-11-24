@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { DesktopApi } from '../../shared/desktopApi';
 import { filterItems, galleryFacts, sortItems, type GalleryFacts, type GalleryFilter, type GallerySortKey } from '../../core/gallerySort';
-import { clickSelect, flagTargets, nextAfterRemoval } from '../../core/galleryViewer';
+import { clickSelect, dragPaths, flagTargets, nextAfterRemoval } from '../../core/galleryViewer';
 import { stackItems, type StackInfo } from '../../core/galleryStacks';
 import { galleryApi, type GalleryItem, type JobUpdate, type RecentFolder } from './api';
 
@@ -146,6 +146,12 @@ interface SaveQueue {
 }
 const saveQueues = new Map<string, SaveQueue>();
 
+/** The list as it was before a change: its paths, and the stack whose face was the selected photo (null: none). */
+interface Before {
+  paths: string[];
+  topOf: string | null;
+}
+
 const noSelection: Pick<GalleryState, 'selected' | 'selection' | 'anchor' | 'viewing'> = { selected: null, selection: [], anchor: null, viewing: null };
 
 function stopTimers() {
@@ -202,13 +208,32 @@ export const useGallery = create<GalleryState>()((set, get) => {
     if (job && progress) void galleryApi.cancel(job).catch(() => {});
   };
 
-  /** After a filter change: photos it hides leave the selection (what a drag would take). */
-  /** After photos left the list (hidden, deleted, filtered out): move the selection on from `before`, the list as it was. */
-  const settleSelection = (before: string[]) => {
+  /** What settleSelection needs to know of the list as it was, taken before the change. */
+  const snapshot = (): Before => {
+    const s = get();
+    const stack = s.selected === null ? undefined : selectStackInfo(s).get(s.selected);
+    return { paths: selectablePaths(s), topOf: stack?.top ? stack.id : null };
+  };
+
+  /**
+   * After photos left the list (hidden, deleted, filtered out, folded away): move the selection on from
+   * the list as it was. A stack's face that left gives way to the stack's new face; any other photo to
+   * the one now in its place. Photos no longer shown leave the selection (what a drag would take).
+   */
+  const settleSelection = (before: Before) => {
     const s = get();
     const after = selectablePaths(s);
     if (s.selected !== null && !after.includes(s.selected)) {
-      get().select(nextAfterRemoval(before, after, s.selected));
+      let next: string | null = null;
+      if (before.topOf !== null && s.view === 'grid') {
+        for (const [path, info] of selectStackInfo(s)) if (info.id === before.topOf && info.top) next = path;
+        // One member left: a plain tile now, still the stack's photo.
+        if (next === null) {
+          const facts = selectFacts(s);
+          next = after.find((p) => facts.get(p)?.groupId === before.topOf) ?? null;
+        }
+      }
+      get().select(next ?? nextAfterRemoval(before.paths, after, s.selected));
       return;
     }
     const shown = new Set(after);
@@ -216,12 +241,11 @@ export const useGallery = create<GalleryState>()((set, get) => {
     if (selection.length !== s.selection.length) set({ selection });
   };
 
-  const pruneSelection = () => {
+  /** Unfold the stacks of these photos where they are folded away (picked on the map), so the grid shows them. */
+  const unfoldFor = (paths: string[]) => {
     const s = get();
-    if (!s.selection.length) return;
-    const shown = new Set(selectablePaths(s));
-    const selection = s.selection.filter((p) => shown.has(p));
-    if (selection.length !== s.selection.length) set({ selection });
+    const ids = foldedStackIds(s, paths).filter((id) => !s.openStacks.includes(id));
+    if (ids.length) set({ openStacks: [...s.openStacks, ...ids] });
   };
 
   /** Once the folder is read, and then every 3 s: has any photoinfo.json of this folder changed? Then reload the photos' info, once. */
@@ -371,6 +395,8 @@ export const useGallery = create<GalleryState>()((set, get) => {
     },
 
     openViewer(path) {
+      // A photo folded into a stack (picked on the map) is shown unfolded: the viewer steps through the grid's list.
+      unfoldFor([path]);
       set({ viewing: path });
     },
 
@@ -393,17 +419,19 @@ export const useGallery = create<GalleryState>()((set, get) => {
     },
 
     setFilter(patch) {
+      const before = snapshot();
       set((s) => {
         const filter: GalleryFilter = { ...s.filter, ...patch };
         for (const k of Object.keys(filter) as (keyof GalleryFilter)[]) if (filter[k] === undefined) delete filter[k];
         return { filter };
       });
-      pruneSelection();
+      settleSelection(before);
     },
 
     clearFilter() {
+      const before = snapshot();
       set({ filter: {} });
-      pruneSelection();
+      settleSelection(before);
     },
 
     setRecursive(recursive) {
@@ -411,14 +439,22 @@ export const useGallery = create<GalleryState>()((set, get) => {
     },
 
     setStacked(stacked) {
-      const before = selectablePaths(get());
+      const before = snapshot();
       set({ stacked });
       settleSelection(before);
     },
 
     toggleStack(id) {
-      const before = selectablePaths(get());
-      set((s) => ({ openStacks: s.openStacks.includes(id) ? s.openStacks.filter((o) => o !== id) : [...s.openStacks, id] }));
+      const s = get();
+      const before = snapshot();
+      const folding = s.openStacks.includes(id);
+      const member = s.selected === null ? undefined : selectStackInfo(s).get(s.selected);
+      set({ openStacks: folding ? s.openStacks.filter((o) => o !== id) : [...s.openStacks, id] });
+      // Folding the stack the selected photo is in: its face takes the selection.
+      if (folding && member?.id === id && !member.top && s.view === 'grid') {
+        for (const [path, info] of selectStackInfo(get())) if (info.id === id && info.top) get().select(path);
+        return;
+      }
       settleSelection(before);
     },
 
@@ -427,7 +463,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
       const byPath = new Map(s.items.map((i) => [i.path, i]));
       const targets = flagTargets(s.selection, s.selected, (p) => byPath.get(p)?.info[field] === true);
       if (!targets) return;
-      const before = selectablePaths(s);
+      const before = snapshot();
       await Promise.all(
         targets.paths.map((p) => (field === 'star' ? get().setStar(p, targets.value) : get().saveInfo(p, { hidden: targets.value ? true : null }))),
       );
@@ -435,7 +471,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
     },
 
     removeItems(paths) {
-      const before = selectablePaths(get());
+      const before = snapshot();
       const gone = new Set(paths);
       set((s) => ({ items: s.items.filter((i) => !gone.has(i.path)) }));
       settleSelection(before);
@@ -457,7 +493,14 @@ export const useGallery = create<GalleryState>()((set, get) => {
     },
 
     setView(view) {
-      if (view !== get().view) set({ view });
+      const s = get();
+      if (view === s.view) return;
+      // Photos picked on the map may be folded into a stack on the grid: their stacks unfold, so the
+      // selection stays as it was and in view.
+      if (view === 'grid') unfoldFor(s.selected === null ? s.selection : [...s.selection, s.selected]);
+      const before = snapshot();
+      set({ view });
+      settleSelection(before);
     },
 
     toast(kind, text) {
@@ -481,8 +524,31 @@ const NO_STACKS = new Map<string, StackInfo>();
 let factsMemo: { items: GalleryItem[]; facts: Map<string, GalleryFacts>; at: number } | null = null;
 let visibleMemo: {
   items: GalleryItem[]; sort: GallerySortKey; filter: GalleryFilter; stacked: boolean; openStacks: string[] | undefined;
-  filtered: GalleryItem[]; visible: GalleryItem[]; stackOf: Map<string, StackInfo>; stale: boolean;
+  filtered: GalleryItem[]; visible: GalleryItem[]; stackOf: Map<string, StackInfo>; facts: Map<string, GalleryFacts>; stale: boolean;
 } | null = null;
+
+const sameAnalysis = (a: GalleryItem['analysis'], b: GalleryItem['analysis']) => a === b || (!!a && !!b && JSON.stringify(a) === JSON.stringify(b));
+
+/**
+ * True when the facts of `b` are those of `a`: the same photos in the same order, each with the same
+ * name, size, date, star and analysis (all galleryFacts reads). A save (H, a description, a place)
+ * replaces one photo with the server's reply and leaves these alone but for a star or a date, so the
+ * costly grouping of bursts is not redone for it.
+ */
+function sameFactsInput(a: GalleryItem[], b: GalleryItem[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (x === y) continue;
+    if (
+      x.path !== y.path || x.fileName !== y.fileName || x.size !== y.size || x.width !== y.width || x.height !== y.height ||
+      x.effectiveDate !== y.effectiveDate || (x.info.star === true) !== (y.info.star === true) || !sameAnalysis(x.analysis, y.analysis)
+    ) return false;
+  }
+  return true;
+}
 /** While a folder is still being read, facts are refreshed at most this often. */
 const FACTS_SCAN_THROTTLE_MS = 2000;
 
@@ -497,6 +563,7 @@ export function selectVisible(s: VisibleInput): GalleryItem[] {
   if (withFacts) {
     const now = Date.now();
     // Mid-scan the list grows every half second: keep the last facts (new photos have none yet) for a while.
+    if (factsMemo && factsMemo.items !== s.items && sameFactsInput(factsMemo.items, s.items)) factsMemo = { ...factsMemo, items: s.items };
     const fresh = factsMemo?.items === s.items || (!!s.progress && !!factsMemo && now >= factsMemo.at && now - factsMemo.at < FACTS_SCAN_THROTTLE_MS);
     if (!fresh) factsMemo = { items: s.items, facts: galleryFacts(s.items), at: now };
     facts = factsMemo!.facts;
@@ -506,7 +573,7 @@ export function selectVisible(s: VisibleInput): GalleryItem[] {
   const visible = folded ? folded.items : sorted;
   // Built from stale facts: remembered (the selector must return the same list for the same state), but redone once the scan ends.
   const stale = withFacts && factsMemo?.items !== s.items;
-  visibleMemo = { items: s.items, sort: s.sort, filter: s.filter, stacked, openStacks: s.openStacks, filtered: sorted, visible, stackOf: folded ? folded.stackOf : NO_STACKS, stale };
+  visibleMemo = { items: s.items, sort: s.sort, filter: s.filter, stacked, openStacks: s.openStacks, filtered: sorted, visible, stackOf: folded ? folded.stackOf : NO_STACKS, facts, stale };
   return visible;
 }
 
@@ -525,12 +592,61 @@ export function selectFiltered(s: VisibleInput): GalleryItem[] {
   return visibleMemo!.filtered;
 }
 
+/** The facts the visible list was built from (empty when nothing needed them): same memo as selectVisible. */
+export function selectFacts(s: VisibleInput): Map<string, GalleryFacts> {
+  selectVisible(s);
+  return visibleMemo!.facts;
+}
+
 /**
  * Where the selection may rest: the grid's tiles, or (on the map, where every shown photo has its own
- * marker) every photo that passes the filter, stacks unfolded.
+ * marker) every photo that passes the filter, stacks unfolded. The list the user is looking at.
  */
-function selectablePaths(s: VisibleInput & Pick<GalleryState, 'view'>): string[] {
+export function selectablePaths(s: VisibleInput & Pick<GalleryState, 'view'>): string[] {
   return (s.view === 'map' ? selectFiltered(s) : selectVisible(s)).map((i) => i.path);
+}
+
+/**
+ * What the photo menu's Copy path and Delete take when `path` is right-clicked: every selected photo,
+ * in the order of the list the user is looking at (the map's list, folded members included, on the
+ * map), when `path` is one of them; else just `path`.
+ */
+export function menuTargets(path: string): string[] {
+  const s = useGallery.getState();
+  const targets = dragPaths(selectablePaths(s), s.selection, path);
+  return targets.length ? targets : [path];
+}
+
+/** The stacks these photos are folded away in (they pass the filter but have no tile of their own). */
+function foldedStackIds(s: VisibleInput, paths: string[]): string[] {
+  if (!s.stacked || !paths.length) return [];
+  const tiles = new Set(selectVisible(s).map((i) => i.path));
+  const shown = new Set(selectFiltered(s).map((i) => i.path));
+  const facts = selectFacts(s);
+  const ids = new Set<string>();
+  for (const p of paths) {
+    const id = facts.get(p)?.groupId;
+    if (id && shown.has(p) && !tiles.has(p)) ids.add(id);
+  }
+  return [...ids];
+}
+
+/**
+ * A photo's place in its stack, folded or not: the face is 1, the other members follow in the shown
+ * order (as the grid shows them once the stack is unfolded). Null when the photo is in no stack.
+ */
+export function selectStackPlace(s: VisibleInput, path: string): { place: number; size: number } | null {
+  if (!s.stacked) return null;
+  const facts = selectFacts(s);
+  const id = facts.get(path)?.groupId;
+  if (!id) return null;
+  let top: string | null = null;
+  for (const [p, info] of selectStackInfo(s)) if (info.id === id && info.top) top = p;
+  if (top === null) return null;
+  const members = selectFiltered(s).filter((i) => i.path !== top && facts.get(i.path)?.groupId === id).map((i) => i.path);
+  const order = [top, ...members];
+  const at = order.indexOf(path);
+  return at < 0 ? null : { place: at + 1, size: order.length };
 }
 
 /** The photos to show, in order: the grid and the viewer step through this one list. */

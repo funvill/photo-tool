@@ -105,14 +105,20 @@ export function flagTargets(selection: readonly string[], selected: string | nul
   return { paths, value: !current(selected) };
 }
 
-/** The photo to select once some photos are gone (deleted, hidden): the same one if it is still there, else the next remaining one, else the previous, else none. */
+/**
+ * The photo to select once some photos are gone (deleted, hidden, folded away): the same one if it is
+ * still there, else the photo now in its place (the photos before it that stayed keep their places, so
+ * that is `after[k]`, k = how many of them stayed), else the last one, else none. By place rather than
+ * by "the next photo of `before`": a photo can come in as another leaves (a stack's new face), and it
+ * belongs in the gap.
+ */
 export function nextAfterRemoval(before: readonly string[], after: readonly string[], selected: string | null): string | null {
-  if (selected === null) return null;
+  if (selected === null || after.length === 0) return null;
   const left = new Set(after);
   if (left.has(selected)) return selected;
   const at = before.indexOf(selected);
   if (at < 0) return null;
-  for (let i = at + 1; i < before.length; i++) if (left.has(before[i])) return before[i];
-  for (let i = at - 1; i >= 0; i--) if (left.has(before[i])) return before[i];
-  return null;
+  let k = 0;
+  for (let i = 0; i < at; i++) if (left.has(before[i])) k++;
+  return after[Math.min(k, after.length - 1)];
 }

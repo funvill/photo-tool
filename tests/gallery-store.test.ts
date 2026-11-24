@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GalleryItem } from '../src/gallery/server/app';
 
-const { useGallery, connectDesktop, selectVisible, selectStackInfo, selectFiltered } = await import('../src/gallery/web/store');
+const { useGallery, connectDesktop, selectVisible, selectStackInfo, selectFiltered, selectFacts, selectStackPlace, menuTargets } = await import('../src/gallery/web/store');
 
 function item(over: Partial<GalleryItem> = {}): GalleryItem {
   return {
@@ -444,7 +444,7 @@ describe('gallery store', () => {
     const photos = (...names: string[]) => names.map((n) => item({ path: n, fileName: `${n}.jpg`, key: n }));
     const g = () => useGallery.getState();
     const setup = (items: GalleryItem[], selected: string | null, extra: Record<string, unknown> = {}) =>
-      useGallery.setState({ job: 'j1', root: 'D:\Trip', items, sort: 'name', filter: {}, stacked: false, openStacks: [], selected, selection: selected ? [selected] : [], anchor: selected, ...extra });
+      useGallery.setState({ job: 'j1', root: 'D:\Trip', items, sort: 'name', filter: {}, stacked: false, openStacks: [], view: 'grid', selected, selection: selected ? [selected] : [], anchor: selected, ...extra });
     /** A server that applies the patch to the photo it is for and answers with it. */
     const serve = () => {
       const saved: { path: string; patch: Record<string, unknown> }[] = [];
@@ -547,7 +547,7 @@ describe('gallery store', () => {
       expect(selectFiltered(g())).toBe(selectFiltered(g()));
     });
 
-    it('on the map a photo folded into a stack keeps the selection when the filter changes; on the grid it moves on', () => {
+    it('on the map a photo folded into a stack keeps the selection when the filter changes', () => {
       setup([burst('a', '2026-01-01T10:00:00'), burst('b', '2026-01-01T10:00:01'), ...photos('z')], null, { stacked: true });
       const folded = selectFiltered(g()).find((i) => !selectVisible(g()).includes(i))!.path;
       g().setView('map');
@@ -557,9 +557,99 @@ describe('gallery store', () => {
       g().toggleStack('nothing');
       expect(g().selected).toBe(folded);
       expect(g().selection).toEqual([folded]);
+    });
+
+    it('map to grid with a folded member selected unfolds its stack: still selected, and shown', () => {
+      setup([burst('a', '2026-01-01T10:00:00'), burst('b', '2026-01-01T10:00:01'), ...photos('z')], null, { stacked: true, view: 'map' });
+      const folded = selectFiltered(g()).find((i) => !selectVisible(g()).includes(i))!.path;
+      g().select(folded);
+      expect(selectStackPlace(g(), folded)).toEqual({ place: 2, size: 2 });
       g().setView('grid');
+      expect(g().selected).toBe(folded);
+      expect(g().selection).toEqual([folded]);
+      expect(selectVisible(g()).map((i) => i.path)).toContain(folded);
+      expect(selectStackInfo(g()).get(folded)).toMatchObject({ open: true, top: false });
+      expect(selectStackPlace(g(), folded)).toEqual({ place: 2, size: 2 });
       g().setFilter({ starred: undefined });
-      expect(g().selection).toEqual([]);
+      expect(g().selection).toEqual([folded]);
+    });
+
+    it('the viewer opened on a folded member unfolds its stack, so it steps from that photo', () => {
+      setup([burst('a', '2026-01-01T10:00:00'), burst('b', '2026-01-01T10:00:01'), ...photos('z')], null, { stacked: true, view: 'map' });
+      const folded = selectFiltered(g()).find((i) => !selectVisible(g()).includes(i))!.path;
+      g().select(folded);
+      g().openViewer(folded);
+      expect(g().viewing).toBe(folded);
+      expect(selectVisible(g()).map((i) => i.path)).toContain(folded);
+    });
+
+    it("on the map the menu's targets are the selected photos as the map lists them, folded members included", () => {
+      setup([burst('a', '2026-01-01T10:00:00'), burst('b', '2026-01-01T10:00:01'), ...photos('z')], null, { stacked: true, view: 'map' });
+      const folded = selectFiltered(g()).find((i) => !selectVisible(g()).includes(i))!.path;
+      g().select(folded);
+      expect(menuTargets(folded)).toEqual([folded]);
+      useGallery.setState({ selection: ['z', folded] });
+      expect(menuTargets(folded)).toEqual(selectFiltered(g()).map((i) => i.path).filter((p) => p === 'z' || p === folded));
+      // A photo not among the selected: just it.
+      g().select(folded);
+      expect(menuTargets('z')).toEqual(['z']);
+    });
+
+    it("H on a folded stack's face selects the stack's new face, not the photo after the stack", async () => {
+      // By name: the burst a, b sorts first, then z. The face is a (the keeper or the first).
+      setup([burst('a', '2026-01-01T10:00:00'), burst('b', '2026-01-01T10:00:01'), ...photos('z')], null, { stacked: true });
+      const face = selectVisible(g())[0].path;
+      const other = face === 'a' ? 'b' : 'a';
+      g().select(face);
+      serve();
+      await g().toggleFlag('hidden');
+      expect(g().selected).toBe(other);
+      expect(selectVisible(g()).map((i) => i.path)).toEqual([other, 'z']);
+    });
+
+    it("H on a stack's face whose new face sorts elsewhere still selects the new face", async () => {
+      // Starred b is the face; hiding it makes the keeper the face, wherever it sorts.
+      setup([burst('a', '2026-01-01T10:00:00'), { ...burst('m', '2026-01-01T10:00:01'), info: { star: true } }, ...photos('c')], 'm', { stacked: true });
+      expect(selectVisible(g()).map((i) => i.path)).toEqual(['c', 'm']);
+      serve();
+      await g().toggleFlag('hidden');
+      expect(selectVisible(g()).map((i) => i.path)).toEqual(['a', 'c']);
+      expect(g().selected).toBe('a');
+    });
+
+    it('folding an open stack while a member is selected selects its face', () => {
+      setup([burst('a', '2026-01-01T10:00:00'), burst('b', '2026-01-01T10:00:01'), ...photos('z')], null, { stacked: true });
+      const [info] = [...selectStackInfo(g()).values()];
+      const face = selectVisible(g())[0].path;
+      g().toggleStack(info.id);
+      const member = selectVisible(g()).find((i) => selectStackInfo(g()).get(i.path)?.top === false)!.path;
+      g().select(member);
+      g().toggleStack(info.id);
+      expect(g().selected).toBe(face);
+    });
+
+    it('a filter that leaves out the selected photo moves the selection on', () => {
+      setup([item({ path: 'a', fileName: 'a.jpg' }), item({ path: 'b', fileName: 'b.jpg', info: { star: true } }), item({ path: 'c', fileName: 'c.jpg' })], 'a');
+      g().setFilter({ starred: 'yes' });
+      expect(g().selected).toBe('b');
+      expect(g().selection).toEqual(['b']);
+      // b leaves: a is now in its place.
+      g().setFilter({ starred: 'no' });
+      expect(g().selected).toBe('a');
+      g().clearFilter();
+      expect(g().selected).toBe('a');
+    });
+
+    it('hiding one photo does not work the facts out again (only a star, a date or an analysis does)', async () => {
+      setup([burst('a', '2026-01-01T10:00:00'), burst('b', '2026-01-01T10:00:01'), ...photos('z')], 'z', { stacked: true });
+      const facts = selectFacts(g());
+      serve();
+      await g().toggleFlag('hidden');
+      expect(selectFacts(g())).toBe(facts);
+      await g().saveInfo('a', { description: 'x' });
+      expect(selectFacts(g())).toBe(facts);
+      await g().toggleFlag('star');
+      expect(selectFacts(g())).not.toBe(facts);
     });
 
     it("view starts on the grid and stays on the map across folders", () => {

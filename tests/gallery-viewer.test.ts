@@ -127,6 +127,13 @@ describe('nextAfterRemoval', () => {
   it('moves to the previous one when the last was removed', () => {
     expect(nextAfterRemoval(before, ['a', 'b', 'c'], 'd')).toBe('c');
   });
+  it('takes the photo that came into its place (a stack whose face was hidden shows its next member there)', () => {
+    // A (a stack's face) hidden: B, folded under it until now, is the new face in the same place.
+    expect(nextAfterRemoval(['x', 'A', 'z'], ['x', 'B', 'z'], 'A')).toBe('B');
+    expect(nextAfterRemoval(['A', 'z'], ['B', 'z'], 'A')).toBe('B');
+    // Several gone around it: the place counts only the photos before it that stayed.
+    expect(nextAfterRemoval(['a', 'b', 'c', 'd'], ['c', 'd'], 'b')).toBe('c');
+  });
   it('is null when everything is gone or nothing was selected', () => {
     expect(nextAfterRemoval(before, [], 'b')).toBeNull();
     expect(nextAfterRemoval(before, ['a'], null)).toBeNull();

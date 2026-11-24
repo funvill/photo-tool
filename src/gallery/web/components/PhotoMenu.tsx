@@ -1,8 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { dragPaths } from '../../../core/galleryViewer';
 import { Icon } from '../../../web/components/Icon';
 import { desktop } from '../../../web/desktop';
-import { selectVisible, useGallery } from '../store';
+import { menuTargets, useGallery } from '../store';
 
 // Right-click menu on a photo (a tile or the preview), in the editor's .ctx-menu style. Copy to
 // clipboard and Show in file explorer act on the photo clicked; Copy path, Favourite, Hide and Delete
@@ -24,11 +23,11 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-/** The selected photos in grid order when `path` is one of them, else just `path`. */
-function targetsFor(path: string): string[] {
-  const s = useGallery.getState();
-  return dragPaths(selectVisible(s).map((i) => i.path), s.selection, path);
-}
+/** The review keys (move, favourite, hide): they act on the photos, so the menu goes away. */
+const REVIEW_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'f', 'F', 'h', 'H']);
+
+/** Where a deleted photo goes, named as the desktop app's confirm names it. */
+const BIN = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent) ? 'Recycle Bin' : 'Trash';
 
 /**
  * Text onto the clipboard. In the desktop app the main process does it (the app turns every web
@@ -61,7 +60,7 @@ async function writeText(text: string) {
 async function copyPaths(path: string) {
   const { toast } = useGallery.getState();
   try {
-    await writeText(targetsFor(path).join('\n'));
+    await writeText(menuTargets(path).join('\n'));
     toast('success', 'Copied');
   } catch (e) {
     toast('error', `Couldn't copy the path: ${message(e)}`);
@@ -91,12 +90,12 @@ async function showInFolder(path: string) {
 async function trash(path: string) {
   const { toast } = useGallery.getState();
   try {
-    const r = await desktop!.trashPhotos!(targetsFor(path));
+    const r = await desktop!.trashPhotos!(menuTargets(path));
     if (r.cancelled) return;
     if (r.trashed.length) useGallery.getState().removeItems(r.trashed);
     if (r.failed.length) {
       const first = r.failed[0];
-      toast('error', `Couldn't move ${r.failed.length === 1 ? fileName(first.path) : plural(r.failed.length, 'photo')} to the Recycle Bin: ${first.message}`);
+      toast('error', `Couldn't move ${r.failed.length === 1 ? fileName(first.path) : plural(r.failed.length, 'photo')} to the ${BIN}: ${first.message}`);
     }
   } catch (e) {
     toast('error', `Couldn't delete: ${message(e)}`);
@@ -121,6 +120,11 @@ export function PhotoMenu({ x, y, path, onClose }: PhotoMenuProps) {
   useEffect(() => {
     const outside = (e: Event) => !ref.current?.contains(e.target as Node) && onClose();
     const esc = (e: KeyboardEvent) => {
+      if (REVIEW_KEYS.has(e.key) && !e.ctrlKey && !e.altKey && !e.metaKey) {
+        // Left to the review keys to act on; the menu would now be about another photo.
+        onClose();
+        return;
+      }
       if (e.key !== 'Escape') return;
       e.preventDefault();
       onClose();

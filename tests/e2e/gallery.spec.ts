@@ -313,6 +313,13 @@ test('right-click opens the menu with icons; Copy path puts the path on the clip
     // Windows' clipboard hands text back with CRLF line ends.
     await expect.poll(async () => (await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, '\n')).toBe(paths.join('\n'));
 
+    // A review key closes it and does its work: the selection moves on from the focused photo (the second).
+    await first.click({ button: 'right' });
+    await expect(page.getByRole('menu')).toBeVisible();
+    await page.keyboard.press('ArrowRight');
+    await expect(page.getByRole('menu')).toHaveCount(0);
+    await expect(page.locator('.gallery-tile').nth(2)).toHaveClass(/\bselected\b/);
+
     // Esc closes it.
     await first.click({ button: 'right' });
     await expect(page.getByRole('menu')).toBeVisible();
