@@ -56,15 +56,16 @@ export interface DesktopApi {
   setEditTarget?(target: 'info' | 'file'): Promise<void>;
   /**
    * Gallery window: write the photo with this edit into its own file (the original goes to the Recycle
-   * Bin first). `item` is the server's refreshed GalleryItem. Not for HEIC photos.
+   * Bin first). `item` is the server's refreshed GalleryItem. Not for HEIC photos. `saved` is true when
+   * the file was replaced although `ok` is false (only a follow-up step failed): reload the photo.
    */
-  saveEditToFile?(path: string, edit: PhotoEdit): Promise<{ ok: boolean; error?: string; item?: unknown }>;
+  saveEditToFile?(path: string, edit: PhotoEdit): Promise<{ ok: boolean; saved?: boolean; error?: string; item?: unknown }>;
   /**
    * Gallery window: ask for a file name and write the photo with this edit there; the original stays.
    * `info` is the original's info: a copy inside the open folder gets its star, people, date, location,
    * description and notes. `item` is the server's GalleryItem for the copy (only when it is in the open folder).
    */
-  saveEditAs?(path: string, edit: PhotoEdit, info?: Record<string, unknown>): Promise<{ ok: boolean; cancelled?: boolean; error?: string; savedPath?: string; item?: unknown }>;
+  saveEditAs?(path: string, edit: PhotoEdit, info?: Record<string, unknown>): Promise<{ ok: boolean; saved?: boolean; cancelled?: boolean; error?: string; savedPath?: string; item?: unknown }>;
   /** Gallery window: how many photos have edits not saved yet; closing the window asks first while it is above 0. */
   setUnsavedEdits?(count: number): void;
 }

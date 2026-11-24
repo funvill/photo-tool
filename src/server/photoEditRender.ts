@@ -1,21 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { rename, rm } from 'node:fs/promises';
-import { extname } from 'node:path';
 import sharp, { type Sharp } from 'sharp';
-import { editPlan, type PhotoEdit } from '../core';
+import { editFormatFor, editPlan, type EditFormat, type PhotoEdit } from '../core';
 
 // Renders a photo edit (crop, rotate, straighten) into a new file. The steps follow `editPlan` in
 // core/photoEdit.ts, the same plan the page uses for its preview. The original is only read.
 
-export type EditFormat = 'jpeg' | 'png' | 'webp';
-
-/** The format an edited photo is written in: its own, except HEIC, which is written as JPEG. */
-export function editFormatFor(path: string): EditFormat {
-  const ext = extname(path).toLowerCase();
-  if (ext === '.png') return 'png';
-  if (ext === '.webp') return 'webp';
-  return 'jpeg';
-}
+// The format rules live in core/photoEdit.ts (the desktop shell needs them without sharp).
+export { editFormatFor, type EditFormat };
 
 /** A lossless step between two sharp pipelines (sharp applies rotate and extract in a fixed order, so each gets its own). */
 const lossless = (img: Sharp) => img.png({ compressionLevel: 0 }).toBuffer({ resolveWithObject: true });

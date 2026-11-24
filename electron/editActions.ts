@@ -4,11 +4,13 @@
 // touches the original. Only photos of the open folder; a failure is reported, never retried another way.
 import { posix, win32 } from 'node:path';
 import type { MessageBoxOptions } from 'electron';
-import type { PhotoEdit } from '../src/core/photoEdit';
+import { editFormatFor, type EditFormat, type PhotoEdit } from '../src/core/photoEdit';
 
 export interface EditSaveResult {
   ok: boolean;
   error?: string;
+  /** True when the file was written even though `ok` is false (only the follow-up steps failed). */
+  saved?: boolean;
   /** The server's refreshed GalleryItem. */
   item?: unknown;
 }
@@ -22,7 +24,7 @@ interface CommonDeps {
   /** Which of these paths are photos of the folder open now (and files), in order. */
   check(paths: string[]): Promise<string[]>;
   /** Write the photo with the edit applied into the gallery's data folder; says where. */
-  render(path: string, edit: PhotoEdit): Promise<{ file: string }>;
+  render(path: string, edit: PhotoEdit): Promise<{ file: string; format?: string }>;
   /** Put `from` at `to`: a rename, else (another drive) a copy and then removing `from`. */
   move(from: string, to: string): Promise<void>;
   removeTemp(file: string): Promise<void>;
@@ -39,23 +41,15 @@ export interface SaveToFileDeps extends CommonDeps {
 
 export interface SaveAsDeps extends CommonDeps {
   platform: NodeJS.Platform;
+  /** Is there a file (or folder) at this path? */
+  exists(path: string): Promise<boolean>;
   /** The save dialog, starting at this path. The chosen path, or null when cancelled. */
   ask(defaultPath: string): Promise<string | null>;
   /** Give the new photo these fields of the original's info. */
   copyInfo(to: string, patch: Record<string, unknown>): Promise<void>;
 }
 
-type EditFormat = 'jpeg' | 'png' | 'webp';
-
-/**
- * The format the server writes an edited photo in (editFormatFor in src/server/photoEditRender.ts, which
- * cannot be imported here: it loads sharp, and the main process bundle does not carry it).
- */
-function editFormatFor(path: string): EditFormat {
-  const ext = win32.extname(path).toLowerCase();
-  return ext === '.png' ? 'png' : ext === '.webp' ? 'webp' : 'jpeg';
-}
-
+const BAD_FORMAT = 'The gallery wrote the edited photo in an unexpected format, so nothing was changed.';
 const failure = (err: unknown) => (err instanceof Error ? err.message : String(err));
 const NOT_A_PHOTO = 'That photo is not in the open folder any more.';
 const isHeic = (path: string) => /\.(heic|heif)$/i.test(path);
@@ -66,7 +60,12 @@ export async function saveToFile(path: string, edit: PhotoEdit, deps: SaveToFile
   if (isHeic(path)) return { ok: false, error: 'HEIC photos can only be saved as a copy.' };
   let temp: string;
   try {
-    temp = (await deps.render(path, edit)).file;
+    const made = await deps.render(path, edit);
+    temp = made.file;
+    if (made.format !== undefined && made.format !== editFormatFor(path)) {
+      await deps.removeTemp(temp).catch(() => undefined);
+      return { ok: false, error: BAD_FORMAT };
+    }
   } catch (err) {
     return { ok: false, error: `Couldn't make the edited photo: ${failure(err)}` };
   }
@@ -79,18 +78,18 @@ export async function saveToFile(path: string, edit: PhotoEdit, deps: SaveToFile
   try {
     await deps.move(temp, path);
   } catch (err) {
-    // The temp file is the only copy of the edit now: it stays where it is.
-    return { ok: false, error: `The original is in the Recycle Bin, but the edited photo could not be put in its place: ${failure(err)}. The edited photo is at ${temp}.` };
+    // The temp file is the only copy of the picture now: it stays where it is (the gallery sweeps its edits folder after an hour).
+    return { ok: false, error: `The original is in the Recycle Bin, but the edited photo could not be put in its place: ${failure(err)}. A temporary edited copy is at ${temp} for the next hour; your edit is still saved in the gallery, so you can Save again.` };
   }
   try {
     await deps.clearEdit(path);
   } catch (err) {
-    return { ok: false, error: `The photo was saved, but its old edit could not be cleared from the photo info: ${failure(err)}` };
+    return { ok: false, saved: true, error: `The photo was saved, but its old edit could not be cleared from the photo info: ${failure(err)}` };
   }
   try {
     return { ok: true, item: (await deps.refresh([path]))[0] };
   } catch (err) {
-    return { ok: false, error: `The photo was saved, but the gallery could not read it again: ${failure(err)}` };
+    return { ok: false, saved: true, error: `The photo was saved, but the gallery could not read it again: ${failure(err)}` };
   }
 }
 
@@ -112,9 +111,16 @@ export async function saveAs(path: string, edit: PhotoEdit, deps: SaveAsDeps, in
   const target = withFormatExtension(chosen, format, p);
   const same = deps.platform === 'win32' ? target.toLowerCase() === path.toLowerCase() : target === path;
   if (same) return { ok: false, error: 'Choose a different name: Save as keeps the original.' };
+  // The dialog confirmed the name as typed; a name changed to fit the format was not confirmed.
+  if (target !== chosen && (await deps.exists(target))) return { ok: false, error: 'A file with that name already exists. Choose another name.' };
   let temp: string;
   try {
-    temp = (await deps.render(path, edit)).file;
+    const made = await deps.render(path, edit);
+    temp = made.file;
+    if (made.format !== undefined && made.format !== format) {
+      await deps.removeTemp(temp).catch(() => undefined);
+      return { ok: false, error: BAD_FORMAT };
+    }
   } catch (err) {
     return { ok: false, error: `Couldn't make the edited photo: ${failure(err)}` };
   }
@@ -125,14 +131,19 @@ export async function saveAs(path: string, edit: PhotoEdit, deps: SaveAsDeps, in
     return { ok: false, error: `Couldn't save the copy: ${failure(err)}` };
   }
   // A copy outside the open folder is just a file: the server has nothing to say about it.
+  let item: unknown;
   try {
-    const item = (await deps.refresh([target]))[0];
-    if (item === undefined) return { ok: true, savedPath: target };
-    await deps.copyInfo(target, copyablePatch(info));
-    return { ok: true, savedPath: target, item };
+    item = (await deps.refresh([target]))[0];
   } catch (err) {
-    return { ok: false, savedPath: target, error: `The copy was saved as ${target}, but the gallery could not read it: ${failure(err)}` };
+    return { ok: false, saved: true, savedPath: target, error: `The copy was saved as ${target}, but the gallery could not read it: ${failure(err)}` };
   }
+  if (item === undefined) return { ok: true, savedPath: target };
+  try {
+    await deps.copyInfo(target, copyablePatch(info));
+  } catch (err) {
+    return { ok: false, saved: true, savedPath: target, error: `The copy was saved as ${target}, but its star, people and notes could not be copied to it: ${failure(err)}` };
+  }
+  return { ok: true, savedPath: target, item };
 }
 
 /** The fields of a photo's info a copy of it keeps: what the person said about the photo, not its edit. */

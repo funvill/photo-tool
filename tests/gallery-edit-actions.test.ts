@@ -12,7 +12,7 @@ const edit = { rotate: 90 as const, straighten: 0, crop: { x: 0, y: 0, w: 1, h: 
 const ORIGINAL = 'C:\\p\\IMG_1.jpg';
 const TEMP = 'C:\\data\\edits\\abc.jpg';
 
-function fakes(o: { catalogued?: string[]; trashFails?: boolean; renderFails?: boolean; moveFails?: boolean; ask?: string | null; refreshEmpty?: boolean; format?: string } = {}) {
+function fakes(o: { catalogued?: string[]; trashFails?: boolean; renderFails?: boolean; moveFails?: boolean; ask?: string | null; refreshEmpty?: boolean; format?: string; existing?: string[]; clearFails?: boolean; refreshFails?: boolean; renderFormat?: string; copyFails?: boolean } = {}) {
   const calls: string[] = [];
   const catalogued = new Set(o.catalogued ?? [ORIGINAL, 'C:\\p\\IMG_1.HEIC']);
   const deps = {
@@ -21,7 +21,7 @@ function fakes(o: { catalogued?: string[]; trashFails?: boolean; renderFails?: b
     render: vi.fn(async (path: string) => {
       calls.push('render');
       if (o.renderFails) throw new Error('render broke');
-      return { file: o.format ? `C:\\data\\edits\\abc.${o.format}` : TEMP };
+      return { file: o.format ? `C:\\data\\edits\\abc.${o.format}` : TEMP, format: o.renderFormat };
     }),
     trash: vi.fn(async () => {
       calls.push('trash');
@@ -32,16 +32,24 @@ function fakes(o: { catalogued?: string[]; trashFails?: boolean; renderFails?: b
       if (o.moveFails) throw new Error('disk full');
     }),
     removeTemp: vi.fn(async () => void calls.push('removeTemp')),
-    clearEdit: vi.fn(async () => void calls.push('clearEdit')),
+    clearEdit: vi.fn(async () => {
+      calls.push('clearEdit');
+      if (o.clearFails) throw new Error('info locked');
+    }),
     refresh: vi.fn(async (paths: string[]) => {
       calls.push('refresh');
+      if (o.refreshFails) throw new Error('server down');
       return o.refreshEmpty ? [] : paths.map((p) => ({ path: p }));
     }),
     ask: vi.fn(async (_default: string) => {
       calls.push('ask');
       return o.ask === undefined ? 'C:\\p\\copy.jpg' : o.ask;
     }),
-    copyInfo: vi.fn(async () => void calls.push('copyInfo')),
+    exists: vi.fn(async (p: string) => (o.existing ?? []).includes(p)),
+    copyInfo: vi.fn(async () => {
+      calls.push('copyInfo');
+      if (o.copyFails) throw new Error('info locked');
+    }),
   };
   return { deps, calls };
 }
@@ -93,8 +101,25 @@ describe('saveToFile', () => {
     expect(r.error).toContain('Recycle Bin');
     expect(r.error).toContain(TEMP);
     expect(r.error).toContain('disk full');
+    expect(r.error).toContain('for the next hour');
     expect(deps.removeTemp).not.toHaveBeenCalled();
     expect(calls).toEqual(['render', 'trash', 'move']);
+  });
+
+  it('says the photo was saved when the edit cannot be cleared or the photo read again', async () => {
+    const a = fakes({ clearFails: true });
+    const ra = await saveToFile(ORIGINAL, edit, a.deps);
+    expect(ra).toEqual({ ok: false, saved: true, error: 'The photo was saved, but its old edit could not be cleared from the photo info: info locked' });
+    const b = fakes({ refreshFails: true });
+    const rb = await saveToFile(ORIGINAL, edit, b.deps);
+    expect(rb).toEqual({ ok: false, saved: true, error: 'The photo was saved, but the gallery could not read it again: server down' });
+  });
+
+  it('stops, removing the temp file, when the server wrote another format than expected', async () => {
+    const { deps, calls } = fakes({ renderFormat: 'png' });
+    const r = await saveToFile(ORIGINAL, edit, deps);
+    expect(r.ok).toBe(false);
+    expect(calls).toEqual(['render', 'removeTemp']);
   });
 });
 
@@ -161,6 +186,40 @@ describe('saveAs', () => {
     const r = await saveAs(ORIGINAL, edit, deps);
     expect(r.ok).toBe(false);
     expect(calls).toEqual(['ask', 'render', 'move', 'removeTemp']);
+  });
+
+  it('refuses a changed name that would replace an existing file, before rendering', async () => {
+    const { deps } = fakes({ ask: 'C:\\p\\copy.png', existing: ['C:\\p\\copy.jpg'] });
+    const r = await saveAs(ORIGINAL, edit, deps);
+    expect(r).toEqual({ ok: false, error: 'A file with that name already exists. Choose another name.' });
+    expect(deps.render).not.toHaveBeenCalled();
+    expect(deps.move).not.toHaveBeenCalled();
+  });
+
+  it('leaves the replace question to the dialog when the name was not changed', async () => {
+    const { deps } = fakes({ ask: 'C:\\p\\copy.jpg', existing: ['C:\\p\\copy.jpg'] });
+    expect((await saveAs(ORIGINAL, edit, deps)).ok).toBe(true);
+    expect(deps.exists).not.toHaveBeenCalled();
+  });
+
+  it('does nothing else when the render fails', async () => {
+    const { deps, calls } = fakes({ renderFails: true });
+    const r = await saveAs(ORIGINAL, edit, deps);
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('render broke');
+    expect(calls).toEqual(['ask', 'render']);
+  });
+
+  it('says the copy was saved when it cannot be read again or its info cannot be copied', async () => {
+    const a = fakes({ refreshFails: true });
+    const ra = await saveAs(ORIGINAL, edit, a.deps);
+    expect(ra.ok).toBe(false);
+    expect(ra.saved).toBe(true);
+    expect(ra.error).toContain('could not read it');
+    const b = fakes({ copyFails: true });
+    const rb = await saveAs(ORIGINAL, edit, b.deps);
+    expect(rb.saved).toBe(true);
+    expect(rb.error).toContain('could not be copied');
   });
 
   it('refuses a path that is not in the open folder, before asking', async () => {

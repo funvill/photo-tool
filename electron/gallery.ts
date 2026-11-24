@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { statSync } from 'node:fs';
 import { copyFile, rename, rm, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import type { PhotoEdit } from '../src/core/photoEdit';
+import { editFormatFor, type PhotoEdit } from '../src/core/photoEdit';
 import { galleryLaunchCommand, parseMode } from './config';
 import { dragFiles, dragRequest, preparedDragFor, sameDragList, type DragCheck, type PreparedDrag } from './drag';
 import { copyTextRequest, trashConfirm, trashPhotos, type TrashResult } from './fileActions';
@@ -389,13 +389,21 @@ async function galleryJson(port: number, method: 'POST' | 'PATCH', path: string,
   return res.json();
 }
 
-/** Rename; across drives (the data folder may be on another one than the photo) copy, then remove the source. */
+/** Rename; across drives (the data folder may be on another one than the photo) copy beside the target, rename into place, remove the source. */
 async function moveFile(from: string, to: string): Promise<void> {
   try {
     await rename(from, to);
   } catch (err) {
     if ((err as NodeJS.ErrnoException)?.code !== 'EXDEV') throw err;
-    await copyFile(from, to);
+    // A copy that fails half way must not leave a partial file under the real name.
+    const part = `${to}.${process.pid}-${Date.now()}.part`;
+    try {
+      await copyFile(from, part);
+      await rename(part, to);
+    } catch (copyErr) {
+      await rm(part, { force: true }).catch(() => undefined);
+      throw copyErr;
+    }
     await unlink(from);
   }
 }
@@ -414,7 +422,7 @@ export function galleryEditActions(o: { window: () => BrowserWindow | null; from
   const port = () => o.serverPort();
   const common = {
     check: async (paths: string[]) => (await fileCheck(port(), paths)).filter(isFile),
-    render: async (path: string, edit: PhotoEdit) => (await galleryJson(port(), 'POST', '/api/gallery/edit/render', { path, edit }, EDIT_TIMEOUT_MS)) as { file: string },
+    render: async (path: string, edit: PhotoEdit) => (await galleryJson(port(), 'POST', '/api/gallery/edit/render', { path, edit }, EDIT_TIMEOUT_MS)) as { file: string; format?: string },
     move: moveFile,
     removeTemp: (file: string) => rm(file, { force: true }),
     refresh: async (paths: string[]) => {
@@ -423,6 +431,17 @@ export function galleryEditActions(o: { window: () => BrowserWindow | null; from
     },
   };
   const pathOf = (raw: unknown) => (typeof raw === 'string' ? raw : '');
+  // Photos being saved now: a second save of the same photo would race the first.
+  const saving = new Set<string>();
+  const once = async <T extends { ok: boolean; error?: string }>(path: string, run: () => Promise<T>): Promise<T | { ok: false; error: string }> => {
+    if (saving.has(path)) return { ok: false, error: 'That photo is already being saved.' };
+    saving.add(path);
+    try {
+      return await run();
+    } finally {
+      saving.delete(path);
+    }
+  };
 
   let target = readEditTarget(o.file);
   ipcMain.handle('gallery:get-edit-target', (e): EditTarget => (allowed(e) ? target : 'info'));
@@ -441,11 +460,13 @@ export function galleryEditActions(o: { window: () => BrowserWindow | null; from
   ipcMain.handle('gallery:save-edit-file', async (e, rawPath: unknown, rawEdit: unknown): Promise<EditSaveResult> => {
     if (!allowed(e)) return { ok: false, error: 'Not allowed' };
     try {
-      const r = await saveToFile(pathOf(rawPath), rawEdit as PhotoEdit, {
-        ...common,
-        trash: (path) => shell.trashItem(path),
-        clearEdit: async (path) => void (await galleryJson(port(), 'PATCH', '/api/gallery/info', { path, patch: { edit: null } }, EDIT_TIMEOUT_MS)),
-      });
+      const r = await once(pathOf(rawPath), () =>
+        saveToFile(pathOf(rawPath), rawEdit as PhotoEdit, {
+          ...common,
+          trash: (path) => shell.trashItem(path),
+          clearEdit: async (path) => void (await galleryJson(port(), 'PATCH', '/api/gallery/info', { path, patch: { edit: null } }, EDIT_TIMEOUT_MS)),
+        }),
+      );
       o.log('save edit to file', { ok: r.ok });
       return r;
     } catch (err) {
@@ -458,23 +479,36 @@ export function galleryEditActions(o: { window: () => BrowserWindow | null; from
     if (!allowed(e)) return { ok: false, error: 'Not allowed' };
     const info = rawInfo && typeof rawInfo === 'object' && !Array.isArray(rawInfo) ? (rawInfo as Record<string, unknown>) : undefined;
     try {
-      const r = await saveAs(
-        pathOf(rawPath),
-        rawEdit as PhotoEdit,
-        {
-          ...common,
-          platform: process.platform,
-          ask: async (defaultPath) => {
-            const w = o.window();
-            const options = { title: 'Save the edited photo as', defaultPath };
-            const chosen = w && !w.isDestroyed() ? await dialog.showSaveDialog(w, options) : await dialog.showSaveDialog(options);
-            return chosen.canceled || !chosen.filePath ? null : chosen.filePath;
+      const r = await once(pathOf(rawPath), () =>
+        saveAs(
+          pathOf(rawPath),
+          rawEdit as PhotoEdit,
+          {
+            ...common,
+            platform: process.platform,
+            exists: async (p) => {
+              try {
+                statSync(p);
+                return true;
+              } catch {
+                return false;
+              }
+            },
+            ask: async (defaultPath) => {
+              const w = o.window();
+              // The filter makes the dialog itself give the name the right extension and ask before replacing a file.
+              const format = editFormatFor(defaultPath);
+              const filters = [format === 'jpeg' ? { name: 'JPEG photo', extensions: ['jpg', 'jpeg'] } : { name: `${format.toUpperCase()} photo`, extensions: [format] }];
+              const options = { title: 'Save the edited photo as', defaultPath, filters };
+              const chosen = w && !w.isDestroyed() ? await dialog.showSaveDialog(w, options) : await dialog.showSaveDialog(options);
+              return chosen.canceled || !chosen.filePath ? null : chosen.filePath;
+            },
+            copyInfo: async (to, patch) => void (await galleryJson(port(), 'PATCH', '/api/gallery/info', { path: to, patch }, EDIT_TIMEOUT_MS)),
           },
-          copyInfo: async (to, patch) => void (await galleryJson(port(), 'PATCH', '/api/gallery/info', { path: to, patch }, EDIT_TIMEOUT_MS)),
-        },
-        info,
+          info,
+        ),
       );
-      o.log('save edit as', { ok: r.ok, cancelled: !!r.cancelled });
+      o.log('save edit as', { ok: r.ok });
       return r;
     } catch (err) {
       o.log('save edit as failed', String(err));

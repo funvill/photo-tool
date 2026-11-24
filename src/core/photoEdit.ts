@@ -285,3 +285,14 @@ export function editCss(
     },
   };
 }
+
+/** The format an edited photo is written in. */
+export type EditFormat = 'jpeg' | 'png' | 'webp';
+
+/** The format an edited photo is written in: its own, except HEIC, which is written as JPEG. */
+export function editFormatFor(path: string): EditFormat {
+  const ext = /\.[^./\\]*$/.exec(path)?.[0].toLowerCase();
+  if (ext === '.png') return 'png';
+  if (ext === '.webp') return 'webp';
+  return 'jpeg';
+}
