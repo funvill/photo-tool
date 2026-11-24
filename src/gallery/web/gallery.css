@@ -130,3 +130,24 @@
 .gallery-orphans { max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
 .gallery-orphans h3 { margin: 0 0 4px; color: var(--muted); font-weight: 600; }
 .gallery-orphans ul { margin: 0; padding-left: 18px; font-size: 12px; overflow-wrap: anywhere; }
+
+/* Grid | Map switch, and the Map tab */
+.gallery-view-switch { flex: none; display: flex; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line-soft); background: var(--panel); }
+.gallery-map { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+.gallery-map-note { flex: none; margin: 0; padding: 6px 12px; font-size: 12px; border-bottom: 1px solid var(--line-soft); background: var(--panel); }
+.gallery-map-stage { position: relative; flex: 1; min-height: 0; }
+/* Without tiles (Not now, offline) the markers sit on a plain background. */
+.gallery-map-canvas { position: absolute; inset: 0; background: var(--panel-2); }
+.gallery-map-canvas.leaflet-container { background: var(--panel-2); font: inherit; }
+.gallery-map-canvas .leaflet-control-attribution { background: rgba(0, 0, 0, 0.6); color: #ddd; }
+.gallery-map-canvas .leaflet-bar a { background: var(--panel); color: var(--text); border-bottom-color: var(--line); }
+.gallery-map-canvas .leaflet-bar a:hover { background: var(--panel-3); }
+.gallery-map-marker { border-radius: 50%; overflow: hidden; background: var(--panel-3); border: 2px solid #fff; box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6); box-sizing: border-box; cursor: pointer; }
+.gallery-map-marker img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+.gallery-map-marker.selected { border: 3px solid var(--select); box-shadow: 0 0 0 2px #fff, 0 1px 6px rgba(0, 0, 0, 0.7); }
+.gallery-map-cluster { display: grid; place-items: center; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-weight: 700; border: 3px solid rgba(255, 255, 255, 0.85); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.6); box-sizing: border-box; }
+.gallery-map-online { position: absolute; top: 10px; right: 10px; z-index: 1100; }
+.gallery-map-offline { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 1100; padding: 6px 12px; border-radius: var(--radius); background: rgba(0, 0, 0, 0.75); color: #fff; pointer-events: none; white-space: nowrap; }
+.gallery-map-consent { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 1100; width: min(360px, calc(100% - 24px)); display: flex; flex-direction: column; gap: 12px; padding: 16px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--panel); box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5); }
+.gallery-map-consent p { margin: 0; line-height: 1.45; }
+.gallery-map-consent .row { gap: 8px; justify-content: flex-end; }

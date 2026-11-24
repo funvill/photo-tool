@@ -71,6 +71,8 @@ export function Grid({ onOpen, onContextMenu }: { onOpen: (path: string) => void
 
   // Up/Down step by a row: the keys (outside the grid) read how many tiles a row holds now.
   useEffect(() => useGallery.getState().setGridCols(w.cols), [w.cols]);
+  // Without the grid (the map shows instead) Up/Down step one photo, like Left/Right.
+  useEffect(() => () => useGallery.getState().setGridCols(1), []);
 
   /** Scroll the grid just enough to show the selected photo's row (nothing when it is in view already). */
   const scrollToSelected = () => {

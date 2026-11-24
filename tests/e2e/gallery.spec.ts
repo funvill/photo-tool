@@ -1,6 +1,6 @@
 // The gallery program: open a folder, review its photos (grid, preview pane, keys, stacks, hidden
 // photos) and star one — the star lands in the folder's photoinfo.json, where the editor will find it.
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
@@ -9,9 +9,11 @@ import { isSupported } from '../../src/server/media';
 const FIXTURES = join(process.cwd(), 'fixtures', 'generated', 'trip');
 
 /** A private copy of the trip fixture (so stars and hides are written there), opened and fully read. */
-async function openTrip(page: Page, request: APIRequestContext): Promise<string> {
+async function openTrip(page: Page, request: APIRequestContext, seed?: Record<string, Record<string, unknown>>): Promise<string> {
   const dir = join(mkdtempSync(join(tmpdir(), 'photobook-gallery-')), 'trip');
   cpSync(FIXTURES, dir, { recursive: true });
+  // Photo info the folder starts with (a photoinfo.json written before the gallery reads it).
+  if (seed) writeFileSync(join(dir, 'photoinfo.json'), JSON.stringify({ format: 'photoinfo/1', photos: seed }, null, 2));
   // Open it through the API (a plain browser has no folder dialog): it becomes a recent folder.
   expect((await request.post('/api/gallery/open', { data: { folder: dir, recursive: false } })).status()).toBe(202);
   // A wide thumbnail column of small tiles: the grid draws only the rows on screen, and every tile
@@ -351,6 +353,138 @@ test('Hide from the menu hides the photo', async ({ page, request }) => {
     await expect.poll(() => photoInfo(dir)[first!]).toEqual({ hidden: true });
     await expect(page.locator(`.gallery-tile img[alt="${first}"]`)).toHaveCount(0);
     await expect(selectedImg(page)).toHaveAttribute('alt', second!);
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+// ---- Map tab. Two photos get places far apart (Paris, Rome) and a description to filter on, so the
+// map shows just their two markers. The tile server is blocked in every test: no test uses the network.
+const PARIS = 'day1-02-street.jpg';
+const ROME = 'day3-02-museum.jpg';
+const MAP_SEED = {
+  [PARIS]: { description: 'maptest', location: { lat: 48.8566, lon: 2.3522 } },
+  [ROME]: { description: 'maptest', location: { lat: 41.9028, lon: 12.4964 } },
+};
+
+/** Abort every request for an OpenStreetMap tile; the list of those asked for. */
+async function blockTiles(page: Page): Promise<string[]> {
+  const asked: string[] = [];
+  await page.route(/^https?:\/\/([a-z0-9-]+\.)*tile\.openstreetmap\.org\//, (route) => {
+    asked.push(route.request().url());
+    return route.abort('internetdisconnected');
+  });
+  return asked;
+}
+
+async function openMap(page: Page, request: APIRequestContext): Promise<{ dir: string; asked: string[] }> {
+  const asked = await blockTiles(page);
+  const dir = await openTrip(page, request, MAP_SEED);
+  await page.getByLabel('Search descriptions and notes').fill('maptest');
+  await expect(page.locator('.gallery-tile')).toHaveCount(2);
+  await page.getByRole('button', { name: 'Map', exact: true }).click();
+  return { dir, asked };
+}
+
+const marker = (page: Page, name: string) => page.locator(`.gallery-map-marker img[alt="${name}"]`);
+
+test('Map tab shows the consent prompt first', async ({ page, request }) => {
+  const { dir, asked } = await openMap(page, request);
+  try {
+    const prompt = page.getByRole('region', { name: 'Online maps' });
+    await expect(prompt).toContainText('The map is downloaded from OpenStreetMap over the internet. This shows OpenStreetMap roughly where you are looking. Load maps from the internet?');
+    await expect(prompt.getByRole('button', { name: 'Load maps' })).toBeVisible();
+    await expect(prompt.getByRole('button', { name: 'Not now' })).toBeVisible();
+    // The grid is gone; nothing was asked of the tile server before the answer.
+    await expect(page.locator('.gallery-tile')).toHaveCount(0);
+    expect(asked).toEqual([]);
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+test('Not now shows markers without tiles', async ({ page, request }) => {
+  const { dir, asked } = await openMap(page, request);
+  try {
+    await page.getByRole('button', { name: 'Not now' }).click();
+    await expect(page.getByRole('region', { name: 'Online maps' })).toHaveCount(0);
+    await expect(page.locator('.gallery-map-marker')).toHaveCount(2);
+    await expect(marker(page, PARIS)).toHaveAttribute('src', /\/api\/gallery\/thumb\?.*size=s/);
+    await expect(page.getByRole('button', { name: 'Map: offline' })).toBeVisible();
+    await expect(page.locator('.leaflet-tile')).toHaveCount(0);
+    // The answer is remembered: after a reload the map opens without asking.
+    await page.reload();
+    await page.getByRole('button', { name: dir }).click();
+    await expect(page.locator('.gallery-tile').first()).toBeVisible({ timeout: 60_000 });
+    await page.getByRole('button', { name: 'Map', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Map: offline' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Online maps' })).toHaveCount(0);
+    expect(asked).toEqual([]);
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+test('Load maps asks the tile server for tiles only; offline says so over the markers', async ({ page, request }) => {
+  const { dir, asked } = await openMap(page, request);
+  try {
+    await page.getByRole('button', { name: 'Load maps' }).click();
+    await expect(page.getByText('Map unavailable offline')).toBeVisible();
+    await expect(page.locator('.gallery-map-marker')).toHaveCount(2);
+    await expect(page.getByText('© OpenStreetMap contributors')).toBeVisible();
+    expect(asked.length).toBeGreaterThan(0);
+    for (const url of asked) expect(url).toMatch(/^https:\/\/tile\.openstreetmap\.org\/\d+\/\d+\/\d+\.png$/);
+    // Turned off again from the corner: no more tiles.
+    await page.getByRole('button', { name: 'Map: online' }).click();
+    await expect(page.getByRole('button', { name: 'Map: offline' })).toBeVisible();
+    await expect(page.locator('.leaflet-tile')).toHaveCount(0);
+    await expect(page.getByText('Map unavailable offline')).toHaveCount(0);
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+test('clicking a marker selects the photo and the preview shows it', async ({ page, request }) => {
+  const { dir } = await openMap(page, request);
+  try {
+    await page.getByRole('button', { name: 'Not now' }).click();
+    await marker(page, ROME).click();
+    const preview = page.getByRole('region', { name: 'Preview' });
+    await expect(preview.locator('img')).toHaveAttribute('alt', ROME);
+    await expect(page.getByRole('complementary', { name: 'Photo details' })).toContainText(ROME);
+    await expect(page.locator('.gallery-map-marker.selected img')).toHaveAttribute('alt', ROME);
+    // The arrow keys still step through the photos in grid order.
+    await page.keyboard.press('ArrowLeft');
+    await expect(preview.locator('img')).toHaveAttribute('alt', PARIS);
+    await expect(page.locator('.gallery-map-marker.selected img')).toHaveAttribute('alt', PARIS);
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+test('switching back to Grid keeps the selection', async ({ page, request }) => {
+  const { dir } = await openMap(page, request);
+  try {
+    await page.getByRole('button', { name: 'Not now' }).click();
+    await marker(page, ROME).click();
+    await page.getByRole('button', { name: 'Grid', exact: true }).click();
+    await expect(page.locator('.gallery-map-marker')).toHaveCount(0);
+    await expect(selectedImg(page)).toHaveAttribute('alt', ROME);
+    await expect(page.getByRole('region', { name: 'Preview' }).locator('img')).toHaveAttribute('alt', ROME);
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+test('the map counts the shown photos that have no location', async ({ page, request }) => {
+  const { dir } = await openMap(page, request);
+  try {
+    await page.getByRole('button', { name: 'Not now' }).click();
+    // Both shown photos have a place: no note.
+    await expect(page.getByText(/no location/)).toHaveCount(0);
+    await page.getByLabel('Search descriptions and notes').fill('');
+    // The scan (PNG) has no GPS in it.
+    await expect(page.getByText(/\d+ photos? (has|have) no location/)).toBeVisible();
   } finally {
     removeTrip(dir);
   }

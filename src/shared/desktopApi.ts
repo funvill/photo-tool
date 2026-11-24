@@ -42,4 +42,11 @@ export interface DesktopApi {
    * the folder open now; `cancelled` when the person said no (nothing was moved).
    */
   trashPhotos?(paths: string[]): Promise<{ trashed: string[]; failed: { path: string; message: string }[]; cancelled: boolean }>;
+  /**
+   * Gallery window: the answer to the Map tab's "Load maps from the internet?" (null: not asked yet).
+   * Kept by the desktop app, whose request guard lets map tiles through only while it is true.
+   */
+  getMapConsent?(): Promise<boolean | null>;
+  /** Gallery window: remember the Map tab's answer; tiles may load from now on (true) or no longer (false). */
+  setMapConsent?(on: boolean): Promise<void>;
 }

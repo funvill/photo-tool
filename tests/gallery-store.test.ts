@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GalleryItem } from '../src/gallery/server/app';
 
-const { useGallery, connectDesktop, selectVisible, selectStackInfo } = await import('../src/gallery/web/store');
+const { useGallery, connectDesktop, selectVisible, selectStackInfo, selectFiltered } = await import('../src/gallery/web/store');
 
 function item(over: Partial<GalleryItem> = {}): GalleryItem {
   return {
@@ -538,6 +538,38 @@ describe('gallery store', () => {
       g().setStacked(false);
       expect(selectVisible(g())).toHaveLength(2);
       expect(selectStackInfo(g()).size).toBe(0);
+    });
+
+    it('selectFiltered is the filtered, sorted list with stacks unfolded and hidden photos left out', () => {
+      setup([burst('a', '2026-01-01T10:00:00'), burst('b', '2026-01-01T10:00:01'), item({ path: 'h', info: { hidden: true } }), ...photos('z')], null, { stacked: true });
+      expect(selectVisible(g())).toHaveLength(2);
+      expect(selectFiltered(g()).map((i) => i.path).sort()).toEqual(['a', 'b', 'z']);
+      expect(selectFiltered(g())).toBe(selectFiltered(g()));
+    });
+
+    it('on the map a photo folded into a stack keeps the selection when the filter changes; on the grid it moves on', () => {
+      setup([burst('a', '2026-01-01T10:00:00'), burst('b', '2026-01-01T10:00:01'), ...photos('z')], null, { stacked: true });
+      const folded = selectFiltered(g()).find((i) => !selectVisible(g()).includes(i))!.path;
+      g().setView('map');
+      g().select(folded);
+      g().setFilter({ orientation: undefined });
+      g().setStacked(true);
+      g().toggleStack('nothing');
+      expect(g().selected).toBe(folded);
+      expect(g().selection).toEqual([folded]);
+      g().setView('grid');
+      g().setFilter({ starred: undefined });
+      expect(g().selection).toEqual([]);
+    });
+
+    it("view starts on the grid and stays on the map across folders", () => {
+      expect(g().view).toBe('grid');
+      g().setView('map');
+      expect(g().view).toBe('map');
+      g().close();
+      expect(g().view).toBe('map');
+      g().setView('grid');
+      expect(g().view).toBe('grid');
     });
 
     it('removeItems drops the photos and moves the selection', () => {

@@ -264,12 +264,17 @@ describe('architecture boundaries', () => {
   });
 
   it('no source file references a remote URL (local-first guarantee)', () => {
+    // The one exception: the gallery's Map tab, after the user says yes, shows OpenStreetMap tiles.
+    // The tile address is written down once (core/galleryMap.ts) and allowed by the gallery page's
+    // content policy (its index.html and its server's header) for images only.
+    const tileFiles = new Set(['src/core/galleryMap.ts', 'src/gallery/web/index.html', 'src/gallery/server/app.ts'].map((f) => join(f)));
     // electron/ is the desktop shell, scripts/desktop builds it: neither may reach out either.
     for (const f of [...files('src'), ...files('electron'), ...files('scripts/desktop'), 'electron-builder.config.cjs']) {
       // Comments may cite documentation; code may not contain remote URLs.
       const src = readFileSync(f, 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
-      const urls = src.match(/https?:\/\/[^\s'"`)]+/g) ?? [];
-      expect(urls.filter((u) => !/^https?:\/\/(127\.0\.0\.1|localhost)/.test(u)), f).toEqual([]);
+      const urls = src.match(/https?:\/\/[^\s'"`);]+/g) ?? [];
+      const allowed = (u: string) => /^https?:\/\/(127\.0\.0\.1|localhost)/.test(u) || (tileFiles.has(join(f)) && /^https:\/\/tile\.openstreetmap\.org(\/\{z\}\/\{x\}\/\{y\}\.png)?$/.test(u));
+      expect(urls.filter((u) => !allowed(u)), f).toEqual([]);
     }
   });
 });

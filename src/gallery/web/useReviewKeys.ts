@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { gridStep } from '../../core/galleryViewer';
-import { selectVisible, useGallery } from './store';
+import { selectFiltered, selectVisible, useGallery } from './store';
 
 /** Where keys belong to what has focus (typing, a menu, a dialog), not to the review. */
 const TYPING = 'input, textarea, select, [contenteditable="true"], [role="dialog"]';
@@ -8,6 +8,25 @@ const TYPING = 'input, textarea, select, [contenteditable="true"], [role="dialog
 const PRESSABLE = `${TYPING}, button, a`;
 
 const inside = (e: KeyboardEvent, selector: string) => !!(e.target as HTMLElement | null)?.closest?.(selector);
+
+/**
+ * Where in the shown list the keys step from: the selected photo's place, or -1 when it is not shown.
+ * A photo folded into a stack (it can be picked on the map) sits just after the nearest shown photo
+ * before it in the unfolded order: `before` is that photo's place (-1: none).
+ */
+function stepFrom(list: { path: string }[], unfolded: { path: string }[], selected: string | null): { at: number; before?: number } {
+  if (selected === null) return { at: -1 };
+  const at = list.findIndex((i) => i.path === selected);
+  if (at >= 0) return { at };
+  const k0 = unfolded.findIndex((i) => i.path === selected);
+  if (k0 < 0) return { at: -1 };
+  const shown = new Map(list.map((i, n) => [i.path, n]));
+  for (let k = k0 - 1; k >= 0; k--) {
+    const n = shown.get(unfolded[k].path);
+    if (n !== undefined) return { at: -1, before: n };
+  }
+  return { at: -1, before: -1 };
+}
 
 /**
  * The review keys, one window listener for the whole screen (it works whichever view shows the photos):
@@ -40,7 +59,13 @@ export function useReviewKeys(onOpen: (path: string) => void) {
       }
 
       const list = selectVisible(s);
-      const at = s.selected === null ? -1 : list.findIndex((i) => i.path === s.selected);
+      const place = stepFrom(list, selectFiltered(s), s.selected);
+      let at = place.at;
+      if (place.before !== undefined) {
+        // Between two shown photos: back lands on the one before, forward on the one after.
+        const back = e.key === 'ArrowLeft' || e.key === 'ArrowUp';
+        at = back ? place.before + 1 : place.before;
+      }
       const to = gridStep(Math.max(0, at), list.length, s.gridCols, e.key);
       if (to === null) return;
       e.preventDefault();

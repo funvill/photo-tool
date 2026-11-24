@@ -44,8 +44,10 @@ export interface GalleryState {
   toasts: Toast[];
   /** The "Tidy photo info" dialog is open. */
   tidyOpen: boolean;
-  /** Tiles per row in the grid as drawn now (the grid publishes it; Up/Down step by it). */
+  /** Tiles per row in the grid as drawn now (the grid publishes it; Up/Down step by it). 1 while the grid is not shown. */
   gridCols: number;
+  /** What the thumbnail column shows: the grid, or the photos on a map. Kept across folders, for the session. */
+  view: 'grid' | 'map';
 
   loadRecent(): Promise<void>;
   open(folder: string, recursive: boolean): Promise<void>;
@@ -85,6 +87,7 @@ export interface GalleryState {
   close(): void;
   setTidyOpen(open: boolean): void;
   setGridCols(cols: number): void;
+  setView(view: 'grid' | 'map'): void;
   toast(kind: Toast['kind'], text: string): void;
   dismissToast(id: number): void;
 }
@@ -203,7 +206,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
   /** After photos left the list (hidden, deleted, filtered out): move the selection on from `before`, the list as it was. */
   const settleSelection = (before: string[]) => {
     const s = get();
-    const after = selectVisible(s).map((i) => i.path);
+    const after = selectablePaths(s);
     if (s.selected !== null && !after.includes(s.selected)) {
       get().select(nextAfterRemoval(before, after, s.selected));
       return;
@@ -216,7 +219,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
   const pruneSelection = () => {
     const s = get();
     if (!s.selection.length) return;
-    const shown = new Set(selectVisible(s).map((i) => i.path));
+    const shown = new Set(selectablePaths(s));
     const selection = s.selection.filter((p) => shown.has(p));
     if (selection.length !== s.selection.length) set({ selection });
   };
@@ -265,6 +268,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
     toasts: [],
     tidyOpen: false,
     gridCols: 1,
+    view: 'grid',
 
     async loadRecent() {
       try {
@@ -407,13 +411,13 @@ export const useGallery = create<GalleryState>()((set, get) => {
     },
 
     setStacked(stacked) {
-      const before = selectVisible(get()).map((i) => i.path);
+      const before = selectablePaths(get());
       set({ stacked });
       settleSelection(before);
     },
 
     toggleStack(id) {
-      const before = selectVisible(get()).map((i) => i.path);
+      const before = selectablePaths(get());
       set((s) => ({ openStacks: s.openStacks.includes(id) ? s.openStacks.filter((o) => o !== id) : [...s.openStacks, id] }));
       settleSelection(before);
     },
@@ -423,7 +427,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
       const byPath = new Map(s.items.map((i) => [i.path, i]));
       const targets = flagTargets(s.selection, s.selected, (p) => byPath.get(p)?.info[field] === true);
       if (!targets) return;
-      const before = selectVisible(s).map((i) => i.path);
+      const before = selectablePaths(s);
       await Promise.all(
         targets.paths.map((p) => (field === 'star' ? get().setStar(p, targets.value) : get().saveInfo(p, { hidden: targets.value ? true : null }))),
       );
@@ -431,7 +435,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
     },
 
     removeItems(paths) {
-      const before = selectVisible(get()).map((i) => i.path);
+      const before = selectablePaths(get());
       const gone = new Set(paths);
       set((s) => ({ items: s.items.filter((i) => !gone.has(i.path)) }));
       settleSelection(before);
@@ -450,6 +454,10 @@ export const useGallery = create<GalleryState>()((set, get) => {
     setGridCols(cols) {
       const gridCols = Math.max(1, Math.floor(cols) || 1);
       if (gridCols !== get().gridCols) set({ gridCols });
+    },
+
+    setView(view) {
+      if (view !== get().view) set({ view });
     },
 
     toast(kind, text) {
@@ -473,7 +481,7 @@ const NO_STACKS = new Map<string, StackInfo>();
 let factsMemo: { items: GalleryItem[]; facts: Map<string, GalleryFacts>; at: number } | null = null;
 let visibleMemo: {
   items: GalleryItem[]; sort: GallerySortKey; filter: GalleryFilter; stacked: boolean; openStacks: string[] | undefined;
-  visible: GalleryItem[]; stackOf: Map<string, StackInfo>; stale: boolean;
+  filtered: GalleryItem[]; visible: GalleryItem[]; stackOf: Map<string, StackInfo>; stale: boolean;
 } | null = null;
 /** While a folder is still being read, facts are refreshed at most this often. */
 const FACTS_SCAN_THROTTLE_MS = 2000;
@@ -498,7 +506,7 @@ export function selectVisible(s: VisibleInput): GalleryItem[] {
   const visible = folded ? folded.items : sorted;
   // Built from stale facts: remembered (the selector must return the same list for the same state), but redone once the scan ends.
   const stale = withFacts && factsMemo?.items !== s.items;
-  visibleMemo = { items: s.items, sort: s.sort, filter: s.filter, stacked, openStacks: s.openStacks, visible, stackOf: folded ? folded.stackOf : NO_STACKS, stale };
+  visibleMemo = { items: s.items, sort: s.sort, filter: s.filter, stacked, openStacks: s.openStacks, filtered: sorted, visible, stackOf: folded ? folded.stackOf : NO_STACKS, stale };
   return visible;
 }
 
@@ -508,10 +516,29 @@ export function selectStackInfo(s: VisibleInput): Map<string, StackInfo> {
   return visibleMemo!.stackOf;
 }
 
+/**
+ * Every photo that passes the filter, sorted, with stacks unfolded (the map gives each one a marker):
+ * same memo as selectVisible.
+ */
+export function selectFiltered(s: VisibleInput): GalleryItem[] {
+  selectVisible(s);
+  return visibleMemo!.filtered;
+}
+
+/**
+ * Where the selection may rest: the grid's tiles, or (on the map, where every shown photo has its own
+ * marker) every photo that passes the filter, stacks unfolded.
+ */
+function selectablePaths(s: VisibleInput & Pick<GalleryState, 'view'>): string[] {
+  return (s.view === 'map' ? selectFiltered(s) : selectVisible(s)).map((i) => i.path);
+}
+
 /** The photos to show, in order: the grid and the viewer step through this one list. */
 export const useVisibleItems = (): GalleryItem[] => useGallery((s) => selectVisible(s));
 
 export const useStackInfo = (): Map<string, StackInfo> => useGallery((s) => selectStackInfo(s));
+
+export const useFilteredItems = (): GalleryItem[] => useGallery((s) => selectFiltered(s));
 
 /**
  * Open each folder the desktop app hands the page (`--gallery <folder>`, a second launch, File >

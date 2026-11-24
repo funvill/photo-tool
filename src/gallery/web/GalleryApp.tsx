@@ -4,6 +4,7 @@ import { Details } from './components/Details';
 import { FilterBar } from './components/FilterBar';
 import { FolderBar, RecentFolders } from './components/FolderBar';
 import { Grid } from './components/Grid';
+import { MapView } from './components/MapView';
 import { PhotoMenu } from './components/PhotoMenu';
 import { Preview } from './components/Preview';
 import { Progress } from './components/Progress';
@@ -51,9 +52,28 @@ export function GalleryApp() {
   );
 }
 
+/** Grid | Map, at the top of the thumbnail column: the map replaces only the thumbnails. */
+function ViewSwitch() {
+  const view = useGallery((s) => s.view);
+  const setView = useGallery((s) => s.setView);
+  return (
+    <div className="gallery-view-switch">
+      <div className="seg" role="group" aria-label="Show the photos as">
+        <button type="button" className={view === 'grid' ? 'on' : ''} aria-pressed={view === 'grid'} onClick={() => setView('grid')}>
+          Grid
+        </button>
+        <button type="button" className={view === 'map' ? 'on' : ''} aria-pressed={view === 'map'} onClick={() => setView('map')}>
+          Map
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Thumbnails | handle | preview | handle | details. The two side columns keep the widths last dragged to. */
 function ReviewScreen({ root }: { root: string }) {
   const noneShown = useVisibleItems().length === 0;
+  const view = useGallery((s) => s.view);
   const ref = useRef<HTMLDivElement>(null);
   const [room, setRoom] = useState(0);
   const [gridWidth, setGridWidth] = useState(() => savedWidth(GRID_KEY, GRID.fallback));
@@ -90,8 +110,12 @@ function ReviewScreen({ root }: { root: string }) {
   return (
     <div className="gallery-main" ref={ref}>
       <div className="gallery-grid-col" style={{ width: grid }}>
+        <ViewSwitch />
         {noneShown ? (
           <p className="muted pad">No photos match the filter</p>
+        ) : view === 'map' ? (
+          // A new folder opens fitted to its own markers.
+          <MapView key={root} />
         ) : (
           // A new folder starts at the top.
           <Grid key={root} onOpen={openViewer} onContextMenu={onPhotoMenu} />

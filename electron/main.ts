@@ -5,13 +5,15 @@
 //
 // Offline by construction: nothing here downloads anything, the window can only reach the app's
 // own local server, and Chromium's own network features are switched off (see hardenSession).
+// The one exception: the gallery's Map tab may load OpenStreetMap tiles once the user allows it (mapTiles.ts).
 // There is deliberately no crash reporter and no updater.
 import { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, screen, session, shell, utilityProcess, type MenuItemConstructorOptions, type UtilityProcess, type WebContents } from 'electron';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { GALLERY_APP_ID, GALLERY_PRODUCT_NAME, LICENCE_FILE, MIN_WINDOW, NOTICES_BUTTON, NOTICES_FILE, dataLayout, describeAbout, describeFailure, galleryEnv, parseMode, parseSelfTest, photoInfoFallbackDir, restoreWindow, selfTestOverlap, type WindowState } from './config';
-import { GALLERY_DESCRIPTION, galleryDrag, galleryFileActions, galleryFolders, galleryPage, launchGallery, type LaunchData } from './gallery';
+import { GALLERY_DESCRIPTION, galleryDrag, galleryFileActions, galleryFolders, galleryMapConsent, galleryPage, launchGallery, type LaunchData } from './gallery';
+import { OSM_TILE_ORIGIN, galleryRequestAllowed, hostResolverRules, isMapTileRequest, mapTileUserAgent } from './mapTiles';
 import { isAllowedRequest, isAppNavigation, requestHost } from './netGuard';
 import product from './product.json';
 import type { HostMessage, HostReply } from './server-host';
@@ -65,7 +67,8 @@ app.commandLine.appendSwitch('dns-prefetch-disable');
 // No name is ever looked up: without this, every start asks the system's DNS server for
 // redirector.gvt1.com (Chromium going for a spell-check dictionary before setSpellCheckerEnabled
 // below can stop it; seen with strace on Linux, and not a request the filter below ever sees).
-app.commandLine.appendSwitch('host-resolver-rules', 'MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost');
+// The gallery also looks up the map tile server's name, for its Map tab (see mapTiles.ts).
+app.commandLine.appendSwitch('host-resolver-rules', hostResolverRules(isGallery));
 app.commandLine.appendSwitch('disable-features', 'SpellcheckServiceMultilingual,MediaRouter,DialMediaRouteProvider,OptimizationHints,Translate,AutofillServerCommunication,CertificateTransparencyComponentUpdater');
 
 // ---- log file (in the data folder; the temp folder if that cannot be written)
@@ -213,17 +216,37 @@ function hardenSession() {
   ses.setDevicePermissionHandler(() => false);
   // The last line of defence: any request that is not to the app's own local server is cancelled
   // before it leaves.
+  // The gallery alone may also fetch map tiles, and only while the user allows maps (see mapTiles.ts).
   ses.webRequest.onBeforeRequest((details, callback) => {
     const host = requestHost(details.url);
     seen.requestsByHost[host] = (seen.requestsByHost[host] ?? 0) + 1;
-    const ok = isAllowedRequest(details.url, { ports: allowedPorts(), devTools: !app.isPackaged });
+    const guard = { ports: allowedPorts(), devTools: !app.isPackaged };
+    const ok = isGallery ? galleryRequestAllowed(details.url, details.method, { ...guard, mapsAllowed: mapsAllowed() }) : isAllowedRequest(details.url, guard);
     if (!ok) {
       keep(seen.cancelledRequests, details.url);
       log('cancelled request', details.url);
     }
     callback({ cancel: !ok });
   });
+  if (isGallery) {
+    // A tile request names the program and its version, nothing more (OpenStreetMap's tile policy).
+    ses.webRequest.onBeforeSendHeaders({ urls: [`${OSM_TILE_ORIGIN}/*`] }, (details, callback) => {
+      if (!isMapTileRequest(details.url, details.method)) return callback({ cancel: true });
+      const headers: Record<string, string | string[]> = {};
+      for (const [k, v] of Object.entries(details.requestHeaders)) if (!/^(user-agent|referer|cookie)$/i.test(k)) headers[k] = v;
+      headers['User-Agent'] = mapTileUserAgent(app.getVersion());
+      callback({ requestHeaders: headers });
+    });
+  }
 }
+
+// ---- the gallery's map (the one network exception; see mapTiles.ts)
+
+/** The gallery's own settings, beside Chromium's profile: `{ "mapsOnline": boolean }` once asked. */
+const gallerySettingsFile = () => join(app.getPath('userData'), 'settings.json');
+let mapsOnline = false;
+/** Tiles may load: in the gallery, after the user chose Load maps (never during a self-test). */
+const mapsAllowed = () => isGallery && mapsOnline && !selfTest;
 
 function hardenContents(contents: WebContents) {
   const block = (what: string) => (event: { preventDefault: () => void }, url: string) => {
@@ -414,6 +437,8 @@ function registerDesktopApi() {
     galleryDrag({ fromApp, serverPort: () => serverPort, log });
     // The right-click menu's copy, show in folder and delete (to the Recycle Bin), same checks.
     galleryFileActions({ window: () => win, fromApp, serverPort: () => serverPort, log });
+    // The Map tab's "Load maps from the internet?" answer, kept here so the request guard can read it.
+    galleryMapConsent({ window: () => win, fromApp, file: gallerySettingsFile(), onChange: (on) => (mapsOnline = on), log });
   }
 }
 

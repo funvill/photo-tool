@@ -8,6 +8,7 @@ import { resolve } from 'node:path';
 import { galleryLaunchCommand, parseMode } from './config';
 import { dragFiles, dragRequest, preparedDragFor, sameDragList, type DragCheck, type PreparedDrag } from './drag';
 import { copyTextRequest, trashConfirm, trashPhotos, type TrashResult } from './fileActions';
+import { readMapConsent, writeMapConsent } from './mapTiles';
 
 export const GALLERY_DESCRIPTION = 'Look through a folder of photos, star the best ones and drag them into other programs. Works offline.';
 
@@ -332,6 +333,32 @@ export function galleryFileActions(o: { window: () => BrowserWindow | null; from
     });
     o.log('trash', { trashed: result.trashed.length, failed: result.failed.length, cancelled: result.cancelled });
     return result;
+  });
+}
+
+/**
+ * The Map tab's answer to "Load maps from the internet?", kept in the gallery's settings file (see
+ * mapTiles.ts). null until it was asked. Only for the gallery's own page in its own window.
+ */
+export function galleryMapConsent(o: { window: () => BrowserWindow | null; fromApp: (e: IpcMainInvokeEvent) => boolean; file: string; onChange: (on: boolean) => void; log: (...a: unknown[]) => void }) {
+  const allowed = (e: IpcMainInvokeEvent) => {
+    const w = o.window();
+    return o.fromApp(e) && !!w && !w.isDestroyed() && e.sender === w.webContents;
+  };
+  let answer = readMapConsent(o.file);
+  o.onChange(answer === true);
+  ipcMain.handle('gallery:get-map-consent', (e): boolean | null => (allowed(e) ? answer : null));
+  ipcMain.handle('gallery:set-map-consent', (e, on: unknown): void => {
+    if (!allowed(e) || typeof on !== 'boolean') return;
+    // The guard follows the answer at once, even when it cannot be remembered.
+    answer = on;
+    o.onChange(on);
+    o.log('maps online', on);
+    try {
+      writeMapConsent(o.file, on);
+    } catch (err) {
+      o.log('could not save the map setting', String(err));
+    }
   });
 }
 

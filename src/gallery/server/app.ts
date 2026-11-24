@@ -61,11 +61,12 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
   app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
 
-  // Defence in depth for the local-first guarantee: the page may only talk to this server.
+  // Defence in depth for the local-first guarantee: the page may only talk to this server. The one
+  // exception: map tiles from OpenStreetMap, as images only (the Map tab, after the user said yes).
   app.use((_req, res, next) => {
     res.setHeader(
       'Content-Security-Policy',
-      "default-src 'self'; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ws://127.0.0.1:*; script-src 'self' 'unsafe-inline'",
+      "default-src 'self'; img-src 'self' blob: data: https://tile.openstreetmap.org; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ws://127.0.0.1:*; script-src 'self' 'unsafe-inline'",
     );
     next();
   });
