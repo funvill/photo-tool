@@ -1,7 +1,7 @@
 // Gallery sorting, filtering and the per-photo facts (interesting score, main colour, flags, bursts).
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import type { GalleryItem } from '../src/gallery/server/app';
-import { colourBucket, filterItems, galleryFacts, sortItems, type GalleryFilter, type GalleryItemLike } from '../src/core/gallerySort';
+import { colourBucket, filterItems, galleryFacts, isFilterActive, sortItems, type GalleryFilter, type GalleryItemLike } from '../src/core/gallerySort';
 
 // GalleryItem must keep satisfying the subset the pure sort code needs.
 expectTypeOf<GalleryItem>().toExtend<GalleryItemLike>();
@@ -182,6 +182,25 @@ describe('filterItems', () => {
     const small = item({ width: 800, height: 600 });
     const fine = item();
     expect(run([dark, bright, small, fine], { lowQuality: true })).toEqual([dark, bright, small]);
+  });
+});
+
+describe('hidden filter', () => {
+  const run = (list: GalleryItemLike[], f: GalleryFilter) => filterItems(list, f, galleryFacts(list));
+  const shown = item();
+  const hidden = item({ info: { hidden: true } });
+  it('filter hides hidden photos by default', () => {
+    expect(run([shown, hidden], {})).toEqual([shown]);
+  });
+  it("hidden 'show' keeps them", () => {
+    expect(run([shown, hidden], { hidden: 'show' })).toEqual([shown, hidden]);
+  });
+  it("hidden 'only' keeps only them", () => {
+    expect(run([shown, hidden], { hidden: 'only' })).toEqual([hidden]);
+  });
+  it('a hidden setting counts as an active filter', () => {
+    expect(isFilterActive({ hidden: 'show' })).toBe(true);
+    expect(isFilterActive({})).toBe(false);
   });
 });
 

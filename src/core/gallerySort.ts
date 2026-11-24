@@ -19,6 +19,8 @@ export interface GalleryFilter {
   orientation?: 'portrait' | 'landscape';
   hasLocation?: boolean;
   hasPeople?: boolean;
+  /** Hidden photos are left out unless this is 'show' (everything) or 'only' (just the hidden ones). */
+  hidden?: 'show' | 'only';
   /** The subfolder, as GalleryItem.relDir; '' is the top folder. */
   relDir?: string;
   /** Case-insensitive, over description and notes. */
@@ -27,7 +29,7 @@ export interface GalleryFilter {
 
 /** True when any filter is set (an empty search box or a cleared option does not count). */
 export function isFilterActive(f: GalleryFilter): boolean {
-  return !!(f.starred || f.from || f.to || f.lowQuality || f.nearDuplicates || f.orientation || f.hasLocation || f.hasPeople || f.relDir !== undefined || f.text?.trim());
+  return !!(f.starred || f.from || f.to || f.lowQuality || f.nearDuplicates || f.orientation || f.hasLocation || f.hasPeople || f.hidden || f.relDir !== undefined || f.text?.trim());
 }
 
 export type ColourBucket = 'red' | 'orange' | 'yellow' | 'green' | 'cyan' | 'blue' | 'purple' | 'pink' | 'neutral';
@@ -194,6 +196,8 @@ const day = (date: string | null) => (date ? date.slice(0, 10) : null);
 export function filterItems<T extends GalleryItemLike>(items: T[], f: GalleryFilter, facts: Map<string, GalleryFacts>): T[] {
   const text = f.text?.trim().toLowerCase();
   return items.filter((i) => {
+    const isHidden = i.info.hidden === true;
+    if (f.hidden === 'only' ? !isHidden : isHidden && f.hidden !== 'show') return false;
     const star = i.info.star === true;
     if (f.starred === 'yes' && !star) return false;
     if (f.starred === 'no' && star) return false;

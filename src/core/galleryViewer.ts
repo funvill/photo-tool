@@ -70,3 +70,44 @@ export function dragPaths(visible: readonly string[], selection: readonly string
   const set = new Set(selection);
   return visible.filter((p) => set.has(p));
 }
+
+/** Where a key moves the grid's selection from `index` (Left/Right by one, Up/Down by a row of `cols`, Home/End to the ends), kept inside the list; null for other keys or an empty list. */
+export function gridStep(index: number, count: number, cols: number, key: string): number | null {
+  if (count <= 0) return null;
+  const to = (i: number) => Math.max(0, Math.min(i, count - 1));
+  switch (key) {
+    case 'ArrowLeft':
+      return to(index - 1);
+    case 'ArrowRight':
+      return to(index + 1);
+    case 'ArrowUp':
+      return to(index - cols);
+    case 'ArrowDown':
+      return to(index + cols);
+    case 'Home':
+      return 0;
+    case 'End':
+      return count - 1;
+    default:
+      return null;
+  }
+}
+
+/** The photos a flag key (star, hide) changes and the value to give them: the whole selection when the selected photo is one of several, else just it; null when nothing is selected. */
+export function flagTargets(selection: readonly string[], selected: string | null, current: (path: string) => boolean): { paths: string[]; value: boolean } | null {
+  if (selected === null) return null;
+  const paths = selection.length >= 2 && selection.includes(selected) ? [...selection] : [selected];
+  return { paths, value: !current(selected) };
+}
+
+/** The photo to select once some photos are gone (deleted, hidden): the same one if it is still there, else the next remaining one, else the previous, else none. */
+export function nextAfterRemoval(before: readonly string[], after: readonly string[], selected: string | null): string | null {
+  if (selected === null) return null;
+  const left = new Set(after);
+  if (left.has(selected)) return selected;
+  const at = before.indexOf(selected);
+  if (at < 0) return null;
+  for (let i = at + 1; i < before.length; i++) if (left.has(before[i])) return before[i];
+  for (let i = at - 1; i >= 0; i--) if (left.has(before[i])) return before[i];
+  return null;
+}

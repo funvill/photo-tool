@@ -1,6 +1,6 @@
 // The gallery viewer's keys, and how clicks build the grid's selection (which a drag then takes along).
 import { describe, expect, it } from 'vitest';
-import { clickSelect, dragPaths, viewerNeighbours, viewerStep } from '../src/core';
+import { clickSelect, dragPaths, flagTargets, gridStep, nextAfterRemoval, viewerNeighbours, viewerStep } from '../src/core';
 
 describe('viewerStep', () => {
   it('moves with the arrow keys and stops at the ends', () => {
@@ -66,5 +66,62 @@ describe('grid selection', () => {
     expect(dragPaths(visible, ['d', 'b'], 'd')).toEqual(['b', 'd']);
     expect(dragPaths(visible, ['d', 'b'], 'a')).toEqual(['a']);
     expect(dragPaths(visible, [], 'c')).toEqual(['c']);
+  });
+});
+
+describe('gridStep', () => {
+  it('moves by one with Left/Right and by a row with Up/Down', () => {
+    expect(gridStep(3, 10, 4, 'ArrowRight')).toBe(4);
+    expect(gridStep(3, 10, 4, 'ArrowLeft')).toBe(2);
+    expect(gridStep(1, 10, 4, 'ArrowDown')).toBe(5);
+    expect(gridStep(5, 10, 4, 'ArrowUp')).toBe(1);
+  });
+  it('clamps to the list', () => {
+    expect(gridStep(9, 10, 4, 'ArrowRight')).toBe(9);
+    expect(gridStep(0, 10, 4, 'ArrowLeft')).toBe(0);
+    expect(gridStep(8, 10, 4, 'ArrowDown')).toBe(9);
+    expect(gridStep(2, 10, 4, 'ArrowUp')).toBe(0);
+  });
+  it('Home and End jump to the ends', () => {
+    expect(gridStep(5, 10, 4, 'Home')).toBe(0);
+    expect(gridStep(5, 10, 4, 'End')).toBe(9);
+  });
+  it('ignores other keys and an empty list', () => {
+    expect(gridStep(1, 10, 4, 'x')).toBeNull();
+    expect(gridStep(0, 0, 4, 'ArrowRight')).toBeNull();
+  });
+});
+
+describe('flagTargets', () => {
+  const current = (path: string) => path === 'b';
+  it('is null when nothing is selected', () => {
+    expect(flagTargets([], null, current)).toBeNull();
+  });
+  it('flags just the selected photo and flips its current value', () => {
+    expect(flagTargets(['a'], 'a', current)).toEqual({ paths: ['a'], value: true });
+    expect(flagTargets(['b'], 'b', current)).toEqual({ paths: ['b'], value: false });
+  });
+  it('flags the whole selection when the selected photo is in it', () => {
+    expect(flagTargets(['a', 'b', 'c'], 'b', current)).toEqual({ paths: ['a', 'b', 'c'], value: false });
+  });
+  it('flags only the selected photo when it is outside a multi-selection', () => {
+    expect(flagTargets(['a', 'c'], 'd', current)).toEqual({ paths: ['d'], value: true });
+  });
+});
+
+describe('nextAfterRemoval', () => {
+  const before = ['a', 'b', 'c', 'd'];
+  it('keeps the selected photo when it is still there', () => {
+    expect(nextAfterRemoval(before, ['a', 'b', 'd'], 'b')).toBe('b');
+  });
+  it('moves to the next remaining photo', () => {
+    expect(nextAfterRemoval(before, ['a', 'd'], 'b')).toBe('d');
+  });
+  it('moves to the previous one when the last was removed', () => {
+    expect(nextAfterRemoval(before, ['a', 'b', 'c'], 'd')).toBe('c');
+  });
+  it('is null when everything is gone or nothing was selected', () => {
+    expect(nextAfterRemoval(before, [], 'b')).toBeNull();
+    expect(nextAfterRemoval(before, ['a'], null)).toBeNull();
   });
 });
