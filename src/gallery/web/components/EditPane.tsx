@@ -99,6 +99,11 @@ export function EditPane({ item }: { item: GalleryItem }) {
     setFlipped(false);
   };
 
+  // The store keeps the edit in progress: selecting another photo now is Done with it.
+  useEffect(() => {
+    useGallery.getState().setEditDraft(isIdentityEdit(draft) ? null : draft);
+  }, [draft]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey || inside(e, TYPING)) return;
@@ -106,7 +111,8 @@ export function EditPane({ item }: { item: GalleryItem }) {
         e.preventDefault();
         cancel();
       } else if (e.key === 'Enter') {
-        // Enter on a focused toolbar button presses that button.
+        // Enter on a toolbar button reached with the keyboard presses that button (one clicked with the
+        // mouse lets go of the focus, below, so Enter is Done after it).
         if (inside(e, 'button')) return;
         e.preventDefault();
         if (!e.repeat) done();
@@ -165,7 +171,13 @@ export function EditPane({ item }: { item: GalleryItem }) {
           </div>
         </div>
       </div>
-      <div className="gallery-edit-tools">
+      <div
+        className="gallery-edit-tools"
+        onClick={(e) => {
+          // A mouse click (detail > 0; a key press gives 0) leaves no focus on the button it pressed.
+          if (e.detail > 0) (e.target as HTMLElement).closest('button')?.blur();
+        }}
+      >
         {/* The shapes need the photo's own shape: they wait for the picture. */}
         <div className="seg seg-compact" role="group" aria-label="Aspect ratio">
           {ASPECTS.map((a) => (

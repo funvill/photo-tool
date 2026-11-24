@@ -1,7 +1,8 @@
 import { useEffect, useState, type MouseEvent } from 'react';
 import { editKey, editPlan, isIdentityEdit, type PhotoEdit } from '../../../core/photoEdit';
 import { fullUrl, thumbUrl, type GalleryItem } from '../api';
-import { selectStackPlace, shownEdit, useFilteredItems, useGallery } from '../store';
+import { useShallow } from 'zustand/react/shallow';
+import { editActions, selectStackPlace, shownEdit, useFilteredItems, useGallery } from '../store';
 import { Icon } from '../../../web/components/Icon';
 import { EditPane } from './EditPane';
 import { EditedImage } from './EditedImage';
@@ -52,15 +53,52 @@ export function Preview({ onOpen, onContextMenu }: PreviewProps) {
             {stack && <span className="badge">{stack}</span>}
             {unsaved && <span className="badge gallery-badge-unsaved">Edited · not saved</span>}
             {!editing && (
-              <button type="button" className="btn btn-small gallery-preview-edit" onClick={() => useGallery.getState().startEdit(item.path)} title="Crop and rotate (E)">
-                <Icon name="crop" size={14} />
-                Edit
-              </button>
+              <span className="gallery-preview-actions">
+                <SaveButtons item={item} />
+                <button type="button" className="btn btn-small gallery-preview-edit" onClick={() => useGallery.getState().startEdit(item.path)} title="Crop and rotate (E)">
+                  <Icon name="crop" size={14} />
+                  Edit
+                </button>
+              </span>
             )}
           </div>
         </>
       )}
     </section>
+  );
+}
+
+/**
+ * The caption's save buttons: Save and Save as… for the photo's unsaved edit, Save all (N) while any photo
+ * has one, and Revert to original for an edit saved in the info file (with nothing unsaved over it).
+ */
+function SaveButtons({ item }: { item: GalleryItem }) {
+  const a = useGallery(useShallow((s) => editActions(s, item)));
+  const saving = useGallery((s) => s.saving);
+  const g = useGallery.getState;
+  return (
+    <>
+      {a.save && (
+        <button type="button" className="btn btn-small btn-primary" disabled={saving || !!a.saveBlocked} title={a.saveBlocked ?? a.saveTitle} onClick={() => void g().saveEdit(item.path)}>
+          Save
+        </button>
+      )}
+      {a.save && (
+        <button type="button" className="btn btn-small" disabled={saving || !!a.saveAsBlocked} title={a.saveAsBlocked ?? 'Save the edited photo as a new file; this one stays as it is'} onClick={() => void g().saveEditAs(item.path)}>
+          Save as…
+        </button>
+      )}
+      {a.saveAll > 0 && (
+        <button type="button" className="btn btn-small" disabled={saving} title="Save every photo's unsaved edit" onClick={() => void g().saveAllEdits()}>
+          Save all ({a.saveAll})
+        </button>
+      )}
+      {a.revert && (
+        <button type="button" className="btn btn-small" disabled={saving} title="Remove the crop and rotation saved in photoinfo.json" onClick={() => void g().revertEdit(item.path)}>
+          Revert to original
+        </button>
+      )}
+    </>
   );
 }
 

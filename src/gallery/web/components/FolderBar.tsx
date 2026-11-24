@@ -1,10 +1,13 @@
+import { useState } from 'react';
 import { desktop } from '../../../web/desktop';
 import { Icon } from '../../../web/components/Icon';
 import { THUMB_MAX, THUMB_MIN, useGallery } from '../store';
+import { SettingsDialog } from './SettingsDialog';
 
+// Another folder, or closing this one, asks first while there are unsaved edits (requestOpen / requestClose).
 const pickAndOpen = async () => {
   const folder = await desktop?.pickFolder({ title: 'Open a folder of photos' });
-  if (folder) await useGallery.getState().open(folder, useGallery.getState().recursive);
+  if (folder) await useGallery.getState().requestOpen(folder, useGallery.getState().recursive);
 };
 
 function IncludeSubfolders() {
@@ -17,8 +20,9 @@ function IncludeSubfolders() {
   );
 }
 
-/** The bar along the top: open a folder, the folder that is open, and the thumbnail size. */
+/** The bar along the top: open a folder, the folder that is open, the thumbnail size and Settings. */
 export function FolderBar() {
+  const [settings, setSettings] = useState(false);
   const root = useGallery((s) => s.root);
   const thumbSize = useGallery((s) => s.thumbSize);
   // A read-only folder's stars are kept in Photobook Studio's data folder (so the editor still sees them).
@@ -50,7 +54,7 @@ export function FolderBar() {
             <button type="button" className="btn" onClick={() => useGallery.getState().setTidyOpen(true)} title="Remove info saved for photos that are no longer in the folder">
               Tidy photo info…
             </button>
-            <button type="button" className="btn" onClick={() => useGallery.getState().close()}>
+            <button type="button" className="btn" onClick={() => useGallery.getState().requestClose()}>
               Close folder
             </button>
             <IncludeSubfolders />
@@ -59,7 +63,11 @@ export function FolderBar() {
             </button>
           </>
         )}
+        <button type="button" className="icon-btn gallery-settings-btn" aria-label="Settings" title="Settings" onClick={() => setSettings(true)}>
+          ⚙
+        </button>
       </div>
+      {settings && <SettingsDialog onClose={() => setSettings(false)} />}
     </header>
   );
 }
@@ -88,7 +96,7 @@ export function RecentFolders() {
                   className="gallery-recent-item"
                   disabled={!r.exists}
                   title={r.exists ? r.folder : 'Not found — is the drive connected?'}
-                  onClick={() => void useGallery.getState().open(r.folder, r.recursive)}
+                  onClick={() => void useGallery.getState().requestOpen(r.folder, r.recursive)}
                 >
                   <Icon name="folder" />
                   <span className="ellipsis">{r.folder}</span>

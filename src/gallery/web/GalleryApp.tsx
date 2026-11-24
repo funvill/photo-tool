@@ -8,6 +8,7 @@ import { MapView } from './components/MapView';
 import { PhotoMenu } from './components/PhotoMenu';
 import { Preview } from './components/Preview';
 import { Progress } from './components/Progress';
+import { LeaveDialog } from './components/SettingsDialog';
 import { Splitter, saveWidth, savedWidth } from './components/Splitter';
 import { TidyDialog } from './components/TidyDialog';
 import { Toasts } from './components/Toasts';
@@ -36,6 +37,8 @@ export function GalleryApp() {
   useEffect(() => connectDesktop(desktop), []);
   useEffect(() => {
     void useGallery.getState().loadRecent();
+    // Where edits are saved (Settings), once connectDesktop above has handed the store the desktop app.
+    void useGallery.getState().loadEditTarget();
   }, []);
   useReviewKeys(openViewer);
 
@@ -47,6 +50,7 @@ export function GalleryApp() {
       {!root ? <RecentFolders /> : empty ? <p className="muted pad">No photos in this folder.</p> : <ReviewScreen root={root} />}
       {root && !empty && <Viewer />}
       {root && tidyOpen && <TidyDialog />}
+      <LeaveDialog />
       <Toasts />
     </div>
   );

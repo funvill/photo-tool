@@ -615,7 +615,7 @@ test('E opens edit mode; R turns the crop box; a dragged corner and Done leave a
     await expect(preview).toContainText('Edited · not saved');
     // The preview and the tile show the edit; the arrows work again.
     await expect(preview.locator('.gallery-preview-img.gallery-edited img')).toBeVisible();
-    await expect(page.locator('.gallery-tile.selected .gallery-edited img')).toHaveCount(1);
+    await expect(page.locator('.gallery-tile.selected .gallery-edited img')).toBeVisible();
     // The edited photo zooms like any other, with the mini map; double-click goes back to fit.
     const stage = preview.locator('.gallery-preview-stage');
     const s = (await stage.boundingBox())!;
@@ -698,7 +698,7 @@ test('Edit in the right-click menu opens edit mode on that photo; a saved edit s
     await page.getByLabel('Stack similar').uncheck();
     const tile = page.locator('.gallery-tile[title="day1-02-street.jpg"]');
     // A saved edit (info-file mode) shows, with no unsaved dot.
-    await expect(tile.locator('.gallery-edited img')).toHaveCount(1);
+    await expect(tile.locator('.gallery-edited img')).toBeVisible();
     await expect(tile.locator('.gallery-tile-unsaved')).toHaveCount(0);
     await tile.click({ button: 'right' });
     await page.getByRole('menuitem', { name: /Edit/ }).click();
@@ -716,6 +716,200 @@ test('Edit in the right-click menu opens edit mode on that photo; a saved edit s
     await expect(preview.getByRole('button', { name: 'Done' })).toHaveCount(0);
     await expect(tile.locator('.gallery-tile-unsaved')).toHaveCount(0);
     await expect(preview).not.toContainText('Edited · not saved');
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+// ---- Saving edits. The e2e tests run the gallery in a plain browser: edits are saved in photoinfo.json only.
+
+/** Square crop on the selected photo, then Done: an unsaved edit. */
+async function squareCrop(page: Page) {
+  const preview = page.getByRole('region', { name: 'Preview' });
+  await page.keyboard.press('e');
+  await expect(page.locator('.gallery-edit-frame')).toBeVisible();
+  await expect(preview.getByRole('button', { name: 'Square' })).toBeEnabled();
+  await preview.getByRole('button', { name: 'Square' }).click();
+  await preview.getByRole('button', { name: 'Done' }).click();
+  await expect(preview).toContainText('Edited · not saved');
+}
+
+test('Save writes the edit into photoinfo.json; after a reload the tile and preview still show it', async ({ page, request }) => {
+  const dir = await openTrip(page, request);
+  try {
+    const first = await altOf(page, 0);
+    const preview = page.getByRole('region', { name: 'Preview' });
+    await squareCrop(page);
+    await expect(preview.getByRole('button', { name: 'Save all (1)' })).toBeVisible();
+    await preview.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(preview).not.toContainText('Edited · not saved');
+    await expect(page.locator('.gallery-tile-unsaved')).toHaveCount(0);
+    await expect(preview.getByRole('button', { name: 'Save', exact: true })).toHaveCount(0);
+    await expect.poll(() => photoInfo(dir)[first!]?.edit).toEqual(expect.objectContaining({ rotate: 0, straighten: 0 }));
+    const crop = (photoInfo(dir)[first!].edit as { crop: { w: number; h: number } }).crop;
+    expect(crop.w).toBeLessThan(1);
+
+    await page.reload();
+    await page.getByRole('button', { name: dir }).click();
+    await expect(page.locator('.gallery-tile').first()).toBeVisible({ timeout: 60_000 });
+    await expect(selectedImg(page)).toHaveAttribute('alt', first!);
+    await expect(page.locator('.gallery-tile.selected .gallery-edited img')).toBeVisible();
+    await expect(page.locator('.gallery-tile.selected .gallery-tile-unsaved')).toHaveCount(0);
+    await expect(preview.locator('.gallery-preview-img.gallery-edited img')).toBeVisible();
+    // A saved edit can be taken back.
+    await expect(preview.getByRole('button', { name: 'Revert to original' })).toBeVisible();
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+test('a mouse click on Rotate 90° then Enter is Done with one turn, not a second turn', async ({ page, request }) => {
+  const dir = await openTrip(page, request);
+  try {
+    const first = await altOf(page, 0);
+    const preview = page.getByRole('region', { name: 'Preview' });
+    await page.keyboard.press('e');
+    await expect(page.locator('.gallery-edit-frame')).toBeVisible();
+    await preview.getByRole('button', { name: 'Rotate 90°' }).click();
+    await page.keyboard.press('Enter');
+    await expect(preview.getByRole('button', { name: 'Done' })).toHaveCount(0);
+    await expect(preview).toContainText('Edited · not saved');
+    await preview.getByRole('button', { name: 'Save', exact: true }).click();
+    // One turn anticlockwise is 270 clockwise; two would be 180.
+    await expect.poll(() => (photoInfo(dir)[first!]?.edit as { rotate?: number } | undefined)?.rotate).toBe(270);
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+test('selecting another photo while editing keeps what was done as an unsaved edit', async ({ page, request }) => {
+  const dir = await openTrip(page, request);
+  try {
+    await page.getByLabel('Stack similar').uncheck();
+    const first = page.locator('.gallery-tile').first();
+    const preview = page.getByRole('region', { name: 'Preview' });
+    await first.click();
+    await page.keyboard.press('e');
+    await expect(page.locator('.gallery-edit-frame')).toBeVisible();
+    await expect(preview.getByRole('button', { name: 'Square' })).toBeEnabled();
+    await preview.getByRole('button', { name: 'Square' }).click();
+    await page.locator('.gallery-tile').nth(1).click();
+    await expect(preview.getByRole('button', { name: 'Done' })).toHaveCount(0);
+    await expect(first.locator('.gallery-tile-unsaved')).toBeVisible();
+    await expect(preview.getByRole('button', { name: 'Save all (1)' })).toBeVisible();
+    expect(photoInfo(dir)).toEqual({});
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+test('Save all saves every unsaved edit and says so; the menu offers Save, Save as and Save all', async ({ page, request }) => {
+  const dir = await openTrip(page, request);
+  try {
+    await page.getByLabel('Stack similar').uncheck();
+    const preview = page.getByRole('region', { name: 'Preview' });
+    const names = [await altOf(page, 0), await altOf(page, 1)];
+    await page.locator('.gallery-tile').nth(0).click();
+    await squareCrop(page);
+    await page.locator('.gallery-tile').nth(1).click();
+    await squareCrop(page);
+    await expect(page.locator('.gallery-tile-unsaved')).toHaveCount(2);
+
+    await page.locator('.gallery-tile').nth(1).click({ button: 'right' });
+    const menu = page.getByRole('menu');
+    await expect(menu.getByRole('menuitem', { name: 'Save', exact: true })).toBeEnabled();
+    await expect(menu.getByRole('menuitem', { name: /Save as/ })).toBeDisabled();
+    await expect(menu.getByRole('menuitem', { name: /Save as/ })).toHaveAttribute('title', 'Save as needs the desktop app');
+    await expect(menu.getByRole('menuitem', { name: /Revert to original/ })).toHaveCount(0);
+    await menu.getByRole('menuitem', { name: 'Save all (2)' }).click();
+
+    await expect(page.locator('.toast', { hasText: 'Saved 2 photos' })).toBeVisible();
+    await expect(page.locator('.gallery-tile-unsaved')).toHaveCount(0);
+    await expect(preview.getByRole('button', { name: /Save all/ })).toHaveCount(0);
+    await expect.poll(() => Object.keys(photoInfo(dir)).sort()).toEqual([...names].sort());
+    for (const n of names) expect(photoInfo(dir)[n!].edit).toBeTruthy();
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+test('Save as is disabled in the browser, with a title saying why', async ({ page, request }) => {
+  const dir = await openTrip(page, request);
+  try {
+    const preview = page.getByRole('region', { name: 'Preview' });
+    await squareCrop(page);
+    const saveAs = preview.getByRole('button', { name: 'Save as…' });
+    await expect(saveAs).toBeDisabled();
+    await expect(saveAs).toHaveAttribute('title', 'Save as needs the desktop app');
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+test('Revert to original (caption and menu) removes the saved edit from photoinfo.json', async ({ page, request }) => {
+  const edit = { rotate: 90, straighten: 0, crop: { x: 0, y: 0, w: 0.5, h: 0.5 } };
+  const dir = await openTrip(page, request, { 'day1-02-street.jpg': { edit, star: true }, 'day3-02-museum.jpg': { edit } });
+  try {
+    await page.getByLabel('Stack similar').uncheck();
+    const preview = page.getByRole('region', { name: 'Preview' });
+    const street = page.locator('.gallery-tile[title="day1-02-street.jpg"]');
+    await street.click();
+    await preview.getByRole('button', { name: 'Revert to original' }).click();
+    await expect.poll(() => photoInfo(dir)['day1-02-street.jpg']).toEqual({ star: true });
+    await expect(street.locator('.gallery-edited')).toHaveCount(0);
+    await expect(preview.getByRole('button', { name: 'Revert to original' })).toHaveCount(0);
+
+    const museum = page.locator('.gallery-tile[title="day3-02-museum.jpg"]');
+    await museum.click({ button: 'right' });
+    await page.getByRole('menuitem', { name: /Revert to original/ }).click();
+    await expect.poll(() => photoInfo(dir)['day3-02-museum.jpg'] ?? {}).toEqual({});
+    await expect(museum.locator('.gallery-edited')).toHaveCount(0);
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+test('Settings: two choices for saving an edit, the photo file greyed out in the browser', async ({ page, request }) => {
+  const dir = await openTrip(page, request);
+  try {
+    await page.getByRole('button', { name: 'Settings' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Settings' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('group', { name: 'When I save an edit' })).toBeVisible();
+    const info = dialog.getByRole('radio', { name: /Change only the photo's info file/ });
+    const file = dialog.getByRole('radio', { name: /Change the photo file itself/ });
+    await expect(info).toBeChecked();
+    await expect(info).toBeEnabled();
+    await expect(file).toBeDisabled();
+    await expect(dialog).toContainText('The photo stays as it is. The crop and rotation are kept in photoinfo.json, and the photobook applies them when it brings the photo in.');
+    await expect(dialog).toContainText('The photo is rewritten. The original goes to the Recycle Bin.');
+    await expect(dialog).toContainText('Needs the desktop app');
+    // Keys typed in the dialog stay there.
+    const selected = await selectedImg(page).getAttribute('alt');
+    await page.keyboard.press('ArrowRight');
+    await expect(selectedImg(page)).toHaveAttribute('alt', selected!);
+    await dialog.getByRole('button', { name: 'Close' }).last().click();
+    await expect(dialog).toHaveCount(0);
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+test('closing the folder with unsaved edits asks first; Cancel keeps it open', async ({ page, request }) => {
+  const dir = await openTrip(page, request);
+  try {
+    await squareCrop(page);
+    await page.getByRole('button', { name: 'Close folder' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Unsaved edits' });
+    await expect(dialog).toContainText('You have unsaved edits to 1 photo. Close the folder without saving?');
+    await dialog.getByRole('button', { name: 'Cancel' }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page.locator('.gallery-tile-unsaved')).toHaveCount(1);
+
+    await page.getByRole('button', { name: 'Close folder' }).click();
+    await dialog.getByRole('button', { name: 'Close without saving' }).click();
+    await expect(page.getByRole('heading', { name: 'Open a folder of photos' })).toBeVisible();
+    expect(photoInfo(dir)).toEqual({});
   } finally {
     removeTrip(dir);
   }

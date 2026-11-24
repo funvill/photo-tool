@@ -1,7 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Icon } from '../../../web/components/Icon';
 import { desktop } from '../../../web/desktop';
-import { menuTargets, useGallery } from '../store';
+import { useShallow } from 'zustand/react/shallow';
+import { editActions, menuTargets, useGallery } from '../store';
 
 // Right-click menu on a photo (a tile or the preview), in the editor's .ctx-menu style. Copy to
 // clipboard and Show in file explorer act on the photo clicked; Copy path, Favourite, Hide and Delete
@@ -117,6 +118,12 @@ export function PhotoMenu({ x, y, path, onClose }: PhotoMenuProps) {
   const starred = selectedItem?.info.star === true;
   const hidden = selectedItem?.info.hidden === true;
   const editing = useGallery((s) => s.editing === path);
+  // Save, Save as…, Save all and Revert to original, as the preview caption offers them for this photo.
+  const actions = useGallery(useShallow((s) => {
+    const item = s.items.find((i) => i.path === path);
+    return item && s.editing === null ? editActions(s, item) : null;
+  }));
+  const saving = useGallery((s) => s.saving);
 
   // Keep the menu on screen.
   useLayoutEffect(() => {
@@ -164,6 +171,14 @@ export function PhotoMenu({ x, y, path, onClose }: PhotoMenuProps) {
   return (
     <div className="ctx-menu" ref={ref} style={pos} role="menu" aria-label="Photo" onContextMenu={(e) => e.preventDefault()}>
       <MenuItem icon="crop" label="Edit" hint="E" disabled={editing} onClick={go(() => edit(path))} />
+      {actions?.save && (
+        <>
+          <MenuItem icon="check" label="Save" disabled={saving || !!actions.saveBlocked} title={actions.saveBlocked ?? actions.saveTitle} onClick={go(() => useGallery.getState().saveEdit(path))} />
+          <MenuItem icon="download" label="Save as…" disabled={saving || !!actions.saveAsBlocked} title={actions.saveAsBlocked ?? undefined} onClick={go(() => useGallery.getState().saveEditAs(path))} />
+        </>
+      )}
+      {!!actions?.saveAll && <MenuItem icon="check" label={`Save all (${actions.saveAll})`} disabled={saving} onClick={go(() => useGallery.getState().saveAllEdits())} />}
+      {actions?.revert && <MenuItem icon="undo" label="Revert to original" disabled={saving} onClick={go(() => useGallery.getState().revertEdit(path))} />}
       <div className="ctx-sep" />
       <MenuItem icon="image" label="Copy to clipboard" disabled={!desktop?.copyImage} onClick={go(() => copyImage(path))} />
       <MenuItem icon="copy" label="Copy path to clipboard" onClick={go(() => copyPaths(path))} />
@@ -177,9 +192,9 @@ export function PhotoMenu({ x, y, path, onClose }: PhotoMenuProps) {
   );
 }
 
-function MenuItem({ icon, label, hint, disabled, danger, onClick }: { icon: string; label: string; hint?: string; disabled?: boolean; danger?: boolean; onClick: () => void }) {
+function MenuItem({ icon, label, hint, title, disabled, danger, onClick }: { icon: string; label: string; hint?: string; title?: string; disabled?: boolean; danger?: boolean; onClick: () => void }) {
   return (
-    <button type="button" role="menuitem" className={`ctx-item ${danger ? 'danger' : ''}`} disabled={disabled} onClick={onClick}>
+    <button type="button" role="menuitem" className={`ctx-item ${danger ? 'danger' : ''}`} disabled={disabled} title={title} onClick={onClick}>
       <Icon name={icon} size={14} />
       <span>{label}</span>
       {hint && <kbd>{hint}</kbd>}

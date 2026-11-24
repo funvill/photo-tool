@@ -79,7 +79,20 @@
 .gallery-preview-caption .badge { font-size: 11px; padding: 2px 7px; white-space: nowrap; background: rgba(255, 255, 255, 0.12); }
 .gallery-preview-caption .gallery-badge-fav { background: var(--accent); color: var(--accent-ink); }
 .gallery-preview-caption .gallery-badge-unsaved { background: #d98b2b; color: #111; }
-.gallery-preview-caption .gallery-preview-edit { margin-left: auto; flex: none; gap: 5px; }
+.gallery-preview-caption .gallery-preview-edit { flex: none; gap: 5px; }
+/* Save, Save as…, Save all, Revert to original and Edit, at the caption's right end. */
+.gallery-preview-actions { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; }
+.gallery-preview-actions .btn { white-space: nowrap; }
+
+/* Settings (the gear in the top bar). */
+.gallery-settings-btn { font-size: 17px; line-height: 1; }
+.gallery-settings-group { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.gallery-settings-group legend { padding: 0; margin-bottom: 8px; font-weight: 600; }
+.gallery-settings-option { display: flex; align-items: flex-start; gap: 9px; cursor: pointer; }
+.gallery-settings-option input { margin-top: 3px; accent-color: var(--accent); }
+.gallery-settings-option > span { display: flex; flex-direction: column; gap: 2px; }
+.gallery-settings-option.disabled { cursor: default; opacity: 0.55; }
+.gallery-settings-note { color: var(--muted); font-style: italic; }
 
 /* A photo with an edit (EditedImage): the box hides what is cut away; the picture inside is placed and turned
    by editCss (transform-origin 0 0). */
