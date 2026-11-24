@@ -10,6 +10,12 @@
 .gallery-size { gap: 6px; color: var(--muted); }
 .gallery-size input { width: 120px; accent-color: var(--accent); }
 
+/* Sort and filters */
+.gallery-filters { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 12px; border-bottom: 1px solid var(--line-soft); background: var(--panel); }
+.gallery-field { gap: 6px; color: var(--muted); white-space: nowrap; }
+.gallery-search { width: 220px; }
+.gallery-count { margin-left: auto; white-space: nowrap; }
+
 /* Reading a folder */
 .gallery-progress { flex: none; display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line-soft); background: var(--panel); }
 .gallery-progress-bar { flex: 1; max-width: 420px; height: 6px; border-radius: 3px; background: var(--panel-3); overflow: hidden; }

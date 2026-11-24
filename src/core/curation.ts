@@ -48,12 +48,14 @@ export function groupSimilar(assets: PhotoAsset[], opts = DEFAULT_SIMILARITY): M
   };
   for (const a of assets) parent.set(a.id, a.id);
   const hashed = assets.filter((a) => a.analysis?.dHash);
+  // Parsed once: the pair loop below is quadratic, and parsing a date per pair dominated a big folder.
+  const times = hashed.map(timeOf);
   for (let i = 0; i < hashed.length; i++) {
     for (let j = i + 1; j < hashed.length; j++) {
       const a = hashed[i];
       const b = hashed[j];
-      const ta = timeOf(a);
-      const tb = timeOf(b);
+      const ta = times[i];
+      const tb = times[j];
       const dated = !Number.isNaN(ta) && !Number.isNaN(tb);
       if (dated && Math.abs(ta - tb) > opts.maxMinutesApart * 60_000) continue;
       const limit = dated ? opts.maxDistance : opts.maxDistanceUndated;

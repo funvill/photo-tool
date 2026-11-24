@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GalleryItem } from '../src/gallery/server/app';
 
-const { useGallery, connectDesktop } = await import('../src/gallery/web/store');
+const { useGallery, connectDesktop, selectVisible } = await import('../src/gallery/web/store');
 
 function item(over: Partial<GalleryItem> = {}): GalleryItem {
   return {
@@ -255,5 +255,29 @@ describe('gallery store', () => {
     expect(useGallery.getState().thumbSize).toBe(96);
     useGallery.getState().setThumbSize(999);
     expect(useGallery.getState().thumbSize).toBe(320);
+  });
+
+  it('remembers sort and filters for the session, but a new folder clears the subfolder filter', async () => {
+    routes['POST /api/gallery/open'] = () => ({ json: { jobId: 'j2' } });
+    routes['GET /api/gallery/job'] = () => ({ json: { done: true, total: 0, processed: 0, startedAt: 0, items: [], errors: [] } });
+    routes['GET /api/gallery/stamp'] = () => ({ json: { stamp: 's' } });
+    routes['GET /api/gallery/recent'] = () => ({ json: [] });
+    useGallery.getState().setSort('name');
+    useGallery.getState().setFilter({ starred: 'yes', relDir: 'sub' });
+    await useGallery.getState().open('D:\Other', true);
+    expect(useGallery.getState().sort).toBe('name');
+    expect(useGallery.getState().filter).toEqual({ starred: 'yes' });
+    useGallery.getState().setFilter({ starred: undefined });
+    expect(useGallery.getState().filter).toEqual({});
+  });
+
+  it('works the visible list out once per change of photos, sort or filter', () => {
+    const items = [item({ path: 'b', fileName: 'b.jpg', info: { star: true } }), item({ path: 'a', fileName: 'a.jpg' })];
+    const base = { items, sort: 'name' as const, filter: {} };
+    const first = selectVisible(base);
+    expect(first.map((i) => i.path)).toEqual(['a', 'b']);
+    expect(selectVisible({ ...base })).toBe(first);
+    expect(selectVisible({ ...base, filter: { starred: 'yes' } }).map((i) => i.path)).toEqual(['b']);
+    expect(selectVisible({ ...base, sort: 'date' })).not.toBe(first);
   });
 });

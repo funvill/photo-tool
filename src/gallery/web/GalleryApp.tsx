@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { desktop } from '../../web/desktop';
 import { Details } from './components/Details';
+import { FilterBar } from './components/FilterBar';
 import { FolderBar, RecentFolders } from './components/FolderBar';
 import { Grid } from './components/Grid';
 import { Progress } from './components/Progress';
@@ -27,6 +28,7 @@ export function GalleryApp() {
     <div className="gallery">
       <FolderBar />
       <Progress />
+      {root && !empty && <FilterBar />}
       {!root ? (
         <RecentFolders />
       ) : empty ? (

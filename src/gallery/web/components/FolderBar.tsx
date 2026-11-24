@@ -20,7 +20,6 @@ function IncludeSubfolders() {
 /** The bar along the top: open a folder, the folder that is open, and the thumbnail size. */
 export function FolderBar() {
   const root = useGallery((s) => s.root);
-  const count = useGallery((s) => s.items.length);
   const thumbSize = useGallery((s) => s.thumbSize);
   // A read-only folder's stars are kept in Photobook Studio's data folder (so the editor still sees them).
   const elsewhere = useGallery((s) => s.items.some((i) => i.infoSource === 'fallback'));
@@ -30,7 +29,7 @@ export function FolderBar() {
         <strong>Photobook Gallery</strong>
         {root && (
           <span className="muted ellipsis" title={root}>
-            {root} · {count} {count === 1 ? 'photo' : 'photos'}
+            {root}
           </span>
         )}
         {elsewhere && (

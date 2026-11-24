@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { DesktopApi } from '../../shared/desktopApi';
+import { filterItems, galleryFacts, sortItems, type GalleryFacts, type GalleryFilter, type GallerySortKey } from '../../core/gallerySort';
 import { galleryApi, type GalleryItem, type JobUpdate, type RecentFolder } from './api';
 
 // The gallery's state: the open folder, its photos (filled in while the folder is read), the
@@ -21,6 +22,9 @@ export interface GalleryState {
   selected: string | null;
   /** Tile size in px, 96–320, remembered in localStorage 'gallery.thumbSize'. */
   thumbSize: number;
+  /** Order and filters of the grid, kept for the session (in memory, not saved): a new folder keeps the sort and the filters except the subfolder. */
+  sort: GallerySortKey;
+  filter: GalleryFilter;
   /** "Include subfolders" for the next folder opened. */
   recursive: boolean;
   recent: RecentFolder[];
@@ -40,6 +44,10 @@ export interface GalleryState {
   refreshInfo(): Promise<void>;
   select(path: string | null): void;
   setThumbSize(px: number): void;
+  setSort(sort: GallerySortKey): void;
+  /** Change some filters; a key set to undefined is cleared. */
+  setFilter(patch: Partial<GalleryFilter>): void;
+  clearFilter(): void;
   setRecursive(recursive: boolean): void;
   /** Stop reading and watching the open folder, and go back to the start screen. */
   close(): void;
@@ -75,6 +83,8 @@ function saveThumbSize(px: number) {
     // Private mode or storage switched off: the size just isn't remembered.
   }
 }
+
+const withoutRelDir = ({ relDir: _dropped, ...rest }: GalleryFilter): GalleryFilter => rest;
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
@@ -162,6 +172,8 @@ export const useGallery = create<GalleryState>()((set, get) => {
     progress: null,
     selected: null,
     thumbSize: savedThumbSize(),
+    sort: 'date',
+    filter: {},
     recursive: true,
     recent: [],
     toasts: [],
@@ -178,7 +190,8 @@ export const useGallery = create<GalleryState>()((set, get) => {
     async open(folder, recursive) {
       stopTimers();
       const gen = generation;
-      set({ job: null, root: folder, items: [], selected: null, progress: { total: 0, processed: 0, startedAt: Date.now() } });
+      // The subfolders of the old folder mean nothing in this one.
+      set((s) => ({ filter: withoutRelDir(s.filter), job: null, root: folder, items: [], selected: null, progress: { total: 0, processed: 0, startedAt: Date.now() } }));
       let job: string;
       try {
         job = (await galleryApi.open(folder, recursive)).jobId;
@@ -250,6 +263,22 @@ export const useGallery = create<GalleryState>()((set, get) => {
       saveThumbSize(thumbSize);
     },
 
+    setSort(sort) {
+      set({ sort });
+    },
+
+    setFilter(patch) {
+      set((s) => {
+        const filter: GalleryFilter = { ...s.filter, ...patch };
+        for (const k of Object.keys(filter) as (keyof GalleryFilter)[]) if (filter[k] === undefined) delete filter[k];
+        return { filter };
+      });
+    },
+
+    clearFilter() {
+      set({ filter: {} });
+    },
+
     setRecursive(recursive) {
       set({ recursive });
     },
@@ -274,6 +303,30 @@ export const useGallery = create<GalleryState>()((set, get) => {
     },
   };
 });
+
+// What the grid shows: the photos filtered and sorted. One list for the grid and the viewer, worked out
+// again only when the photos, sort or filter change. The facts (interesting score, colour, quality flags,
+// bursts) are costly on a big folder, so they are worked out only when a sort or filter reads them.
+const needsFacts = (sort: GallerySortKey, f: GalleryFilter) => sort === 'interesting' || sort === 'colour' || !!f.lowQuality || !!f.nearDuplicates;
+const NO_FACTS = new Map<string, GalleryFacts>();
+let factsMemo: { items: GalleryItem[]; facts: Map<string, GalleryFacts> } | null = null;
+let visibleMemo: { items: GalleryItem[]; sort: GallerySortKey; filter: GalleryFilter; visible: GalleryItem[] } | null = null;
+
+export function selectVisible(s: Pick<GalleryState, 'items' | 'sort' | 'filter'>): GalleryItem[] {
+  const m = visibleMemo;
+  if (m && m.items === s.items && m.sort === s.sort && m.filter === s.filter) return m.visible;
+  let facts = NO_FACTS;
+  if (needsFacts(s.sort, s.filter)) {
+    if (factsMemo?.items !== s.items) factsMemo = { items: s.items, facts: galleryFacts(s.items) };
+    facts = factsMemo.facts;
+  }
+  const visible = sortItems(filterItems(s.items, s.filter, facts), s.sort, facts);
+  visibleMemo = { items: s.items, sort: s.sort, filter: s.filter, visible };
+  return visible;
+}
+
+/** The photos to show, in order: the grid and (Task 7) the viewer step through this one list. */
+export const useVisibleItems = (): GalleryItem[] => useGallery(selectVisible);
 
 /**
  * Open each folder the desktop app hands the page (`--gallery <folder>`, a second launch, File >

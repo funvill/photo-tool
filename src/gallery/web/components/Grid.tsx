@@ -2,7 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { HoverPreview, formatSize } from '../../../web/components/HoverPreview';
 import { gridWindow } from '../../../web/virtualGrid';
 import { thumbUrl, type GalleryItem } from '../api';
-import { useGallery } from '../store';
+import { useGallery, useVisibleItems } from '../store';
 import { Tile } from './Tile';
 
 const GAP = 6;
@@ -15,7 +15,7 @@ const HOVER_DELAY_MS = 400;
  * folder of thousands of photos scrolls smoothly.
  */
 export function Grid({ onOpen }: { onOpen: (path: string) => void }) {
-  const items = useGallery((s) => s.items);
+  const items = useVisibleItems();
   const thumbSize = useGallery((s) => s.thumbSize);
   const selected = useGallery((s) => s.selected);
   const ref = useRef<HTMLDivElement>(null);
