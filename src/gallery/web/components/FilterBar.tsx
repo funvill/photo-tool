@@ -32,6 +32,7 @@ function Toggle({ label, field }: { label: string; field: 'lowQuality' | 'nearDu
 export function FilterBar() {
   const sort = useGallery((s) => s.sort);
   const filter = useGallery((s) => s.filter);
+  const stacked = useGallery((s) => s.stacked);
   const items = useGallery((s) => s.items);
   const shown = useVisibleItems().length;
   const dirs = useMemo(() => [...new Set(items.map((i) => i.relDir))].sort((a, b) => (a === '' ? -1 : b === '' ? 1 : a.localeCompare(b))), [items]);
@@ -71,6 +72,14 @@ export function FilterBar() {
         To
         <input type="date" value={filter.to ?? ''} min={filter.from} onChange={(e) => set({ to: e.target.value || undefined })} />
       </label>
+      <label className="row gallery-field">
+        Hidden
+        <select value={filter.hidden ?? ''} onChange={(e) => set({ hidden: (e.target.value || undefined) as GalleryFilter['hidden'] })}>
+          <option value="">Leave out</option>
+          <option value="show">Show</option>
+          <option value="only">Only</option>
+        </select>
+      </label>
       {dirs.length > 1 && (
         <label className="row gallery-field">
           Folder
@@ -86,6 +95,10 @@ export function FilterBar() {
       <Toggle label="Near-duplicates" field="nearDuplicates" />
       <Toggle label="Has location" field="hasLocation" />
       <Toggle label="Has people" field="hasPeople" />
+      <label className="row gallery-check" title="Show the near-identical shots of a burst as one photo">
+        <input type="checkbox" checked={stacked} onChange={(e) => useGallery.getState().setStacked(e.target.checked)} />
+        Stack similar
+      </label>
       <input
         type="search"
         className="gallery-search"

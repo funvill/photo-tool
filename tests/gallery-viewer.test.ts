@@ -19,6 +19,13 @@ describe('viewerStep', () => {
     for (const key of ['a', 'Enter', ' ', 'ArrowUp', 'ArrowDown', 'Shift']) expect(viewerStep(1, 3, key)).toEqual({ index: 1 });
   });
 
+  it('F favourites (the same star as S) and H hides', () => {
+    expect(viewerStep(1, 3, 'f')).toEqual({ index: 1, action: 'star' });
+    expect(viewerStep(1, 3, 'F')).toEqual({ index: 1, action: 'star' });
+    expect(viewerStep(1, 3, 'h')).toEqual({ index: 1, action: 'hide' });
+    expect(viewerStep(1, 3, 'H')).toEqual({ index: 1, action: 'hide' });
+  });
+
   it('preloads the next two and the previous two that exist', () => {
     expect(viewerNeighbours(2, 10)).toEqual([3, 4, 1, 0]);
     expect(viewerNeighbours(0, 2)).toEqual([1]);

@@ -44,6 +44,8 @@ export interface GalleryState {
   toasts: Toast[];
   /** The "Tidy photo info" dialog is open. */
   tidyOpen: boolean;
+  /** Tiles per row in the grid as drawn now (the grid publishes it; Up/Down step by it). */
+  gridCols: number;
 
   loadRecent(): Promise<void>;
   open(folder: string, recursive: boolean): Promise<void>;
@@ -82,6 +84,7 @@ export interface GalleryState {
   /** Stop reading and watching the open folder, and go back to the start screen. */
   close(): void;
   setTidyOpen(open: boolean): void;
+  setGridCols(cols: number): void;
   toast(kind: Toast['kind'], text: string): void;
   dismissToast(id: number): void;
 }
@@ -261,6 +264,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
     recent: [],
     toasts: [],
     tidyOpen: false,
+    gridCols: 1,
 
     async loadRecent() {
       try {
@@ -441,6 +445,11 @@ export const useGallery = create<GalleryState>()((set, get) => {
 
     setTidyOpen(tidyOpen) {
       set({ tidyOpen });
+    },
+
+    setGridCols(cols) {
+      const gridCols = Math.max(1, Math.floor(cols) || 1);
+      if (gridCols !== get().gridCols) set({ gridCols });
     },
 
     toast(kind, text) {

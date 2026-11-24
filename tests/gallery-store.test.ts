@@ -387,6 +387,13 @@ describe('gallery store', () => {
     expect(useGallery.getState().thumbSize).toBe(320);
   });
 
+  it('keeps the grid column count the grid publishes, at least 1', () => {
+    useGallery.getState().setGridCols(5);
+    expect(useGallery.getState().gridCols).toBe(5);
+    useGallery.getState().setGridCols(0);
+    expect(useGallery.getState().gridCols).toBe(1);
+  });
+
   it('remembers sort and filters for the session, but a new folder clears the subfolder filter', async () => {
     routes['POST /api/gallery/open'] = () => ({ json: { jobId: 'j2' } });
     routes['GET /api/gallery/job'] = () => ({ json: { done: true, total: 0, processed: 0, startedAt: 0, items: [], errors: [] } });

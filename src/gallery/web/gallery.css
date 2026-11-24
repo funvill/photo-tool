@@ -37,20 +37,41 @@
 .gallery-grid-inner { position: relative; }
 .gallery-tile { position: absolute; left: 0; top: 0; border-radius: 6px; overflow: hidden; background: var(--panel-2); cursor: pointer; outline: 1px solid var(--line-soft); contain: strict; user-select: none; }
 .gallery-tile img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+/* Hidden photos (shown by the Hidden filter) are dimmed; an open stack's photos share a tinted outline. */
+.gallery-tile.hidden img { opacity: 0.4; }
+.gallery-tile.stack-member, .gallery-tile.stack-open { outline: 2px solid var(--accent); outline-offset: -2px; }
+.gallery-tile.stack-member { background: color-mix(in srgb, var(--accent) 18%, var(--panel-2)); }
 /* Picked: one of the selected photos (what a drag takes). Selected: the one the details panel shows. */
 .gallery-tile.picked { outline: 2px solid var(--select); outline-offset: -2px; }
 .gallery-tile.selected { outline: 3px solid var(--select); outline-offset: -3px; }
-.gallery-star-badge { position: absolute; left: 5px; top: 5px; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: rgba(0, 0, 0, 0.6); color: var(--accent); }
+.gallery-tile-marks { position: absolute; left: 5px; top: 5px; display: flex; gap: 3px; }
+.gallery-star-badge, .gallery-hidden-badge { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: rgba(0, 0, 0, 0.6); color: var(--accent); }
 .gallery-star-badge .icon path { fill: currentColor; }
+.gallery-hidden-badge { width: 20px; height: 20px; border-radius: 50%; place-items: center; background: rgba(0, 0, 0, 0.6); color: #fff; }
+.gallery-stack-badge { position: absolute; right: 5px; top: 5px; min-width: 28px; height: 20px; padding: 0 6px; border: 0; border-radius: 10px; background: rgba(0, 0, 0, 0.65); color: #fff; font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer; }
+.gallery-stack-badge:hover { background: rgba(0, 0, 0, 0.85); }
+.gallery-stack-badge.open { background: var(--accent); color: var(--accent-ink); }
 .gallery-tile-actions { position: absolute; right: 4px; bottom: 4px; display: flex; gap: 2px; opacity: 0; transition: opacity 0.12s; }
 .gallery-tile:hover .gallery-tile-actions, .gallery-tile-actions:focus-within { opacity: 1; }
 .gallery-tile-actions .icon-btn { width: 26px; height: 26px; background: rgba(0, 0, 0, 0.6); color: #fff; }
 .gallery-tile-actions .icon-btn.on { color: var(--accent); }
 
-/* The grid and, when a photo is selected, its details panel on the right. The grid measures itself, so it shrinks with the panel. */
+/* Thumbnails | handle | preview | handle | details. The side columns take the widths GalleryApp gives them
+   (remembered per machine); the preview takes the rest. The grid measures itself, so it follows its column. */
 .gallery-main { flex: 1; min-height: 0; min-width: 0; display: flex; }
-.gallery-main > .gallery-grid { min-width: 0; }
-.gallery-details { flex: none; width: 320px; display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-left: 1px solid var(--line-soft); }
+.gallery-grid-col { flex: none; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--stage); }
+.gallery-grid-col > .gallery-grid { min-width: 0; }
+.gallery-splitter { flex: none; width: 6px; cursor: col-resize; background: var(--line-soft); touch-action: none; }
+.gallery-splitter:hover, .gallery-splitter:active { background: var(--accent); }
+.gallery-preview { flex: 1; min-width: 300px; min-height: 0; display: flex; flex-direction: column; background: #111; color: #fff; }
+.gallery-preview-stage { flex: 1; min-height: 0; display: grid; place-items: center; padding: 10px; }
+.gallery-preview-stage img { width: 100%; height: 100%; object-fit: contain; display: block; user-select: none; }
+.gallery-preview-caption { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.gallery-preview-caption strong { min-width: 0; margin-right: 4px; }
+.gallery-preview-caption .badge { font-size: 11px; padding: 2px 7px; white-space: nowrap; background: rgba(255, 255, 255, 0.12); }
+.gallery-preview-caption .gallery-badge-fav { background: var(--accent); color: var(--accent-ink); }
+.gallery-details-col { flex: none; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--panel); }
+.gallery-details { flex: 1; width: 100%; display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-left: 1px solid var(--line-soft); }
 .gallery-details-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line-soft); }
 .gallery-details-body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 14px; }
 .gallery-note { margin: 0; padding: 8px 10px; border-radius: var(--radius); background: var(--panel-2); border: 1px solid var(--line); }
@@ -77,6 +98,7 @@
 .gallery-viewer-bar strong { min-width: 0; }
 .gallery-viewer-starred { display: inline-grid; color: var(--accent); }
 .gallery-viewer-starred .icon path { fill: currentColor; }
+.gallery-viewer-hidden { display: inline-grid; color: rgba(255, 255, 255, 0.8); }
 .gallery-viewer-count { color: rgba(255, 255, 255, 0.75); white-space: nowrap; }
 .gallery-viewer-keys { margin-left: auto; color: rgba(255, 255, 255, 0.6); white-space: nowrap; }
 .gallery-viewer-bar .icon-btn { color: #fff; }

@@ -2,10 +2,10 @@
 
 export interface ViewerStep {
   index: number;
-  action?: 'star' | 'details' | 'close';
+  action?: 'star' | 'hide' | 'details' | 'close';
 }
 
-/** What a key does in the viewer showing photo `index` of `count`: Left/Right move (stopping at the ends), S stars, I shows details, Esc closes. */
+/** What a key does in the viewer showing photo `index` of `count`: Left/Right move (stopping at the ends), S or F stars (favourite), H hides, I shows details, Esc closes. */
 export function viewerStep(index: number, count: number, key: string): ViewerStep {
   switch (key) {
     case 'ArrowRight':
@@ -14,7 +14,12 @@ export function viewerStep(index: number, count: number, key: string): ViewerSte
       return { index: Math.max(0, index - 1) };
     case 's':
     case 'S':
+    case 'f':
+    case 'F':
       return { index, action: 'star' };
+    case 'h':
+    case 'H':
+      return { index, action: 'hide' };
     case 'i':
     case 'I':
       return { index, action: 'details' };

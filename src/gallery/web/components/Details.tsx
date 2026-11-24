@@ -132,8 +132,10 @@ function DetailsFor({ item }: { item: GalleryItem }) {
 
   // An uncontrolled input: a half-typed date reads as '' and a controlled input would wipe it.
   const shownDate = toDateTimeLocal(item.effectiveDate);
+  // The input drops ":00" seconds ("09:05", not "09:05:00"): that is still the date shown, not an edit.
+  const unchangedDate = (value: string) => value === shownDate || (value !== '' && fromDateTimeLocal(value) === shownDate);
   const commitDate = (el: HTMLInputElement) => {
-    if (el.value === shownDate) {
+    if (unchangedDate(el.value)) {
       setDateError('');
       return;
     }
@@ -167,7 +169,7 @@ function DetailsFor({ item }: { item: GalleryItem }) {
     saveText('description', description);
     saveText('notes', notes);
     const el = dateInput.current;
-    const iso = el && el.value !== shownDate && el.value !== '' ? fromDateTimeLocal(el.value) : null;
+    const iso = el && !unchangedDate(el.value) && el.value !== '' ? fromDateTimeLocal(el.value) : null;
     if (iso && iso !== info.date && iso !== dateSent.current) void save('date', { date: iso });
   };
   useEffect(() => () => flush.current(), []);

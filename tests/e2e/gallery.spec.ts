@@ -1,30 +1,52 @@
-// The gallery program: open a folder, see its photos in the grid, and star one from its tile —
-// the star lands in the folder's photoinfo.json, where the editor will find it.
+// The gallery program: open a folder, review its photos (grid, preview pane, keys, stacks, hidden
+// photos) and star one — the star lands in the folder's photoinfo.json, where the editor will find it.
 import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test } from '@playwright/test';
+import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { isSupported } from '../../src/server/media';
 
 const FIXTURES = join(process.cwd(), 'fixtures', 'generated', 'trip');
 
-test('open a folder, see every photo, star one from the grid', async ({ page, request }) => {
-  // A private copy, so the star is written there and not into the fixtures.
+/** A private copy of the trip fixture (so stars and hides are written there), opened and fully read. */
+async function openTrip(page: Page, request: APIRequestContext): Promise<string> {
   const dir = join(mkdtempSync(join(tmpdir(), 'photobook-gallery-')), 'trip');
   cpSync(FIXTURES, dir, { recursive: true });
-  // One tile per photo the gallery reads (SUPPORTED_EXTENSIONS), not per file.
-  const count = readdirSync(dir).filter(isSupported).length;
-  expect(count).toBeGreaterThan(0);
+  // Open it through the API (a plain browser has no folder dialog): it becomes a recent folder.
+  expect((await request.post('/api/gallery/open', { data: { folder: dir, recursive: false } })).status()).toBe(202);
+  // A wide thumbnail column of small tiles: the grid draws only the rows on screen, and every tile
+  // should be on screen so the tests can count them.
+  await page.addInitScript(() => {
+    localStorage.setItem('gallery.gridWidth', '900');
+    localStorage.setItem('gallery.thumbSize', '96');
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: dir }).click();
+  await expect(page.locator('.gallery-tile').first()).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole('progressbar')).toHaveCount(0, { timeout: 60_000 });
+  return dir;
+}
+
+const removeTrip = (dir: string) => rmSync(join(dir, '..'), { recursive: true, force: true });
+
+/** The folder's photoinfo.json entries, by file name ({} while there is none). */
+function photoInfo(dir: string): Record<string, Record<string, unknown>> {
+  const file = join(dir, 'photoinfo.json');
+  return existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')).photos ?? {}) : {};
+}
+
+const altOf = (page: Page, nth: number) => page.locator('.gallery-tile img').nth(nth).getAttribute('alt');
+const selectedImg = (page: Page) => page.locator('.gallery-tile.selected img');
+
+test('open a folder, see every photo, star one from the grid', async ({ page, request }) => {
+  const dir = await openTrip(page, request);
   try {
-    // Open it through the API (a plain browser has no folder dialog): it becomes a recent folder.
-    expect((await request.post('/api/gallery/open', { data: { folder: dir, recursive: false } })).status()).toBe(202);
-
-    await page.goto('/');
-    await page.getByRole('button', { name: dir }).click();
-
+    // With stacking off, one tile per photo the gallery reads (SUPPORTED_EXTENSIONS), not per file.
+    await page.getByLabel('Stack similar').uncheck();
+    const count = readdirSync(dir).filter(isSupported).length;
+    expect(count).toBeGreaterThan(0);
     const tiles = page.locator('.gallery-tile');
-    await expect(tiles).toHaveCount(count, { timeout: 60_000 });
-    await expect(page.getByRole('progressbar')).toHaveCount(0, { timeout: 60_000 });
+    await expect(tiles).toHaveCount(count);
 
     const first = tiles.first();
     const name = await first.locator('img').getAttribute('alt');
@@ -36,20 +58,14 @@ test('open a folder, see every photo, star one from the grid', async ({ page, re
     await expect.poll(() => (existsSync(info) ? readFileSync(info, 'utf8') : '')).toContain('"star": true');
     expect(JSON.parse(readFileSync(info, 'utf8')).photos[name!]).toEqual({ star: true });
   } finally {
-    rmSync(join(dir, '..'), { recursive: true, force: true });
+    removeTrip(dir);
   }
 });
 
 test('step through the viewer and star a photo with one key', async ({ page, request }) => {
-  const dir = join(mkdtempSync(join(tmpdir(), 'photobook-gallery-')), 'trip');
-  cpSync(FIXTURES, dir, { recursive: true });
+  const dir = await openTrip(page, request);
   try {
-    expect((await request.post('/api/gallery/open', { data: { folder: dir, recursive: false } })).status()).toBe(202);
-    await page.goto('/');
-    await page.getByRole('button', { name: dir }).click();
     const tiles = page.locator('.gallery-tile');
-    await expect(tiles).toHaveCount(readdirSync(dir).filter(isSupported).length, { timeout: 60_000 });
-    await expect(page.getByRole('progressbar')).toHaveCount(0, { timeout: 60_000 });
     const third = await tiles.nth(2).locator('img').getAttribute('alt');
 
     // Double-click opens the viewer on tile 1; it shows the large (1600 px) picture.
@@ -71,14 +87,12 @@ test('step through the viewer and star a photo with one key', async ({ page, req
 
     await page.keyboard.press('s');
     await expect(viewer.getByLabel('Starred')).toBeVisible();
-    const info = join(dir, 'photoinfo.json');
-    await expect.poll(() => (existsSync(info) ? readFileSync(info, 'utf8') : '')).toContain('"star": true');
-    expect(JSON.parse(readFileSync(info, 'utf8')).photos).toEqual({ [third!]: { star: true } });
+    await expect.poll(() => photoInfo(dir)).toEqual({ [third!]: { star: true } });
 
     // Esc closes and selects the last photo viewed, in the grid.
     await page.keyboard.press('Escape');
     await expect(viewer).toHaveCount(0);
-    await expect(page.locator('.gallery-tile.selected img')).toHaveAttribute('alt', third!);
+    await expect(selectedImg(page)).toHaveAttribute('alt', third!);
     await expect(page.getByRole('complementary', { name: 'Photo details' })).toContainText(third!);
 
     // Enter opens it again on the selected photo.
@@ -86,6 +100,132 @@ test('step through the viewer and star a photo with one key', async ({ page, req
     await expect(viewer).toContainText('3 / ');
     await page.keyboard.press('Escape');
   } finally {
-    rmSync(join(dir, '..'), { recursive: true, force: true });
+    removeTrip(dir);
+  }
+});
+
+test('preview pane shows the selected photo and follows ArrowRight', async ({ page, request }) => {
+  const dir = await openTrip(page, request);
+  try {
+    const first = await altOf(page, 0);
+    const second = await altOf(page, 1);
+    const preview = page.getByRole('region', { name: 'Preview' });
+    // The first photo is selected once the folder is read; the pane shows its large picture.
+    await expect(selectedImg(page)).toHaveAttribute('alt', first!);
+    await expect(preview.locator('img')).toHaveAttribute('alt', first!);
+    await expect(preview.locator('img')).toHaveAttribute('src', /size=m/);
+    await expect(preview).toContainText(first!);
+
+    await page.keyboard.press('ArrowRight');
+    await expect(selectedImg(page)).toHaveAttribute('alt', second!);
+    await expect(preview.locator('img')).toHaveAttribute('alt', second!);
+    await page.keyboard.press('Home');
+    await expect(preview.locator('img')).toHaveAttribute('alt', first!);
+    // Moving through the photos writes nothing.
+    await page.waitForTimeout(500);
+    expect(photoInfo(dir)).toEqual({});
+
+    // Double-click on the preview opens the viewer on it.
+    await preview.locator('img').dblclick();
+    const viewer = page.getByRole('dialog', { name: 'Photo viewer' });
+    await expect(viewer.locator('img')).toHaveAttribute('alt', first!);
+    await page.keyboard.press('Escape');
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+test('F stars the selected photo and the tile shows the star badge', async ({ page, request }) => {
+  const dir = await openTrip(page, request);
+  try {
+    const first = await altOf(page, 0);
+    await expect(selectedImg(page)).toHaveAttribute('alt', first!);
+    await page.keyboard.press('f');
+    await expect(page.locator('.gallery-tile.selected').getByLabel('Starred')).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Preview' })).toContainText('Favourite');
+    await expect.poll(() => photoInfo(dir)[first!]).toEqual({ star: true });
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+test('H hides the photo, it leaves the grid, the next photo is selected; Hidden: Show brings it back dimmed', async ({ page, request }) => {
+  const dir = await openTrip(page, request);
+  try {
+    const tiles = page.locator('.gallery-tile');
+    const count = await tiles.count();
+    const first = await altOf(page, 0);
+    const second = await altOf(page, 1);
+    await expect(selectedImg(page)).toHaveAttribute('alt', first!);
+
+    await page.keyboard.press('h');
+    await expect.poll(() => photoInfo(dir)[first!]).toEqual({ hidden: true });
+    await expect(page.locator(`.gallery-tile img[alt="${first}"]`)).toHaveCount(0);
+    await expect(selectedImg(page)).toHaveAttribute('alt', second!);
+
+    await page.getByRole('combobox', { name: 'Hidden' }).selectOption({ label: 'Show' });
+    const back = page.locator('.gallery-tile', { has: page.locator(`img[alt="${first}"]`) });
+    await expect(back).toHaveClass(/\bhidden\b/);
+    await expect(back.getByLabel('Hidden')).toBeVisible();
+    await expect(tiles).toHaveCount(count);
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+test('typing f, h and arrows in the description box changes only the text', async ({ page, request }) => {
+  const dir = await openTrip(page, request);
+  try {
+    const first = await altOf(page, 0);
+    await expect(selectedImg(page)).toHaveAttribute('alt', first!);
+    const box = page.getByRole('textbox', { name: 'Description' });
+    await box.click();
+    await page.keyboard.type('fh');
+    await page.keyboard.press('ArrowLeft');
+    await page.keyboard.press('ArrowRight');
+    await page.keyboard.press('End');
+    await page.keyboard.type('F');
+    await expect(box).toHaveValue('fhF');
+    await expect(selectedImg(page)).toHaveAttribute('alt', first!);
+    await expect(page.locator('.gallery-tile.selected').getByLabel('Starred')).toHaveCount(0);
+    await expect(page.locator('.gallery-tile.selected')).not.toHaveClass(/\bhidden\b/);
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+test('a stack badge unfolds and folds the stack', async ({ page, request }) => {
+  const dir = await openTrip(page, request);
+  try {
+    const tiles = page.locator('.gallery-tile');
+    const folded = await tiles.count();
+    const show = page.getByRole('button', { name: /^Show \d+ similar photos$/ }).first();
+    await expect(show).toBeVisible();
+    const n = Number((await show.getAttribute('aria-label'))!.match(/\d+/)![0]);
+    expect(n).toBeGreaterThanOrEqual(2);
+    const selectedBefore = await selectedImg(page).getAttribute('alt');
+
+    await show.click();
+    await expect(tiles).toHaveCount(folded + n - 1);
+    await expect(page.locator('.gallery-tile.stack-member')).toHaveCount(n - 1);
+    // The badge opens the stack without selecting its photo.
+    await expect(selectedImg(page)).toHaveAttribute('alt', selectedBefore!);
+
+    await page.getByRole('button', { name: `Fold ${n} similar photos` }).click();
+    await expect(tiles).toHaveCount(folded);
+    await expect(page.locator('.gallery-tile.stack-member')).toHaveCount(0);
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+test('the hover preview no longer appears', async ({ page, request }) => {
+  const dir = await openTrip(page, request);
+  try {
+    await page.locator('.gallery-tile').nth(1).hover();
+    await page.waitForTimeout(600);
+    await expect(page.locator('.hover-preview')).toHaveCount(0);
+  } finally {
+    removeTrip(dir);
   }
 });

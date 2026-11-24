@@ -6,11 +6,11 @@ import { thumbUrl, type GalleryItem } from '../api';
 import { selectVisible, useGallery, useVisibleItems } from '../store';
 
 // The full-screen viewer: one photo at a time over the whole window, stepping through the grid's own
-// list (filtered and sorted). Left/Right move, S stars or unstars, I shows the photo's details, Esc
-// closes and selects the last photo shown. While it is open the page sees no other keys.
+// list (filtered and sorted). Left/Right move, S or F stars or unstars, H hides or unhides, I shows the
+// photo's details, Esc closes and selects the last photo shown. While it is open the page sees no other keys.
 
 /** Keys whose browser default (scrolling the grid behind, moving focus, pressing a button) is kept from happening. */
-const SWALLOWED = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ', 'Enter', 'Tab', 'Escape', 's', 'S', 'i', 'I']);
+const SWALLOWED = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ', 'Enter', 'Tab', 'Escape', 's', 'S', 'f', 'F', 'h', 'H', 'i', 'I']);
 
 /** Where `path` is in `list`. A photo that has left the list (starred under a "not starred" filter) leaves the viewer on the one now in its place. */
 function indexIn(list: GalleryItem[], path: string, last: number): number {
@@ -63,6 +63,12 @@ function OpenViewer({ path }: { path: string }) {
       if (step.action && e.repeat) return;
       if (step.action === 'close') s.closeViewer(shown.path);
       else if (step.action === 'details') setDetails((d) => !d);
+      else if (step.action === 'hide') {
+        // Hides the photo shown (only it, not a selection made before the viewer opened). When the
+        // filter then leaves it out, the viewer moves on to the photo in its place.
+        s.select(shown.path);
+        void s.toggleFlag('hidden');
+      }
       else if (step.action === 'star') {
         const on = !(wanted.current.get(shown.path) ?? shown.info.star === true);
         wanted.current.set(shown.path, on);
@@ -85,6 +91,7 @@ function OpenViewer({ path }: { path: string }) {
 
   if (!item) return null;
   const starred = item.info.star === true;
+  const hidden = item.info.hidden === true;
   return (
     <div className="gallery-viewer" role="dialog" aria-modal="true" aria-label="Photo viewer">
       <ViewerImage key={item.key} item={item} />
@@ -95,8 +102,13 @@ function OpenViewer({ path }: { path: string }) {
             <Icon name="star" size={16} />
           </span>
         )}
+        {hidden && (
+          <span className="gallery-viewer-hidden" aria-label="Hidden">
+            <Icon name="eye-off" size={16} />
+          </span>
+        )}
         <span className="gallery-viewer-count">{index + 1} / {items.length}</span>
-        <span className="gallery-viewer-keys small">← → move · S star · I details · Esc close</span>
+        <span className="gallery-viewer-keys small">← → move · F or S favourite · H hide · I details · Esc close</span>
         <button type="button" className="icon-btn" aria-label="Close viewer" title="Close (Esc)" onClick={() => useGallery.getState().closeViewer(item.path)}>
           <Icon name="x" />
         </button>

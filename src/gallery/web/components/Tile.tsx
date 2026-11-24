@@ -1,4 +1,5 @@
-import { memo, type SyntheticEvent } from 'react';
+import { memo, type MouseEvent, type SyntheticEvent } from 'react';
+import type { StackInfo } from '../../../core/galleryStacks';
 import { Icon } from '../../../web/components/Icon';
 import { thumbUrl, type GalleryItem } from '../api';
 
@@ -12,47 +13,74 @@ export interface TileProps {
   selected: boolean;
   /** One of the selected photos (Ctrl/Shift-click). */
   picked: boolean;
+  /** Hidden (shown only because the Hidden filter says so): drawn dimmed, with a mark. */
+  hidden: boolean;
+  /** Its stack, when it is one of a stack's shown photos. */
+  stack?: StackInfo;
   onSelect(path: string, mods: { ctrl: boolean; shift: boolean }): void;
   onStar(path: string, star: boolean): void;
+  /** The "×N" badge of a stack's top: unfold or fold the stack. */
+  onToggleStack(id: string): void;
   /** Double-click: open the photo in the viewer. */
   onOpen(path: string): void;
   /** The left button went down on the tile: a drag may follow, so the files are checked now. */
   onDragReady(path: string): void;
   /** The tile is being dragged: the desktop app drags the photo files out instead. */
   onDragOut(path: string): void;
-  onHoverStart(path: string, el: HTMLElement): void;
-  onHoverEnd(): void;
+  /** Right-click on the tile (the menu comes later). */
+  onContextMenu?(path: string, e: MouseEvent): void;
 }
 
-const onActions = (e: SyntheticEvent) => !!(e.target as HTMLElement).closest('.gallery-tile-actions');
+/** A click on one of the tile's own buttons is not a click on the photo. */
+const onControls = (e: SyntheticEvent) => !!(e.target as HTMLElement).closest('.gallery-tile-actions, .gallery-stack-badge');
 
-/** One photo in the grid: its thumbnail, a star badge when starred, and a star button on hover. */
-export const Tile = memo(function Tile({ item, x, y, size, selected, picked, onSelect, onStar, onOpen, onDragReady, onDragOut, onHoverStart, onHoverEnd }: TileProps) {
+/** One photo in the grid: its thumbnail, star and hidden marks, a stack's "×N" badge, and a star button on hover. */
+export const Tile = memo(function Tile({ item, x, y, size, selected, picked, hidden, stack, onSelect, onStar, onToggleStack, onOpen, onDragReady, onDragOut, onContextMenu }: TileProps) {
   const starred = item.info.star === true;
+  const classes = ['gallery-tile', selected && 'selected', picked && 'picked', starred && 'starred', hidden && 'hidden', stack && !stack.top && 'stack-member', stack?.top && stack.open && 'stack-open'];
   return (
     <div
-      className={`gallery-tile ${selected ? 'selected' : ''} ${picked ? 'picked' : ''} ${starred ? 'starred' : ''}`}
+      className={classes.filter(Boolean).join(' ')}
       style={{ transform: `translate(${x}px, ${y}px)`, width: size, height: size }}
       title={item.relDir ? `${item.relDir}/${item.fileName}` : item.fileName}
       data-path={item.path}
       draggable
-      onClick={(e) => !onActions(e) && onSelect(item.path, { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey })}
-      onDoubleClick={(e) => !onActions(e) && onOpen(item.path)}
-      onPointerDown={(e) => e.button === 0 && !onActions(e) && onDragReady(item.path)}
+      onClick={(e) => !onControls(e) && onSelect(item.path, { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey })}
+      onDoubleClick={(e) => !onControls(e) && onOpen(item.path)}
+      onPointerDown={(e) => e.button === 0 && !onControls(e) && onDragReady(item.path)}
       onDragStart={(e) => {
         // The page's own drag would carry a picture of the tile; the desktop app drags the files.
         e.preventDefault();
-        onHoverEnd();
         onDragOut(item.path);
       }}
-      onPointerEnter={(e) => e.pointerType === 'mouse' && onHoverStart(item.path, e.currentTarget)}
-      onPointerLeave={onHoverEnd}
+      onContextMenu={(e) => onContextMenu?.(item.path, e)}
     >
       <img src={thumbUrl(item.key, 's')} alt={item.fileName} loading="lazy" decoding="async" draggable={false} />
-      {starred && (
-        <span className="gallery-star-badge" aria-label="Starred">
-          <Icon name="star" size={12} />
+      {(starred || hidden) && (
+        <span className="gallery-tile-marks">
+          {starred && (
+            <span className="gallery-star-badge" aria-label="Starred">
+              <Icon name="star" size={12} />
+            </span>
+          )}
+          {hidden && (
+            <span className="gallery-hidden-badge" aria-label="Hidden">
+              <Icon name="eye-off" size={12} />
+            </span>
+          )}
         </span>
+      )}
+      {stack?.top && (
+        <button
+          type="button"
+          className={`gallery-stack-badge ${stack.open ? 'open' : ''}`}
+          aria-label={`${stack.open ? 'Fold' : 'Show'} ${stack.size} similar photos`}
+          title={`${stack.open ? 'Fold' : 'Show'} ${stack.size} similar photos`}
+          onClick={() => onToggleStack(stack.id)}
+          onDoubleClick={(e) => e.stopPropagation()}
+        >
+          ×{stack.size}
+        </button>
       )}
       <div className="gallery-tile-actions">
         <button

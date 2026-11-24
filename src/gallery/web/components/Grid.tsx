@@ -1,16 +1,13 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { dragPaths } from '../../../core/galleryViewer';
-import { HoverPreview, formatSize } from '../../../web/components/HoverPreview';
 import { desktop } from '../../../web/desktop';
 import { gridWindow } from '../../../web/virtualGrid';
-import { thumbUrl, type GalleryItem } from '../api';
-import { selectVisible, useGallery, useVisibleItems } from '../store';
+import { selectVisible, useGallery, useStackInfo, useVisibleItems } from '../store';
 import { Tile } from './Tile';
 
 const GAP = 6;
 /** The grid's padding (px), matching .gallery-grid in gallery.css. */
 const PAD = 12;
-const HOVER_DELAY_MS = 400;
 
 /** What dragging this tile takes: every selected photo (in grid order) when it is selected, else just it. */
 function dragList(path: string): string[] {
@@ -20,10 +17,12 @@ function dragList(path: string): string[] {
 
 /**
  * The photos of the open folder. Only the rows on screen (and a couple either side) are drawn, so a
- * folder of thousands of photos scrolls smoothly.
+ * folder of thousands of photos scrolls smoothly. The review keys live in useReviewKeys; the grid tells
+ * the store how many tiles fit in a row (for Up/Down) and keeps the selected photo in view.
  */
-export function Grid({ onOpen }: { onOpen: (path: string) => void }) {
+export function Grid({ onOpen, onContextMenu }: { onOpen: (path: string) => void; onContextMenu?: (path: string, e: MouseEvent) => void }) {
   const items = useVisibleItems();
+  const stacks = useStackInfo();
   const thumbSize = useGallery((s) => s.thumbSize);
   const selected = useGallery((s) => s.selected);
   const selection = useGallery((s) => s.selection);
@@ -31,7 +30,6 @@ export function Grid({ onOpen }: { onOpen: (path: string) => void }) {
   const [box, setBox] = useState({ width: 0, height: 0 });
   const [scrollTop, setScrollTop] = useState(0);
   const frame = useRef(0);
-  const hover = useHoverPreview();
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -56,44 +54,28 @@ export function Grid({ onOpen }: { onOpen: (path: string) => void }) {
   }, [sort, filter]);
 
   const onScroll = () => {
-    hover.hide();
     cancelAnimationFrame(frame.current);
     frame.current = requestAnimationFrame(() => setScrollTop(Math.max(0, (ref.current?.scrollTop ?? 0) - PAD)));
   };
 
   const onSelect = useCallback((path: string, mods: { ctrl: boolean; shift: boolean }) => useGallery.getState().clickSelect(path, mods), []);
   const onStar = useCallback((path: string, star: boolean) => void useGallery.getState().setStar(path, star), []);
+  const onToggleStack = useCallback((id: string) => useGallery.getState().toggleStack(id), []);
   // The files are worked out when the button goes down (so the desktop app can check them before the
   // drag) and again on dragstart: the same rule, so the same list unless the selection changed.
   const onDragReady = useCallback((path: string) => desktop?.prepareDrag?.(dragList(path)), []);
   const onDragOut = useCallback((path: string) => desktop?.startDrag?.(dragList(path)), []);
 
-  // Enter or Space opens the selected photo in the viewer (not while typing, or while the viewer is open).
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.key !== 'Enter' && e.key !== ' ') || e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey || e.repeat) return;
-      const s = useGallery.getState();
-      if (s.viewing !== null || s.tidyOpen || !s.selected) return;
-      if ((e.target as HTMLElement | null)?.closest?.('input, textarea, select, button, a, [contenteditable="true"], [role="dialog"]')) return;
-      if (!selectVisible(s).some((i) => i.path === s.selected)) return;
-      e.preventDefault();
-      onOpen(s.selected);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onOpen]);
-
   const w = gridWindow({ count: items.length, width: box.width, tile: thumbSize, gap: GAP, scrollTop, viewport: box.height });
   const stride = w.rowHeight + GAP;
 
-  // Closing the viewer selects the last photo it showed: scroll the grid so that photo is in view.
-  const viewing = useGallery((s) => s.viewing);
-  const wasViewing = useRef(viewing);
-  useLayoutEffect(() => {
-    const was = wasViewing.current;
-    wasViewing.current = viewing;
+  // Up/Down step by a row: the keys (outside the grid) read how many tiles a row holds now.
+  useEffect(() => useGallery.getState().setGridCols(w.cols), [w.cols]);
+
+  /** Scroll the grid just enough to show the selected photo's row (nothing when it is in view already). */
+  const scrollToSelected = () => {
     const el = ref.current;
-    if (was === null || viewing !== null || !el) return;
+    if (!el) return;
     const i = items.findIndex((item) => item.path === useGallery.getState().selected);
     if (i < 0) return;
     const top = PAD + Math.floor(i / w.cols) * stride;
@@ -102,7 +84,14 @@ export function Grid({ onOpen }: { onOpen: (path: string) => void }) {
     else if (bottom > el.scrollTop + el.clientHeight) el.scrollTop = bottom - el.clientHeight;
     else return;
     setScrollTop(Math.max(0, el.scrollTop - PAD));
-  }, [viewing]);
+  };
+
+  // Another photo selected (a key, the viewer closing on the last photo it showed, H moving on) or the
+  // viewer closed, or the rows reflowed: keep the selected photo in view.
+  const viewing = useGallery((s) => s.viewing);
+  useLayoutEffect(() => {
+    if (viewing === null) scrollToSelected();
+  }, [selected, viewing, w.cols]);
 
   const picked = useMemo(() => new Set(selection), [selection]);
   const tiles = [];
@@ -117,13 +106,15 @@ export function Grid({ onOpen }: { onOpen: (path: string) => void }) {
         size={w.rowHeight}
         selected={item.path === selected}
         picked={picked.has(item.path)}
+        hidden={item.info.hidden === true}
+        stack={stacks.get(item.path)}
         onSelect={onSelect}
         onStar={onStar}
+        onToggleStack={onToggleStack}
         onOpen={onOpen}
         onDragReady={onDragReady}
         onDragOut={onDragOut}
-        onHoverStart={hover.start}
-        onHoverEnd={hover.hide}
+        onContextMenu={onContextMenu}
       />,
     );
   }
@@ -131,56 +122,6 @@ export function Grid({ onOpen }: { onOpen: (path: string) => void }) {
   return (
     <div className="gallery-grid" ref={ref} onScroll={onScroll}>
       <div className="gallery-grid-inner" style={{ height: w.totalHeight }}>{tiles}</div>
-      {hover.shown && <HoverPreview {...previewOf(hover.shown.item)} left={hover.shown.left} right={hover.shown.right} />}
     </div>
   );
-}
-
-function previewOf(item: GalleryItem) {
-  const people = Array.isArray(item.info.people) ? item.info.people.filter((p) => typeof p === 'string') : [];
-  return {
-    src: thumbUrl(item.key, 'm'),
-    title: item.relDir ? `${item.relDir}/${item.fileName}` : item.fileName,
-    takenAt: item.effectiveDate,
-    details: [`${item.width} × ${item.height} · ${formatSize(item.size)}`, ...(people.length ? [people.join(', ')] : [])],
-  };
-}
-
-/**
- * Rest the pointer on a tile for a moment and the large (1600 px) preview opens over the half of the
- * window the pointer is not in. It closes when the pointer leaves, a button is pressed, the grid
- * scrolls or Esc is pressed.
- */
-function useHoverPreview() {
-  const timer = useRef<number | undefined>(undefined);
-  const [shown, setShown] = useState<{ item: GalleryItem; left: number; right?: number } | null>(null);
-
-  const hide = useCallback(() => {
-    window.clearTimeout(timer.current);
-    setShown(null);
-  }, []);
-  const start = useCallback((path: string, el: HTMLElement) => {
-    window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => {
-      const item = useGallery.getState().items.find((i) => i.path === path);
-      if (!item || !el.isConnected) return;
-      const r = el.getBoundingClientRect();
-      const half = window.innerWidth / 2;
-      // HoverPreview adds 24 px on each side it is given.
-      setShown(r.left + r.width / 2 < half ? { item, left: half - 24 } : { item, left: 0, right: half - 24 });
-    }, HOVER_DELAY_MS);
-  }, []);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && hide();
-    window.addEventListener('keydown', onKey);
-    window.addEventListener('pointerdown', hide, true);
-    return () => {
-      window.removeEventListener('keydown', onKey);
-      window.removeEventListener('pointerdown', hide, true);
-      window.clearTimeout(timer.current);
-    };
-  }, [hide]);
-
-  return { shown, start, hide };
 }
