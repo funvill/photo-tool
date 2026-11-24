@@ -84,13 +84,15 @@ In the desktop and local app, a photo's star, date, place, people and notes live
 - A summary lists what was added, removed, replaced and re-laid, with a link to each page it touched. It is one undo step.
 - **Rebuild all pages** starts the draft again and **Another variation** gives a different layout. **Re-lay this page** (in the page's side panel) redoes one page.
 
-**Dragging in from Explorer.** Drop JPEGs or folders from Explorer or Finder onto a frame (replaces it), onto empty space on a page (adds it) or onto the library (imports it). Imports show the time left, the library can be widened by dragging its edge, and hovering a photo shows a larger preview. Only the desktop and local app do this.
+## Dragging photos in
+
+Drop JPEGs or folders from Explorer or Finder onto a frame (replaces it), onto empty space on a page (adds it) or onto the library (imports it). Imports show the time left, the library can be widened by dragging its edge, and hovering a photo shows a larger preview. Only the desktop and local app do this.
 
 ## Using it
 
 1. **New book** → choose a printer (Lulu, Blurb, or custom), binding, size and style.
 2. **Import** a folder. Originals are referenced in place, never copied or modified. Thumbnails, quality analysis and near-duplicate fingerprints are computed in the background.
-3. **Auto draft** (the Draft tab in the side panel, beside the pages) → choose the page count and style, then **Regenerate** or **Another variation** while you look at the result; you stay on the spread you're viewing, and every regenerate is one undo step. Variations explore layouts widely, so each one changes most spreads even with few photos. The generator picks the best frame of each burst, skips duplicates and hidden photos, always keeps favourites (★), sequences chronologically with day chapters, puts true panoramas across spreads (keeping the subject out of the fold), and gives low-resolution photos small frames.
+3. **Auto draft** (the Draft tab in the side panel, beside the pages) → choose the page count and style, then **Generate** (or **Rebuild all pages** once a draft exists) or **Another variation** while you look at the result; after you star or unstar photos, **Update from stars** brings the draft in line (see Stars and photoinfo.json above); you stay on the spread you're viewing, and every regenerate is one undo step. Variations explore layouts widely, so each one changes most spreads even with few photos. The generator picks the best frame of each burst, skips duplicates and hidden photos, always keeps favourites (★), sequences chronologically with day chapters, puts true panoramas across spreads (keeping the subject out of the fold), and gives low-resolution photos small frames.
 4. **Edit:**
    - drag, resize (Shift keeps the ratio) and rotate (Shift snaps to 15°) photos, with snapping to margins, centre lines and other photos (hold Alt to turn snapping off);
    - double-click a photo to crop it: drag to reposition, scroll or pinch to zoom around the pointer, drag the photo's corner handles to resize it, arrow keys to nudge, Enter (or double-click) when done. A floating toolbar has the zoom slider, Fill/Fit, Reset and the live print DPI; a rule-of-thirds grid helps framing. Double-click text to edit it;
