@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createRequire } from 'node:module';
-import { DEFAULT_WINDOW, GALLERY_APP_ID, GALLERY_PRODUCT_NAME, MIN_WINDOW, NOTICES_BUTTON, dataLayout, describeAbout, describeFailure, galleryEnv, parseMode, parseSelfTest, photoInfoFallbackDir, restoreWindow, selfTestOverlap } from '../electron/config';
+import { DEFAULT_WINDOW, GALLERY_APP_ID, GALLERY_PRODUCT_NAME, MIN_WINDOW, NOTICES_BUTTON, dataLayout, describeAbout, describeFailure, galleryEnv, galleryLaunchCommand, parseMode, parseSelfTest, photoInfoFallbackDir, restoreWindow, selfTestOverlap } from '../electron/config';
 import product from '../electron/product.json';
 import { isAllowedRequest, isAppNavigation, requestHost } from '../electron/netGuard';
 
@@ -179,6 +179,29 @@ describe('self-test flags', () => {
       } finally {
         rmSync(root, { recursive: true, force: true });
       }
+    });
+  });
+});
+
+describe('starting the gallery from the editor', () => {
+  it('runs the installed exe with --gallery on packaged Windows', () => {
+    expect(galleryLaunchCommand({ execPath: 'C:\\Program Files\\Photobook Studio\\Photobook Studio.exe', packaged: true, appPath: 'C:\\Program Files\\Photobook Studio\\resources\\app.asar', env: {} })).toEqual({
+      command: 'C:\\Program Files\\Photobook Studio\\Photobook Studio.exe',
+      args: ['--gallery'],
+    });
+  });
+
+  it('runs electron with the app folder from source', () => {
+    expect(galleryLaunchCommand({ execPath: 'D:\\src\\node_modules\\electron\\dist\\electron.exe', packaged: false, appPath: 'D:\\src', env: {} })).toEqual({
+      command: 'D:\\src\\node_modules\\electron\\dist\\electron.exe',
+      args: ['D:\\src', '--gallery'],
+    });
+  });
+
+  it('runs the AppImage itself, not the binary inside the editor\'s mount', () => {
+    expect(galleryLaunchCommand({ execPath: '/tmp/.mount_PhotobXYZ/photobook-studio', packaged: true, appPath: '/tmp/.mount_PhotobXYZ/resources/app.asar', env: { APPIMAGE: '/home/a/Apps/Photobook-Studio.AppImage' } })).toEqual({
+      command: '/home/a/Apps/Photobook-Studio.AppImage',
+      args: ['--gallery'],
     });
   });
 });

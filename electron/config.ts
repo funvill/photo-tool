@@ -70,6 +70,16 @@ export function parseMode(argv: readonly string[]): { mode: AppMode; folder: str
   return { mode: 'gallery', folder: v && !v.startsWith('--') ? v : null };
 }
 
+/**
+ * How the editor starts the gallery: this same program with `--gallery`. From source that is
+ * electron with the app folder. Run as an AppImage, execPath is the binary inside the editor's own
+ * FUSE mount, which goes away when the editor quits, so the AppImage file itself ($APPIMAGE) is run.
+ */
+export function galleryLaunchCommand(o: { execPath: string; packaged: boolean; appPath: string; env: Record<string, string | undefined> }): { command: string; args: string[] } {
+  if (o.env.APPIMAGE) return { command: o.env.APPIMAGE, args: ['--gallery'] };
+  return { command: o.execPath, args: [...(o.packaged ? [] : [o.appPath]), '--gallery'] };
+}
+
 // ---- folders
 
 export interface DataLayout {

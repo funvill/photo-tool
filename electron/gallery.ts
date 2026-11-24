@@ -5,7 +5,7 @@ import { app, dialog, ipcMain, nativeImage, type BrowserWindow, type IpcMainEven
 import { spawn } from 'node:child_process';
 import { statSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { parseMode } from './config';
+import { galleryLaunchCommand, parseMode } from './config';
 import { dragFiles, dragRequest, preparedDragFor, sameDragList, type DragCheck, type PreparedDrag } from './drag';
 
 export const GALLERY_DESCRIPTION = 'Look through a folder of photos, star the best ones and drag them into other programs. Works offline.';
@@ -210,15 +210,15 @@ export function galleryDrag(o: { fromApp: (e: IpcMainEvent) => boolean; serverPo
  * When the gallery is already running, that copy just brings its window forward and exits.
  */
 export function launchGallery(log: (...a: unknown[]) => void) {
-  const args = [...(app.isPackaged ? [] : [app.getAppPath()]), '--gallery'];
+  const { command, args } = galleryLaunchCommand({ execPath: process.execPath, packaged: app.isPackaged, appPath: app.getAppPath(), env: process.env });
   const env = { ...process.env };
   // A development editor's Vite dev server and API port are its own: the gallery must not take them.
   delete env.PHOTOBOOK_DESKTOP_DEV_URL;
   delete env.PHOTOBOOK_PORT;
   delete env.PHOTOBOOK_WEB_PORT;
   delete env.ELECTRON_RUN_AS_NODE;
-  log('starting the gallery', { execPath: process.execPath, args });
-  const child = spawn(process.execPath, args, { detached: true, stdio: 'ignore', env });
+  log('starting the gallery', { command, args });
+  const child = spawn(command, args, { detached: true, stdio: 'ignore', env });
   child.once('error', (e) => log('could not start the gallery', String(e)));
   child.unref();
 }
