@@ -71,7 +71,10 @@ export function thumbUrl(key: string, size: 's' | 'm' = 's'): string {
   return `/api/gallery/thumb?${qs({ key, size })}`;
 }
 
-/** The photo at full size, upright (JPEG): what the zoomed preview swaps in. */
-export function fullUrl(path: string): string {
-  return `/api/gallery/full?${qs({ path })}`;
+/**
+ * The photo at full size, upright (JPEG): what the zoomed preview swaps in. The server ignores `key`; it is
+ * there because the reply is cached and the key changes whenever the file does (a Save to file, say).
+ */
+export function fullUrl(path: string, key: string): string {
+  return `/api/gallery/full?${qs({ path, key })}`;
 }

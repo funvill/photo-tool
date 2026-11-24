@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { copyablePatch, saveAs, saveToFile, unsavedClosePrompt } from '../electron/editActions';
+import { copyablePatch, MOVE_RETRY_MS, MOVE_TRIES, saveAs, saveToFile, shouldQuit, unsavedClosePrompt } from '../electron/editActions';
 import { readEditTarget, readMapConsent, writeEditTarget, writeMapConsent } from '../electron/mapTiles';
 
 const edit = { rotate: 90 as const, straighten: 0, crop: { x: 0, y: 0, w: 1, h: 1 } };
@@ -101,9 +101,39 @@ describe('saveToFile', () => {
     expect(r.error).toContain('Recycle Bin');
     expect(r.error).toContain(TEMP);
     expect(r.error).toContain('disk full');
-    expect(r.error).toContain('for the next hour');
+    expect(r.error).toContain('Restore the original from the Recycle Bin');
+    expect(r.error).not.toContain('Save again');
     expect(deps.removeTemp).not.toHaveBeenCalled();
     expect(calls).toEqual(['render', 'trash', 'move']);
+  });
+
+  it('tries a busy move again a few times, waiting between tries', async () => {
+    const { deps, calls } = fakes();
+    const busy = Object.assign(new Error('resource busy'), { code: 'EBUSY' });
+    deps.move.mockRejectedValueOnce(busy).mockRejectedValueOnce(Object.assign(new Error('denied'), { code: 'EPERM' }));
+    const wait = vi.fn(async () => undefined);
+    const r = await saveToFile(ORIGINAL, edit, { ...deps, wait });
+    expect(r.ok).toBe(true);
+    expect(deps.move).toHaveBeenCalledTimes(3);
+    expect(wait).toHaveBeenCalledTimes(2);
+    expect(wait).toHaveBeenCalledWith(MOVE_RETRY_MS);
+    // The two refused tries are the mocked ones; only the third reaches the fake's own move.
+    expect(calls).toEqual(['render', 'trash', 'move', 'clearEdit', 'refresh']);
+  });
+
+  it('gives up on a move that stays busy, and does not retry other failures', async () => {
+    const a = fakes();
+    a.deps.move.mockRejectedValue(Object.assign(new Error('locked'), { code: 'EACCES' }));
+    const wait = vi.fn(async () => undefined);
+    const ra = await saveToFile(ORIGINAL, edit, { ...a.deps, wait });
+    expect(ra.ok).toBe(false);
+    expect(ra.error).toContain('locked');
+    expect(a.deps.move).toHaveBeenCalledTimes(MOVE_TRIES);
+    expect(wait).toHaveBeenCalledTimes(MOVE_TRIES - 1);
+    const b = fakes({ moveFails: true });
+    const rb = await saveToFile(ORIGINAL, edit, { ...b.deps, wait: vi.fn(async () => undefined) });
+    expect(rb.ok).toBe(false);
+    expect(b.deps.move).toHaveBeenCalledTimes(1);
   });
 
   it('says the photo was saved when the edit cannot be cleared or the photo read again', async () => {
@@ -171,7 +201,7 @@ describe('saveAs', () => {
     expect(r).toEqual({ ok: true, savedPath: 'C:\\p\\copy.jpg', item: { path: 'C:\\p\\copy.jpg' } });
     expect(calls).toEqual(['ask', 'render', 'move', 'refresh', 'copyInfo']);
     expect(deps.move).toHaveBeenCalledWith(TEMP, 'C:\\p\\copy.jpg');
-    expect(deps.copyInfo).toHaveBeenCalledWith('C:\\p\\copy.jpg', { star: true, people: ['Ann'] });
+    expect(deps.copyInfo).toHaveBeenCalledWith('C:\\p\\copy.jpg', { edit: null, star: true, people: ['Ann'] });
   });
 
   it('does not copy the info when the copy is outside the open folder', async () => {
@@ -219,7 +249,7 @@ describe('saveAs', () => {
     const b = fakes({ copyFails: true });
     const rb = await saveAs(ORIGINAL, edit, b.deps);
     expect(rb.saved).toBe(true);
-    expect(rb.error).toContain('could not be copied');
+    expect(rb.error).toBe('The copy was saved as C:\\p\\copy.jpg, but its star, people, date, location, description and notes could not be copied to it: info locked');
   });
 
   it('refuses a path that is not in the open folder, before asking', async () => {
@@ -231,8 +261,9 @@ describe('saveAs', () => {
 });
 
 describe('copyablePatch', () => {
-  it('takes only the person-made fields', () => {
+  it('takes only the person-made fields, and removes any edit the copy had', () => {
     expect(copyablePatch({ star: true, people: ['A'], date: 'd', location: { lat: 1, lon: 2 }, description: 'x', notes: 'n', edit: { rotate: 90 }, other: 1 })).toEqual({
+      edit: null,
       star: true,
       people: ['A'],
       date: 'd',
@@ -240,7 +271,7 @@ describe('copyablePatch', () => {
       description: 'x',
       notes: 'n',
     });
-    expect(copyablePatch(undefined)).toEqual({});
+    expect(copyablePatch(undefined)).toEqual({ edit: null });
   });
 });
 
@@ -252,6 +283,21 @@ describe('unsavedClosePrompt', () => {
     expect(p.buttons).toEqual(['Close without saving', 'Keep editing']);
     expect(p.defaultId).toBe(1);
     expect(p.cancelId).toBe(1);
+  });
+});
+
+describe('shouldQuit', () => {
+  it('quits without asking when nothing is unsaved', () => {
+    const ask = vi.fn(() => false);
+    expect(shouldQuit(0, ask)).toBe(true);
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it('asks with the count, and quits only on Close without saving', () => {
+    const yes = vi.fn(() => true);
+    expect(shouldQuit(2, yes)).toBe(true);
+    expect(yes).toHaveBeenCalledWith(2);
+    expect(shouldQuit(2, () => false)).toBe(false);
   });
 });
 

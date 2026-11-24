@@ -125,7 +125,7 @@ A second program in the desktop app, for looking through a folder of photos and 
 **Done** keeps the edit as *unsaved*: the photo's tile gets a marker, and the preview caption says "Edited · not saved". Clicking another photo while editing does the same. Edit is unavailable for a photo while it is being saved. Nothing is written until you save:
 
 - **Save** writes the edit (where it goes depends on the setting below).
-- **Save as…** writes the edited photo to a new file you name, with a Save dialog; the original is never overwritten. Save as into the open folder makes the copy appear in the grid with the original's star, people and notes. If you type a different extension, the file gets one that fits its format (.jpg, .png or .webp), and Save as refuses a name that already exists once the extension is changed.
+- **Save as…** writes the edited photo to a new file you name, with a Save dialog; the original is never overwritten. Save as into the open folder makes the copy appear in the grid with the original's star, people, date, location, description and notes. If you type a different extension, the file gets one that fits its format (.jpg, .png or .webp), and Save as refuses a name that already exists once the extension is changed.
 - **Save all (N)** saves every unsaved edit, one after another, and says how it went.
 - **Revert to original** removes an edit saved in the info file.
 

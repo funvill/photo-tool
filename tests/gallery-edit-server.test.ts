@@ -190,6 +190,22 @@ describe('PATCH /api/gallery/info edit field', () => {
     expect(res.body.info.edit).toBeUndefined();
   });
 
+  it('writes nothing for a removal of an edit the photo does not have', async () => {
+    await openAndFinish();
+    const res = await patch(null);
+    expect(res.status).toBe(200);
+    expect(res.body.info.edit).toBeUndefined();
+    expect(existsSync(infoPath())).toBe(false);
+    // With other info there, the file is left exactly as it was.
+    await api('PATCH', '/api/gallery/info', { path: join(photos, 'a.jpg'), patch: { star: true } });
+    const text = readFileSync(infoPath(), 'utf8');
+    const stamp = statSync(infoPath()).mtimeMs;
+    await new Promise((r) => setTimeout(r, 30));
+    await patch(null);
+    expect(readFileSync(infoPath(), 'utf8')).toBe(text);
+    expect(statSync(infoPath()).mtimeMs).toBe(stamp);
+  });
+
   it('refuses an invalid edit and writes nothing', async () => {
     await openAndFinish();
     const res = await patch({ rotate: 45 });

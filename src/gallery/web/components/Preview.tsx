@@ -125,13 +125,13 @@ function PreviewStage({ item, edit, onOpen, onContextMenu }: { item: GalleryItem
     if (!needFull || full) return;
     const probe = new Image();
     probe.onload = () => setFull(true);
-    probe.src = fullUrl(item.path);
+    probe.src = fullUrl(item.path, item.key);
     return () => {
       probe.onload = null;
     };
-  }, [needFull, full, item.path]);
+  }, [needFull, full, item.path, item.key]);
 
-  const src = full ? fullUrl(item.path) : thumbUrl(item.key, small ? 's' : 'm');
+  const src = full ? fullUrl(item.path, item.key) : thumbUrl(item.key, small ? 's' : 'm');
   const v = z.view;
   const zoomedIn = v !== null && v.zoom > 1;
   const placed = v && z.fit ? { width: z.fit.w, height: z.fit.h, transform: `translate(${v.x}px, ${v.y}px) scale(${v.zoom})` } : { visibility: 'hidden' as const };

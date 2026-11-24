@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { centreOn, clampPan, fitSize, fitView, visibleRect, zoomAt, MAX_ZOOM } from '../src/core/previewZoom';
+import { fullUrl } from '../src/gallery/web/api';
 
 const img = { w: 1600, h: 1067 };
 
@@ -89,5 +90,15 @@ describe('visibleRect and centreOn', () => {
     const r = visibleRect(v, img, pane);
     expect(r.x).toBeCloseTo(0, 6);
     expect(r.y).toBeCloseTo(0, 6);
+  });
+});
+
+describe('fullUrl', () => {
+  it('carries the photo key, so a changed file is not served from the cache', () => {
+    const a = new URLSearchParams(fullUrl('C:\p\a b.jpg', 'k1').split('?')[1]);
+    expect(fullUrl('C:\p\a b.jpg', 'k1').startsWith('/api/gallery/full?')).toBe(true);
+    expect(a.get('path')).toBe('C:\p\a b.jpg');
+    expect(a.get('key')).toBe('k1');
+    expect(fullUrl('C:\p\a b.jpg', 'k2')).not.toBe(fullUrl('C:\p\a b.jpg', 'k1'));
   });
 });

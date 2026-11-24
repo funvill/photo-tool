@@ -27,6 +27,8 @@ interface CommonDeps {
   render(path: string, edit: PhotoEdit): Promise<{ file: string; format?: string }>;
   /** Put `from` at `to`: a rename, else (another drive) a copy and then removing `from`. */
   move(from: string, to: string): Promise<void>;
+  /** Wait this long before trying a busy move again (a test passes one that does not wait). */
+  wait?(ms: number): Promise<void>;
   removeTemp(file: string): Promise<void>;
   /** Make the server read these photos again; the photos now in the open folder. */
   refresh(paths: string[]): Promise<unknown[]>;
@@ -54,6 +56,26 @@ const failure = (err: unknown) => (err instanceof Error ? err.message : String(e
 const NOT_A_PHOTO = 'That photo is not in the open folder any more.';
 const isHeic = (path: string) => /\.(heic|heif)$/i.test(path);
 
+/** Codes a move gets on Windows while another program (OneDrive, antivirus, a viewer) holds the file open. */
+const BUSY_CODES = new Set(['EBUSY', 'EPERM', 'EACCES']);
+/** A busy move is tried this many times in all, this far apart. */
+export const MOVE_TRIES = 3;
+export const MOVE_RETRY_MS = 200;
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+/** `deps.move`, tried again a few times while the file is busy; any other failure is thrown at once. */
+async function moveRetrying(deps: CommonDeps, from: string, to: string): Promise<void> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await deps.move(from, to);
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException)?.code;
+      if (attempt >= MOVE_TRIES || !code || !BUSY_CODES.has(code)) throw err;
+      await (deps.wait ?? sleep)(MOVE_RETRY_MS);
+    }
+  }
+}
+
 /** Replace the photo's file with its edited picture. The original is trashed only after the picture is made. */
 export async function saveToFile(path: string, edit: PhotoEdit, deps: SaveToFileDeps): Promise<EditSaveResult> {
   if (typeof path !== 'string' || !(await deps.check([path])).includes(path)) return { ok: false, error: NOT_A_PHOTO };
@@ -76,10 +98,14 @@ export async function saveToFile(path: string, edit: PhotoEdit, deps: SaveToFile
     return { ok: false, error: `Couldn't move the original to the Recycle Bin, so nothing was changed: ${failure(err)}` };
   }
   try {
-    await deps.move(temp, path);
+    await moveRetrying(deps, temp, path);
   } catch (err) {
     // The temp file is the only copy of the picture now: it stays where it is (the gallery sweeps its edits folder after an hour).
-    return { ok: false, error: `The original is in the Recycle Bin, but the edited photo could not be put in its place: ${failure(err)}. A temporary edited copy is at ${temp} for the next hour; your edit is still saved in the gallery, so you can Save again.` };
+    // Save again cannot help: there is no photo at the path any more until the original is restored.
+    return {
+      ok: false,
+      error: `The original is in the Recycle Bin, but the edited photo could not be put in its place: ${failure(err)}. Restore the original from the Recycle Bin to get the photo back. The edited photo is at ${temp} for about the next hour, if you want to copy it somewhere yourself.`,
+    };
   }
   try {
     await deps.clearEdit(path);
@@ -125,7 +151,7 @@ export async function saveAs(path: string, edit: PhotoEdit, deps: SaveAsDeps, in
     return { ok: false, error: `Couldn't make the edited photo: ${failure(err)}` };
   }
   try {
-    await deps.move(temp, target);
+    await moveRetrying(deps, temp, target);
   } catch (err) {
     await deps.removeTemp(temp).catch(() => undefined);
     return { ok: false, error: `Couldn't save the copy: ${failure(err)}` };
@@ -141,14 +167,18 @@ export async function saveAs(path: string, edit: PhotoEdit, deps: SaveAsDeps, in
   try {
     await deps.copyInfo(target, copyablePatch(info));
   } catch (err) {
-    return { ok: false, saved: true, savedPath: target, error: `The copy was saved as ${target}, but its star, people and notes could not be copied to it: ${failure(err)}` };
+    return { ok: false, saved: true, savedPath: target, error: `The copy was saved as ${target}, but its star, people, date, location, description and notes could not be copied to it: ${failure(err)}` };
   }
   return { ok: true, savedPath: target, item };
 }
 
-/** The fields of a photo's info a copy of it keeps: what the person said about the photo, not its edit. */
+/**
+ * The fields of a photo's info a copy of it keeps: what the person said about the photo, not its edit.
+ * The copy's own edit is removed: a file saved over one that had an entry (an older -edited copy) must
+ * not show that file's edit on top of the new picture.
+ */
 export function copyablePatch(info: Record<string, unknown> | undefined): Record<string, unknown> {
-  const patch: Record<string, unknown> = {};
+  const patch: Record<string, unknown> = { edit: null };
   if (!info || typeof info !== 'object') return patch;
   for (const key of ['star', 'people', 'date', 'location', 'description', 'notes']) if (info[key] !== undefined) patch[key] = info[key];
   return patch;
@@ -164,4 +194,12 @@ export function unsavedClosePrompt(count: number): MessageBoxOptions {
     message: `${count} ${count === 1 ? 'photo has' : 'photos have'} edits that are not saved.`,
     detail: 'Closing now throws those edits away.',
   };
+}
+
+/**
+ * Quitting (File > Exit) closes the window without the page's own question, so it is asked here:
+ * with unsaved edits, quit only when `ask` (the unsavedClosePrompt dialog) says to close anyway.
+ */
+export function shouldQuit(count: number, ask: (count: number) => boolean): boolean {
+  return count <= 0 || ask(count);
 }

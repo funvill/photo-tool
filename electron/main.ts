@@ -595,6 +595,11 @@ if (!app.requestSingleInstanceLock(isGallery ? ({ argv: process.argv, cwd: proce
   // Quit only after the server has closed its database.
   app.on('before-quit', (event) => {
     if (quitting) return;
+    // app.exit below skips the page's beforeunload, so the gallery asks about unsaved edits here.
+    if (!selfTest && !failing && galleryEdits && !galleryEdits.confirmQuit()) {
+      event.preventDefault();
+      return;
+    }
     quitting = true;
     if (!server) return;
     event.preventDefault();

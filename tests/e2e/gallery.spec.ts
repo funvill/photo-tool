@@ -1,6 +1,6 @@
 // The gallery program: open a folder, review its photos (grid, preview pane, keys, stacks, hidden
 // photos) and star one — the star lands in the folder's photoinfo.json, where the editor will find it.
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
@@ -562,6 +562,55 @@ test('on a wide window the preview fits inside its pane; the wheel zooms with a 
     await stage.dblclick({ position: { x: 20, y: 20 } });
     await expect(page.getByRole('dialog', { name: 'Photo viewer' })).toBeVisible();
     await page.keyboard.press('Escape');
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+test('zoomed in, the full-size picture is swapped in, and a changed file gets a new full-size address', async ({ page, request }) => {
+  await page.setViewportSize({ width: 2400, height: 700 });
+  const dir = await openTrip(page, request);
+  try {
+    const first = await altOf(page, 0);
+    const preview = page.getByRole('region', { name: 'Preview' });
+    const stage = preview.locator('.gallery-preview-stage');
+    const img = preview.locator('.gallery-preview-img');
+    await expect(img).toHaveAttribute('alt', first!);
+    const keyOf = (src: string | null) => new URLSearchParams((src ?? '').split('?')[1] ?? '').get('key');
+    // Zoomed well past the 1600 px picture's detail (the fixtures are 3000 px wide), the full one comes in.
+    const zoomToFull = async () => {
+      await expect.poll(async () => (await img.getAttribute('src')) ?? '').toContain('/api/gallery/thumb');
+      const thumbKey = keyOf(await img.getAttribute('src'));
+      // The wheel zooms only once the picture is placed.
+      await expect(img).toBeVisible();
+      await expect.poll(async () => (await img.boundingBox())?.height ?? 0).toBeGreaterThan(100);
+      const s = (await stage.boundingBox())!;
+      await page.mouse.move(s.x + s.width / 2, s.y + s.height / 2);
+      for (let i = 0; i < 8; i++) await page.mouse.wheel(0, -100);
+      await expect(page.locator('.gallery-minimap')).toBeVisible();
+      await expect.poll(async () => (await img.getAttribute('src')) ?? '', { timeout: 30_000 }).toContain('/api/gallery/full');
+      const src = await img.getAttribute('src');
+      // The full-size address carries the photo's key (a cached reply must not outlive a change to the file).
+      expect(keyOf(src)).toBe(thumbKey);
+      return src;
+    };
+    const before = await zoomToFull();
+
+    // The file changes on disk (as Save to file does); read again, the photo has a new key and a new address.
+    const { default: sharp } = await import('sharp');
+    // Mirrored, with its EXIF kept: new pixels, the same date, so it keeps its place in the grid.
+    const changed = await sharp(readFileSync(join(dir, first!))).flop().withMetadata().jpeg().toBuffer();
+    // Put in place by a rename, as a save does (the server may hold the old file open, which refuses a write over it on Windows).
+    writeFileSync(join(dir, '..', 'changed.jpg'), changed);
+    renameSync(join(dir, '..', 'changed.jpg'), join(dir, first!));
+    await page.reload();
+    await page.getByRole('button', { name: dir }).click();
+    await expect(page.locator('.gallery-tile').first()).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByRole('progressbar')).toHaveCount(0, { timeout: 60_000 });
+    await expect(selectedImg(page)).toHaveAttribute('alt', first!);
+    await expect(img).toHaveAttribute('alt', first!);
+    const after = await zoomToFull();
+    expect(after).not.toBe(before);
   } finally {
     removeTrip(dir);
   }

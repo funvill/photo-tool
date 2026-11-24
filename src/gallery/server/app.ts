@@ -326,8 +326,13 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     }
     const job = typeof jobId === 'string' && jobIds.includes(jobId) ? scanner.get(jobId) : undefined;
     const before = job ? jobStamp(job.photos) : undefined;
+    // A patch that only removes fields the photo does not have changes nothing: photoinfo.json is not
+    // written (or made) for it. Saving to the photo file clears the edit this way after every save.
+    const folderInfo = readFolderInfo(dirname(photo.path), infoOpts);
+    const current = infoFor(folderInfo, basename(photo.path)) ?? {};
+    const noChange = !folderInfo.error && Object.entries(toWrite).every(([field, value]) => (value === null || value === undefined) && !(field in current));
     try {
-      updatePhotoInfo(dirname(photo.path), basename(photo.path), toWrite, infoOpts);
+      if (!noChange) updatePhotoInfo(dirname(photo.path), basename(photo.path), toWrite, infoOpts);
     } catch (e) {
       if (e instanceof PhotoInfoWriteError) throw new HttpError(409, e.message);
       throw e;

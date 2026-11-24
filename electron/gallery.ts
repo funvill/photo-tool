@@ -10,7 +10,7 @@ import { editFormatFor, type PhotoEdit } from '../src/core/photoEdit';
 import { galleryLaunchCommand, parseMode } from './config';
 import { dragFiles, dragRequest, preparedDragFor, sameDragList, type DragCheck, type PreparedDrag } from './drag';
 import { copyTextRequest, trashConfirm, trashPhotos, type TrashResult } from './fileActions';
-import { saveAs, saveToFile, unsavedClosePrompt, type EditSaveAsResult, type EditSaveResult } from './editActions';
+import { saveAs, saveToFile, shouldQuit, unsavedClosePrompt, type EditSaveAsResult, type EditSaveResult } from './editActions';
 import { readEditTarget, readMapConsent, writeEditTarget, writeMapConsent, type EditTarget } from './mapTiles';
 
 export const GALLERY_DESCRIPTION = 'Look through a folder of photos, star the best ones and drag them into other programs. Uses the network only for map tiles, and only if you choose Load maps.';
@@ -404,7 +404,8 @@ async function moveFile(from: string, to: string): Promise<void> {
       await rm(part, { force: true }).catch(() => undefined);
       throw copyErr;
     }
-    await unlink(from);
+    // The photo is in place: a source that can't be removed is only a stray temp file (the edits folder is swept).
+    await unlink(from).catch(() => undefined);
   }
 }
 
@@ -534,10 +535,20 @@ export function galleryEditActions(o: { window: () => BrowserWindow | null; from
         // preventDefault here lets the page go: the page's own beforeunload is what stopped it.
         if (!n || dialog.showMessageBoxSync(w, unsavedClosePrompt(n)) === 0) event.preventDefault();
       });
-      // A new page starts with nothing unsaved.
+      // A new page starts with nothing unsaved; a closed window has nothing left to save.
       w.webContents.on('did-start-navigation', (e) => {
         if (e.isMainFrame && !e.isSameDocument) unsaved.delete(id);
       });
+      w.webContents.once('destroyed', () => unsaved.delete(id));
+    },
+    /**
+     * Before quitting (File > Exit, which skips the page's own question): with unsaved edits in the
+     * gallery's window, ask as closing it would. True to go on quitting.
+     */
+    confirmQuit(): boolean {
+      const w = o.window();
+      if (!w || w.isDestroyed()) return true;
+      return shouldQuit(unsaved.get(w.webContents.id) ?? 0, (n) => dialog.showMessageBoxSync(w, unsavedClosePrompt(n)) === 0);
     },
   };
 }

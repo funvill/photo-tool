@@ -470,7 +470,6 @@ export const useGallery = create<GalleryState>()((set, get) => {
     if (reloading > 0) saved.push({ seq: saveSeq, item: updated });
   };
 
-  /** Save one photo's unsaved edit (see saveEdit). Quiet: no error toast (Save all says it once). */
   /** Save one photo's unsaved edit, marking it as being saved meanwhile (a second save of it is refused: false). */
   const saveOne = async (path: string, quiet: boolean): Promise<boolean> => {
     if (get().savingPaths.includes(path)) return false;
@@ -482,6 +481,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
     }
   };
 
+  /** Save one photo's unsaved edit (see saveEdit). Quiet: no error toast (Save all says it once). */
   const saveOneNow = async (path: string, quiet: boolean): Promise<boolean> => {
     const s = get();
     const edit = s.pendingEdits[path];
