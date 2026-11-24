@@ -95,23 +95,35 @@ export interface ExtractedMetadata {
   capturedAt: string | null;
   gpsLat: number | null;
   gpsLon: number | null;
+  /** "Make Model" from EXIF (Model alone when it already starts with the make), or null. */
+  camera: string | null;
+}
+
+function cameraName(make: unknown, model: unknown): string | null {
+  const mk = typeof make === 'string' ? make.trim() : '';
+  const md = typeof model === 'string' ? model.trim() : '';
+  if (!mk) return md || null;
+  if (!md) return mk;
+  return md.toLowerCase().startsWith(mk.toLowerCase()) ? md : `${mk} ${md}`;
 }
 
 export async function readMetadata(originalPath: string): Promise<ExtractedMetadata> {
   let capturedAt: string | null = null;
   let gpsLat: number | null = null;
   let gpsLon: number | null = null;
+  let camera: string | null = null;
   // exifr is given the bytes, not the path: with a path it leaves file handles for the garbage
   // collector to close, which newer Node versions (26.13+) treat as an error.
   let data: Buffer;
   try {
     data = await readFile(originalPath);
   } catch {
-    return { capturedAt, gpsLat, gpsLon };
+    return { capturedAt, gpsLat, gpsLon, camera };
   }
   try {
-    const tags = await exifr.parse(data, { reviveValues: false, pick: ['DateTimeOriginal', 'CreateDate', 'DateTimeDigitized', 'ModifyDate', 'DateTime'] });
+    const tags = await exifr.parse(data, { reviveValues: false, pick: ['DateTimeOriginal', 'CreateDate', 'DateTimeDigitized', 'ModifyDate', 'DateTime', 'Make', 'Model'] });
     if (tags) capturedAt = exifDate(tags.DateTimeOriginal) ?? exifDate(tags.CreateDate) ?? exifDate(tags.DateTimeDigitized) ?? exifDate(tags.ModifyDate) ?? exifDate(tags.DateTime);
+    if (tags) camera = cameraName(tags.Make, tags.Model);
   } catch {
     // no EXIF — fine
   }
@@ -124,7 +136,7 @@ export async function readMetadata(originalPath: string): Promise<ExtractedMetad
   } catch {
     // no GPS — fine
   }
-  return { capturedAt, gpsLat, gpsLon };
+  return { capturedAt, gpsLat, gpsLon, camera };
 }
 
 /** Dimensions after applying EXIF orientation. */
@@ -135,6 +147,18 @@ export async function orientedSize(path: string): Promise<{ width: number; heigh
   return { width: swap ? m.height : m.width, height: swap ? m.width : m.height, format: m.format ?? 'unknown' };
 }
 
+const jpegQuality = (size: ThumbSize) => (size === 's' ? 78 : 84);
+
+/** Writes the opaque JPEG thumbnail of `size` to `outFile` (shared by the editor and the gallery). */
+export async function writeJpegThumb(workPath: string, size: ThumbSize, outFile: string) {
+  await sharp(workPath, { failOn: 'none' })
+    .rotate()
+    .resize(THUMB_SIZES[size], THUMB_SIZES[size], { fit: 'inside', withoutEnlargement: true })
+    .flatten({ background: '#ffffff' })
+    .jpeg({ quality: jpegQuality(size), mozjpeg: true })
+    .toFile(outFile);
+}
+
 export async function makeThumbnails(workPath: string, dataDir: string, assetId: string, transparent = false) {
   const base = sharp(workPath, { failOn: 'none' }).rotate();
   await Promise.all(
@@ -143,7 +167,7 @@ export async function makeThumbnails(workPath: string, dataDir: string, assetId:
       // Remove the other format's file so the route never serves a stale one.
       await rm(thumbPath(dataDir, assetId, size, transparent ? 'jpg' : 'webp'), { force: true });
       if (transparent) return img.webp({ quality: size === 's' ? 80 : 86, alphaQuality: 90 }).toFile(thumbPath(dataDir, assetId, size, 'webp'));
-      return img.flatten({ background: '#ffffff' }).jpeg({ quality: size === 's' ? 78 : 84, mozjpeg: true }).toFile(thumbPath(dataDir, assetId, size));
+      return img.flatten({ background: '#ffffff' }).jpeg({ quality: jpegQuality(size), mozjpeg: true }).toFile(thumbPath(dataDir, assetId, size));
     }),
   );
 }
