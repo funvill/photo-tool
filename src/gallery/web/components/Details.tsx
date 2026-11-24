@@ -1,11 +1,23 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { fromDateTimeLocal, normalisePeople, toDateTimeLocal } from '../../../core';
+import {
+  aspectRatio,
+  formatAperture,
+  formatBias,
+  formatFocal,
+  formatShutter,
+  fromDateTimeLocal,
+  megapixels,
+  normalisePeople,
+  toDateTimeLocal,
+} from '../../../core';
 import { Icon } from '../../../web/components/Icon';
 import { formatSize, formatTaken } from '../../../web/components/HoverPreview';
 import { galleryApi, type GalleryItem } from '../api';
 import { useGallery } from '../store';
+import { Histogram } from './Histogram';
 import { LocationInput } from './LocationInput';
 import { PeopleInput } from './PeopleInput';
+import { Section } from './Section';
 
 /** The country list is the same for every photo: fetched once. */
 let allPlaces: Promise<{ id: string; name: string }[]> | null = null;
@@ -180,6 +192,17 @@ function DetailsFor({ item }: { item: GalleryItem }) {
     name: typeof info.location?.name === 'string' ? info.location.name : '',
   };
 
+  const exif = item.exif ?? {};
+  const cameraRows: [string, string][] = [];
+  if (item.camera) cameraRows.push(['Camera', item.camera]);
+  if (exif.lens) cameraRows.push(['Lens', exif.lens]);
+  if (exif.focalLength !== undefined) cameraRows.push(['Focal length', formatFocal(exif.focalLength, exif.focalLength35)]);
+  if (exif.aperture !== undefined) cameraRows.push(['Aperture', formatAperture(exif.aperture)]);
+  if (exif.exposureTime !== undefined) cameraRows.push(['Shutter', formatShutter(exif.exposureTime)]);
+  if (exif.iso !== undefined) cameraRows.push(['ISO', String(exif.iso)]);
+  if (exif.exposureBias !== undefined) cameraRows.push(['Exposure', formatBias(exif.exposureBias)]);
+  if (exif.flash !== undefined) cameraRows.push(['Flash', exif.flash ? 'Fired' : 'Did not fire']);
+
   return (
     <aside className="gallery-details" aria-label="Photo details">
       <div className="gallery-details-head">
@@ -194,60 +217,93 @@ function DetailsFor({ item }: { item: GalleryItem }) {
         )}
         {item.infoError && <p className="gallery-note gallery-note-error small">{item.infoError}</p>}
 
-        <div className="gallery-facts">
-          <Row label="Taken">
-            {item.effectiveDate ? formatTaken(item.effectiveDate) : 'Unknown'}
-            {overridden && <span className="badge gallery-changed" title="The date was changed here; the camera's is kept in the photo">changed</span>}
-          </Row>
-          {item.camera && <Row label="Camera">{item.camera}</Row>}
-          <Row label="Size">{item.width} × {item.height} px · {formatSize(item.size)}</Row>
-          {item.relDir && <Row label="Folder">{item.relDir}</Row>}
-          {hasLocation && <Row label="Country">{country ?? '…'}</Row>}
-        </div>
+        <Section id="photo" title="Photo">
+          <div className="gallery-facts">
+            <Row label="Taken">
+              {item.effectiveDate ? formatTaken(item.effectiveDate) : 'Unknown'}
+              {overridden && <span className="badge gallery-changed" title="The date was changed here; the camera's is kept in the photo">changed</span>}
+            </Row>
+            <Row label="Size">{item.width} × {item.height} px · {formatSize(item.size)}</Row>
+            <Row label="Resolution">{megapixels(item.width, item.height)} · {aspectRatio(item.width, item.height)}</Row>
+            <Row label="Shape">{item.width === item.height ? 'Square' : item.width > item.height ? 'Landscape' : 'Portrait'}</Row>
+            <Row label="Format">{item.fileName.includes('.') ? item.fileName.split('.').pop()!.toUpperCase() : 'Unknown'}</Row>
+            {item.relDir && <Row label="Folder">{item.relDir}</Row>}
+          </div>
+        </Section>
 
-        <Field label="People" saved={flashed === 'people'}>
-          <PeopleInput value={peopleDraft} suggestions={people} onChange={changePeople} />
-        </Field>
-
-        <Field label="Date and time" saved={flashed === 'date'}>
-          <input
-            key={shownDate}
-            ref={(el) => {
-              if (el) dateInput.current = el;
-            }}
-            type="datetime-local"
-            step={1}
-            defaultValue={shownDate}
-            aria-label="Date and time taken"
-            onBlur={(e) => commitDate(e.currentTarget)}
-            onKeyDown={(e) => e.key === 'Enter' && commitDate(e.currentTarget)}
-          />
-          {overridden && (
-            <button type="button" className="link small" onClick={() => void save('date', { date: null })}>
-              Use the camera&apos;s date
-            </button>
+        <Section id="camera" title="Camera">
+          {cameraRows.length ? (
+            <div className="gallery-facts">
+              {cameraRows.map(([label, value]) => (
+                <Row key={label} label={label}>{value}</Row>
+              ))}
+            </div>
+          ) : (
+            <p className="muted small">No camera details in this file</p>
           )}
-          {dateError && <p className="gallery-field-error" role="alert">{dateError}</p>}
-        </Field>
+        </Section>
 
-        <Field label="Location" saved={flashed === 'location'}>
-          <LocationInput initial={locationFields} hasOverride={!!info.location} places={places} onSave={(location) => save('location', { location })} />
-        </Field>
+        <Section id="histogram" title="Histogram">
+          <Histogram item={item} />
+        </Section>
 
-        <Field label="Description" saved={flashed === 'description'}>
-          <input
-            type="text"
-            value={description.value}
-            aria-label="Description"
-            onChange={(e) => description.set(e.target.value)}
-            onBlur={() => saveText('description', description)}
-            onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
-          />
-        </Field>
+        <Section id="place" title="Place">
+          {hasLocation && (
+            <div className="gallery-facts">
+              <Row label="Country">{country ?? '…'}</Row>
+              <Row label="Coordinates">{item.effectiveLat!.toFixed(5)}, {item.effectiveLon!.toFixed(5)}</Row>
+            </div>
+          )}
+          <Field label="Location" saved={flashed === 'location'}>
+            <LocationInput initial={locationFields} hasOverride={!!info.location} places={places} onSave={(location) => save('location', { location })} />
+          </Field>
+        </Section>
 
-        <Field label="Notes" saved={flashed === 'notes'}>
-          <textarea rows={4} value={notes.value} aria-label="Notes" onChange={(e) => notes.set(e.target.value)} onBlur={() => saveText('notes', notes)} />
-        </Field>
+        <Section id="people" title="People">
+          <Field label="People" saved={flashed === 'people'}>
+            <PeopleInput value={peopleDraft} suggestions={people} onChange={changePeople} />
+          </Field>
+        </Section>
+
+        <Section id="date" title="Date and time">
+          <Field label="Date and time" saved={flashed === 'date'}>
+            <input
+              key={shownDate}
+              ref={(el) => {
+                if (el) dateInput.current = el;
+              }}
+              type="datetime-local"
+              step={1}
+              defaultValue={shownDate}
+              aria-label="Date and time taken"
+              onBlur={(e) => commitDate(e.currentTarget)}
+              onKeyDown={(e) => e.key === 'Enter' && commitDate(e.currentTarget)}
+            />
+            {overridden && (
+              <button type="button" className="link small" onClick={() => void save('date', { date: null })}>
+                Use the camera&apos;s date
+              </button>
+            )}
+            {dateError && <p className="gallery-field-error" role="alert">{dateError}</p>}
+          </Field>
+        </Section>
+
+        <Section id="notes" title="Description and notes">
+          <Field label="Description" saved={flashed === 'description'}>
+            <input
+              type="text"
+              value={description.value}
+              aria-label="Description"
+              onChange={(e) => description.set(e.target.value)}
+              onBlur={() => saveText('description', description)}
+              onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
+            />
+          </Field>
+
+          <Field label="Notes" saved={flashed === 'notes'}>
+            <textarea rows={4} value={notes.value} aria-label="Notes" onChange={(e) => notes.set(e.target.value)} onBlur={() => saveText('notes', notes)} />
+          </Field>
+        </Section>
       </div>
     </aside>
   );

@@ -36,3 +36,4 @@ export * from './draftUpdate';
 export * from './galleryEdit';
 export * from './galleryViewer';
 export * from './photoFacts';
+export * from './histogram';

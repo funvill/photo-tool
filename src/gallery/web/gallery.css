@@ -77,8 +77,18 @@
 .gallery-note { margin: 0; padding: 8px 10px; border-radius: var(--radius); background: var(--panel-2); border: 1px solid var(--line); }
 .gallery-note-error { border-color: var(--error); }
 .gallery-facts { display: flex; flex-direction: column; gap: 6px; }
-.gallery-fact { display: grid; grid-template-columns: 64px 1fr; gap: 8px; align-items: baseline; }
+.gallery-fact { display: grid; grid-template-columns: 88px 1fr; gap: 8px; align-items: baseline; }
 .gallery-fact > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+/* Collapsible parts of the info panel. */
+.gallery-section { border-top: 1px solid var(--line-soft); padding-top: 8px; }
+.gallery-section:first-child { border-top: 0; padding-top: 0; }
+.gallery-section-head { display: flex; align-items: center; gap: 6px; width: 100%; padding: 2px 0; background: none; border: 0; color: inherit; font: inherit; font-weight: 600; cursor: pointer; text-align: left; }
+.gallery-section-chevron { width: 12px; color: var(--muted); }
+.gallery-section-body { display: flex; flex-direction: column; gap: 12px; padding-top: 8px; }
+.gallery-section-body[hidden] { display: none; }
+.gallery-histogram svg { display: block; width: 100%; height: 80px; background: var(--panel-2); border-radius: var(--radius); color: #888; }
+.gallery-clipping { display: flex; justify-content: space-between; gap: 8px; margin-top: 6px; }
+.gallery-clip-flag { color: var(--error); font-weight: 600; }
 .gallery-changed { margin-left: 6px; background: var(--accent); color: var(--accent-ink); }
 .gallery-edit { display: flex; flex-direction: column; gap: 6px; }
 .gallery-edit-label { display: flex; justify-content: space-between; align-items: baseline; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }

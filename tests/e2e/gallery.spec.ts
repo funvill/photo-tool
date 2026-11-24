@@ -229,3 +229,51 @@ test('the hover preview no longer appears', async ({ page, request }) => {
     removeTrip(dir);
   }
 });
+
+test('info sections fold and stay folded after reload', async ({ page, request }) => {
+  const dir = await openTrip(page, request);
+  try {
+    await page.locator('.gallery-tile').first().click();
+    const panel = page.getByRole('complementary', { name: 'Photo details' });
+    const header = panel.getByRole('button', { name: 'Camera', exact: true });
+    await expect(header).toHaveAttribute('aria-expanded', 'true');
+    await header.click();
+    await expect(header).toHaveAttribute('aria-expanded', 'false');
+    await page.reload();
+    await page.getByRole('button', { name: dir }).click();
+    await expect(page.locator('.gallery-tile').first()).toBeVisible({ timeout: 60_000 });
+    await page.locator('.gallery-tile').first().click();
+    await expect(panel.getByRole('button', { name: 'Camera', exact: true })).toHaveAttribute('aria-expanded', 'false');
+    await expect(panel.getByRole('button', { name: 'Photo', exact: true })).toHaveAttribute('aria-expanded', 'true');
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+test('histogram draws for the selected photo', async ({ page, request }) => {
+  const dir = await openTrip(page, request);
+  try {
+    await page.locator('.gallery-tile').first().click();
+    const section = page.locator('.gallery-section', { has: page.getByRole('button', { name: 'Histogram', exact: true }) });
+    await expect(section.locator('svg path').first()).toHaveAttribute('d', /\S/);
+    await expect(section).toContainText('Shadows clipped');
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+test('camera section says No camera details for a photo without EXIF', async ({ page, request }) => {
+  const dir = await openTrip(page, request);
+  try {
+    // The undated PNG carries no EXIF at all; the JPEGs carry a make and model only.
+    await page.getByLabel('Stack similar').uncheck();
+    await page.locator('.gallery-tile[title="undated-scan.png"]').click();
+    const panel = page.getByRole('complementary', { name: 'Photo details' });
+    await expect(panel).toContainText('No camera details in this file');
+    await page.locator('.gallery-tile[title="day3-01-cafe.jpg"]').click();
+    await expect(panel).toContainText('Photobook Fixture');
+    await expect(panel).not.toContainText('No camera details in this file');
+  } finally {
+    removeTrip(dir);
+  }
+});
