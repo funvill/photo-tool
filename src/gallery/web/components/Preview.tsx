@@ -5,7 +5,7 @@ import { useGallery, useStackInfo, useVisibleItems } from '../store';
 export interface PreviewProps {
   /** Double-click: open the photo in the full-screen viewer. */
   onOpen(path: string): void;
-  /** Right-click on the photo (the menu comes later). */
+  /** Right-click on the photo: the photo menu. */
   onContextMenu?(path: string, e: MouseEvent): void;
 }
 

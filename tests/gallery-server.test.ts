@@ -311,6 +311,67 @@ describe('gallery server', () => {
     expect((await api('GET', `/api/gallery/thumb?key=${items[0].key}&size=xl`)).status).toBe(400);
   });
 
+  it('image route returns a PNG for a catalogued photo', async () => {
+    await start();
+    const { byName } = await loaded();
+    const a = byName('day1-01-arrival.jpg');
+    const res = await api('GET', `/api/gallery/image?path=${encodeURIComponent(a.path)}`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('image/png');
+    expect((res.body as Buffer).subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
+  });
+
+  it('image route 404s for an unknown path', async () => {
+    await start();
+    await loaded();
+    expect((await api('GET', `/api/gallery/image?path=${encodeURIComponent('C:\\Windows\\win.ini')}`)).status).toBe(404);
+    expect((await api('GET', `/api/gallery/image?path=${encodeURIComponent(join(photos, 'nope.jpg'))}`)).status).toBe(404);
+    expect((await api('GET', '/api/gallery/image')).status).toBe(404);
+  });
+
+  it('removed drops a deleted photo from items and photoinfo.json', async () => {
+    await start();
+    const { jobId, byName } = await loaded();
+    const gone = byName('day1-02-street.jpg');
+    const kept = byName('day1-01-arrival.jpg');
+    await api('PATCH', '/api/gallery/info', { path: gone.path, patch: { star: true } });
+    await api('PATCH', '/api/gallery/info', { path: kept.path, patch: { star: true } });
+    // Only ever the temp copy of the fixture.
+    expect(gone.path.startsWith(root)).toBe(true);
+    rmSync(gone.path);
+
+    const res = await api('POST', '/api/gallery/removed', { paths: [gone.path] });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ removed: [gone.path] });
+    const items = (await api<any[]>('GET', `/api/gallery/items?job=${jobId}`)).body;
+    expect(items.some((i) => i.path === gone.path)).toBe(false);
+    expect(items).toHaveLength(COUNT - 1);
+    // The scan's own list drops it too (not just the existence filter of GET items).
+    expect((await api('GET', `/api/gallery/jobs/${jobId}`)).body.items.some((i: any) => i.path === gone.path)).toBe(false);
+    expect(Object.keys(readInfo().photos)).toEqual(['day1-01-arrival.jpg']);
+    // Its catalogue row and thumbnails are gone.
+    expect((await api('GET', `/api/gallery/thumb?key=${gone.key}&size=s`)).status).toBe(404);
+    expect(existsSync(join(root, 'data', 'thumbs', `${gone.key}_s.jpg`))).toBe(false);
+    expect(existsSync(join(root, 'data', 'thumbs', `${gone.key}_m.jpg`))).toBe(false);
+    expect((await api('POST', '/api/gallery/removed', { paths: 'x' })).status).toBe(400);
+    expect((await api('POST', '/api/gallery/removed', { paths: [1] })).status).toBe(400);
+  });
+
+  it('removed skips a photo still on disk', async () => {
+    await start();
+    const { jobId, byName } = await loaded();
+    const a = byName('day1-01-arrival.jpg');
+    await api('PATCH', '/api/gallery/info', { path: a.path, patch: { star: true } });
+    const before = readFileSync(infoFile(), 'utf8');
+    const res = await api('POST', '/api/gallery/removed', { paths: [a.path, 'C:\\Windows\\win.ini'] });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ removed: [] });
+    expect(existsSync(a.path)).toBe(true);
+    expect(readFileSync(infoFile(), 'utf8')).toBe(before);
+    expect((await api<any[]>('GET', `/api/gallery/items?job=${jobId}`)).body).toHaveLength(COUNT);
+    expect((await api('GET', `/api/gallery/thumb?key=${a.key}&size=s`)).status).toBe(200);
+  });
+
   it('404s info writes for paths that are not catalogued', async () => {
     await start();
     await loaded();

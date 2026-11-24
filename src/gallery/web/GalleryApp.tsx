@@ -1,9 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from 'react';
 import { desktop } from '../../web/desktop';
 import { Details } from './components/Details';
 import { FilterBar } from './components/FilterBar';
 import { FolderBar, RecentFolders } from './components/FolderBar';
 import { Grid } from './components/Grid';
+import { PhotoMenu } from './components/PhotoMenu';
 import { Preview } from './components/Preview';
 import { Progress } from './components/Progress';
 import { Splitter, saveWidth, savedWidth } from './components/Splitter';
@@ -15,8 +16,6 @@ import { useReviewKeys } from './useReviewKeys';
 
 /** Double-click on a photo, or Enter or Space on the selected one. */
 const openViewer = (path: string) => useGallery.getState().openViewer(path);
-/** Right-click on a photo: the menu is wired in later; the browser's own menu shows meanwhile. */
-const onPhotoMenu = () => undefined;
 
 const GRID_KEY = 'gallery.gridWidth';
 const DETAILS_KEY = 'gallery.detailsWidth';
@@ -59,6 +58,17 @@ function ReviewScreen({ root }: { root: string }) {
   const [room, setRoom] = useState(0);
   const [gridWidth, setGridWidth] = useState(() => savedWidth(GRID_KEY, GRID.fallback));
   const [detailsWidth, setDetailsWidth] = useState(() => savedWidth(DETAILS_KEY, DETAILS.fallback));
+  const [menu, setMenu] = useState<{ x: number; y: number; path: string } | null>(null);
+
+  // Right-click on a tile or the preview: a photo not selected is selected first; one of the selected
+  // photos keeps the selection (so the menu's Copy path and Delete take them all).
+  const onPhotoMenu = useCallback((path: string, e: MouseEvent) => {
+    e.preventDefault();
+    const s = useGallery.getState();
+    if (!s.selection.includes(path)) s.select(path);
+    setMenu({ x: e.clientX, y: e.clientY, path });
+  }, []);
+  const closeMenu = useCallback(() => setMenu(null), []);
 
   useLayoutEffect(() => {
     const el = ref.current;
@@ -93,6 +103,7 @@ function ReviewScreen({ root }: { root: string }) {
       <div className="gallery-details-col" style={{ width: details }}>
         <Details />
       </div>
+      {menu && <PhotoMenu key={`${menu.path}@${menu.x},${menu.y}`} x={menu.x} y={menu.y} path={menu.path} onClose={closeMenu} />}
     </div>
   );
 }

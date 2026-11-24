@@ -28,4 +28,16 @@ export interface DesktopApi {
    * (`--gallery <folder>` at start, or from a second launch). Returns a function that stops listening.
    */
   onOpenFolder?(cb: (folder: string) => void): () => void;
+  /** Gallery window: put this photo on the clipboard as a picture, at full size. */
+  copyImage?(path: string): Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Gallery window: open the photo's folder in the file manager with the photo selected. (Named apart
+   * from `showInFolder`, which shows an editor export by its file name.)
+   */
+  showPhotoInFolder?(path: string): Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Gallery window: move these photos to the Recycle Bin (Trash) after a native confirm. Only photos the
+   * gallery has catalogued; `cancelled` when the person said no (nothing was moved).
+   */
+  trashPhotos?(paths: string[]): Promise<{ trashed: string[]; failed: { path: string; message: string }[]; cancelled: boolean }>;
 }

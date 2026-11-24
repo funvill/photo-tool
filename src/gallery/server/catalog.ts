@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { PhotoAnalysis, PhotoExif } from '../../core';
@@ -92,6 +92,17 @@ export class Catalog {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(p.path, p.folder, p.fileName, p.relDir, p.size, p.mtimeMs, p.width, p.height, p.format, p.capturedAt, p.gpsLat, p.gpsLon, p.camera, p.exif ? JSON.stringify(p.exif) : null, p.analysis ? JSON.stringify(p.analysis) : null, p.key);
+  }
+
+  /**
+   * Forget a photo (its file was deleted): its row and its thumbnails in the cache. Only the cache's own
+   * files are removed here, never the photo. A thumbnail already gone is fine.
+   */
+  remove(path: string): void {
+    const p = this.get(path);
+    if (!p) return;
+    this.db.prepare('DELETE FROM photos WHERE path = ?').run(path);
+    for (const size of ['s', 'm'] as const) rmSync(this.thumbPath(p.key, size), { force: true });
   }
 
   thumbPath(key: string, size: 's' | 'm'): string {

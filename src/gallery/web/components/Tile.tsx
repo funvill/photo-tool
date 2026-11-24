@@ -27,7 +27,7 @@ export interface TileProps {
   onDragReady(path: string): void;
   /** The tile is being dragged: the desktop app drags the photo files out instead. */
   onDragOut(path: string): void;
-  /** Right-click on the tile (the menu comes later). */
+  /** Right-click on the tile: the photo menu. */
   onContextMenu?(path: string, e: MouseEvent): void;
 }
 

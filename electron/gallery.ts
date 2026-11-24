@@ -1,12 +1,13 @@
 // The gallery program's part of the main process (`--gallery [folder]`): its page, its File menu,
 // handing it folders to open, and starting it from the editor. main.ts runs everything else
 // (the server, hardening, the window) the same way for both programs.
-import { app, dialog, ipcMain, nativeImage, type BrowserWindow, type IpcMainEvent, type MenuItemConstructorOptions, type NativeImage, type WebContents } from 'electron';
+import { app, clipboard, ClipboardItem, dialog, ipcMain, nativeImage, shell, type BrowserWindow, type IpcMainEvent, type IpcMainInvokeEvent, type MenuItemConstructorOptions, type NativeImage, type WebContents } from 'electron';
 import { spawn } from 'node:child_process';
 import { statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { galleryLaunchCommand, parseMode } from './config';
 import { dragFiles, dragRequest, preparedDragFor, sameDragList, type DragCheck, type PreparedDrag } from './drag';
+import { trashConfirm, trashPhotos, type TrashResult } from './fileActions';
 
 export const GALLERY_DESCRIPTION = 'Look through a folder of photos, star the best ones and drag them into other programs. Works offline.';
 
@@ -202,6 +203,103 @@ export function galleryDrag(o: { fromApp: (e: IpcMainEvent) => boolean; serverPo
         if (!sender.isDestroyed()) sender.send('gallery:drag-failed', DRAG_FAILED);
       },
     );
+  });
+}
+
+const IMAGE_TIMEOUT_MS = 60_000;
+const REMOVED_TIMEOUT_MS = 10_000;
+
+/** The full-size PNG of a catalogued photo, from the gallery's own server. */
+async function fullImage(port: number, path: string): Promise<Buffer> {
+  const res = await fetch(`http://127.0.0.1:${port}/api/gallery/image?${new URLSearchParams({ path })}`, { signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS) });
+  if (!res.ok) throw new Error(`image answered ${res.status}`);
+  return Buffer.from(await res.arrayBuffer());
+}
+
+/** Tell the gallery's server these photos went to the Recycle Bin. */
+async function tellRemoved(port: number, paths: string[]): Promise<void> {
+  const res = await fetch(`http://127.0.0.1:${port}/api/gallery/removed`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ paths }),
+    signal: AbortSignal.timeout(REMOVED_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`removed answered ${res.status}`);
+}
+
+type ActionReply = { ok: boolean; error?: string };
+const NOT_A_PHOTO = "That photo is not in the open folder any more.";
+const failure = (err: unknown) => (err instanceof Error ? err.message : String(err));
+
+/**
+ * The gallery's right-click menu actions on photo files: copy the picture, show it in the file
+ * manager, move photos to the Recycle Bin. Each asks the gallery's server first which paths it has
+ * catalogued (the drag-check), and acts only on those that are files. Only for the gallery's own page
+ * (`fromApp`) in its own window. A delete is only ever `shell.trashItem`, after a native confirm.
+ */
+export function galleryFileActions(o: { window: () => BrowserWindow | null; fromApp: (e: IpcMainInvokeEvent) => boolean; serverPort: () => number; log: (...a: unknown[]) => void }) {
+  /** From the gallery's page in the gallery's window. */
+  const allowed = (e: IpcMainInvokeEvent) => {
+    const w = o.window();
+    return o.fromApp(e) && !!w && !w.isDestroyed() && e.sender === w.webContents;
+  };
+  const catalogued = async (paths: string[]) => (await dragCheck(o.serverPort(), paths)).paths.filter(isFile);
+  /** The one photo the page named, when the server has catalogued it and it is a file; else null. */
+  const onePhoto = async (raw: unknown) => {
+    const [path] = dragRequest([raw]);
+    return path ? ((await catalogued([path]))[0] ?? null) : null;
+  };
+
+  ipcMain.handle('gallery:copy-image', async (e, raw: unknown): Promise<ActionReply> => {
+    if (!allowed(e)) return { ok: false, error: 'Not allowed' };
+    try {
+      const path = await onePhoto(raw);
+      if (!path) return { ok: false, error: NOT_A_PHOTO };
+      const png = await fullImage(o.serverPort(), path);
+      // Only a picture Electron itself can read goes on the clipboard.
+      if (nativeImage.createFromBuffer(png).isEmpty()) return { ok: false, error: "Couldn't read that photo." };
+      await clipboard.write([new ClipboardItem({ 'image/png': new Blob([new Uint8Array(png)], { type: 'image/png' }) })]);
+      return { ok: true };
+    } catch (err) {
+      o.log('copy image failed', String(err));
+      return { ok: false, error: `Couldn't copy the photo: ${failure(err)}` };
+    }
+  });
+
+  ipcMain.handle('gallery:show-in-folder', async (e, raw: unknown): Promise<ActionReply> => {
+    if (!allowed(e)) return { ok: false, error: 'Not allowed' };
+    try {
+      const path = await onePhoto(raw);
+      if (!path) return { ok: false, error: NOT_A_PHOTO };
+      shell.showItemInFolder(path);
+      return { ok: true };
+    } catch (err) {
+      o.log('show in folder failed', String(err));
+      return { ok: false, error: `Couldn't show the photo: ${failure(err)}` };
+    }
+  });
+
+  ipcMain.handle('gallery:trash', async (e, raw: unknown): Promise<TrashResult> => {
+    if (!allowed(e)) return { trashed: [], failed: [], cancelled: true };
+    const result = await trashPhotos(raw, {
+      check: catalogued,
+      confirm: async (paths) => {
+        const w = o.window();
+        if (!w || w.isDestroyed()) return false;
+        return (await dialog.showMessageBox(w, trashConfirm(paths, process.platform))).response === 0;
+      },
+      trash: (path) => shell.trashItem(path),
+      removed: async (paths) => {
+        try {
+          await tellRemoved(o.serverPort(), paths);
+        } catch (err) {
+          o.log('trash: could not tell the server', String(err));
+          throw err;
+        }
+      },
+    });
+    o.log('trash', { trashed: result.trashed.length, failed: result.failed.length, cancelled: result.cancelled });
+    return result;
   });
 }
 

@@ -1,7 +1,9 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { existsSync, readdirSync, statSync } from 'node:fs';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, extname, join, resolve } from 'node:path';
+import sharp from 'sharp';
 import { folderStamp, forgetPhotos, infoFor, PhotoInfoWriteError, readFolderInfo, updatePhotoInfo, type FolderInfo, type PhotoInfo, type PhotoInfoOptions } from '../../photoinfo';
+import { hashFile, workingFile } from '../../server/media';
 import { listPlaces, suggestPlaces } from '../../server/places';
 import { setResourceRoot } from '../../server/resources';
 import { Catalog, type GalleryPhoto } from './catalog';
@@ -182,6 +184,46 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     const photos = (paths as string[]).slice(0, DRAG_MAX).map((p) => catalog.get(p)).filter((p): p is GalleryPhoto => !!p);
     const icon = photos.length ? catalog.thumbPath(photos[0].key, 's') : null;
     res.json({ paths: photos.map((p) => p.path), icon: icon && existsSync(icon) ? icon : null });
+  }));
+
+  // A catalogued photo at full size as PNG, for the desktop app's "Copy to clipboard": Electron can't
+  // read every format (HEIC goes through its derived JPEG), and a PNG it always can. Turned upright.
+  app.get('/api/gallery/image', wrap(async (req, res) => {
+    const photo = catalog.get(q(req, 'path'));
+    if (!photo || !existsSync(photo.path)) throw new HttpError(404, 'Unknown photo');
+    const isHeic = ['.heic', '.heif'].includes(extname(photo.path).toLowerCase());
+    const work = await workingFile(photo.path, dataDir, isHeic ? await hashFile(photo.path) : '');
+    const png = await sharp(work.path).rotate().png().toBuffer();
+    res.setHeader('Cache-Control', 'no-store');
+    res.type('image/png').send(png);
+  }));
+
+  // The desktop app moved these photos to the Recycle Bin: forget each one that really is gone from
+  // disk (its cache row and thumbnails, its place in every open scan, its photoinfo.json entry). A path
+  // still on disk, or one never catalogued, is skipped: this never deletes a file, only what is known about it.
+  app.post('/api/gallery/removed', wrap((req, res) => {
+    const paths: unknown = req.body?.paths;
+    if (!Array.isArray(paths) || !paths.every((p) => typeof p === 'string')) throw new HttpError(400, 'Expected { paths: string[] }');
+    const removed: string[] = [];
+    for (const path of (paths as string[]).slice(0, DRAG_MAX)) {
+      const photo = catalog.get(path);
+      if (!photo || existsSync(photo.path)) continue;
+      catalog.remove(photo.path);
+      for (const id of jobIds) {
+        const job = scanner.get(id);
+        if (!job) continue;
+        const at = job.photos.findIndex((p) => p.path === photo.path);
+        if (at >= 0) job.photos.splice(at, 1);
+      }
+      try {
+        forgetPhotos(dirname(photo.path), [basename(photo.path)], infoOpts);
+      } catch (e) {
+        // A photoinfo.json that can't be written keeps the entry; "Tidy photo info" offers it later.
+        if (!(e instanceof PhotoInfoWriteError)) throw e;
+      }
+      removed.push(photo.path);
+    }
+    res.json({ removed });
   }));
 
   // With `job`, the reply also has that folder's stamp just before and after this write (`stamp`),

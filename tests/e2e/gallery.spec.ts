@@ -277,3 +277,81 @@ test('camera section says No camera details for a photo without EXIF', async ({ 
     removeTrip(dir);
   }
 });
+
+test('right-click opens the menu with icons; Copy path puts the path on the clipboard', async ({ page, request, context }) => {
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  const dir = await openTrip(page, request);
+  try {
+    await page.getByLabel('Stack similar').uncheck();
+    const tile = page.locator('.gallery-tile').nth(2);
+    const path = await tile.getAttribute('data-path');
+    await tile.click({ button: 'right' });
+    // Right-clicking an unselected tile selects it.
+    await expect(tile).toHaveClass(/\bselected\b/);
+    const menu = page.getByRole('menu');
+    await expect(menu).toBeVisible();
+    const items = menu.getByRole('menuitem');
+    await expect(items).toHaveText([/Copy to clipboard/, /Copy path to clipboard/, /Show in file explorer/, /Favourite/, /Hide/, /Delete/]);
+    for (let i = 0; i < 6; i++) await expect(items.nth(i).locator('svg.icon')).toHaveCount(1);
+    await expect(menu.locator('.ctx-sep')).toHaveCount(2);
+
+    await menu.getByRole('menuitem', { name: /Copy path to clipboard/ }).click();
+    await expect(menu).toHaveCount(0);
+    await expect(page.locator('.toast', { hasText: 'Copied' }).first()).toBeVisible();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(path);
+
+    // Several selected: right-click one of them keeps the selection, and every path goes, in grid order.
+    const first = page.locator('.gallery-tile').nth(0);
+    await first.click();
+    await page.locator('.gallery-tile').nth(1).click({ modifiers: ['Shift'] });
+    const paths = [await first.getAttribute('data-path'), await page.locator('.gallery-tile').nth(1).getAttribute('data-path')];
+    await page.locator('.gallery-tile').nth(1).click({ button: 'right' });
+    await expect(page.locator('.gallery-tile.picked')).toHaveCount(2);
+    await page.getByRole('menuitem', { name: /Copy path to clipboard/ }).click();
+    // Windows' clipboard hands text back with CRLF line ends.
+    await expect.poll(async () => (await page.evaluate(() => navigator.clipboard.readText())).replace(/\r\n/g, '\n')).toBe(paths.join('\n'));
+
+    // Esc closes it.
+    await first.click({ button: 'right' });
+    await expect(page.getByRole('menu')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('menu')).toHaveCount(0);
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+test('desktop-only items are disabled in the browser', async ({ page, request }) => {
+  const dir = await openTrip(page, request);
+  try {
+    await page.locator('.gallery-tile').first().click({ button: 'right' });
+    const menu = page.getByRole('menu');
+    await expect(menu.getByRole('menuitem', { name: /Copy to clipboard/ })).toBeDisabled();
+    await expect(menu.getByRole('menuitem', { name: /Show in file explorer/ })).toBeDisabled();
+    await expect(menu.getByRole('menuitem', { name: /Delete/ })).toBeDisabled();
+    await expect(menu.getByRole('menuitem', { name: /Copy path to clipboard/ })).toBeEnabled();
+    await expect(menu.getByRole('menuitem', { name: /Favourite/ })).toBeEnabled();
+    // A click outside closes it.
+    await page.getByRole('region', { name: 'Preview' }).click({ position: { x: 5, y: 5 } });
+    await expect(menu).toHaveCount(0);
+    // Every photo is still there.
+    expect(readdirSync(dir).filter(isSupported).length).toBe(readdirSync(FIXTURES).filter(isSupported).length);
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+test('Hide from the menu hides the photo', async ({ page, request }) => {
+  const dir = await openTrip(page, request);
+  try {
+    const first = await altOf(page, 0);
+    const second = await altOf(page, 1);
+    await page.getByRole('region', { name: 'Preview' }).locator('img').click({ button: 'right' });
+    await page.getByRole('menuitem', { name: /Hide/ }).click();
+    await expect.poll(() => photoInfo(dir)[first!]).toEqual({ hidden: true });
+    await expect(page.locator(`.gallery-tile img[alt="${first}"]`)).toHaveCount(0);
+    await expect(selectedImg(page)).toHaveAttribute('alt', second!);
+  } finally {
+    removeTrip(dir);
+  }
+});
