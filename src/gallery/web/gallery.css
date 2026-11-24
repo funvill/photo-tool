@@ -64,8 +64,16 @@
 .gallery-splitter { flex: none; width: 6px; cursor: col-resize; background: var(--line-soft); touch-action: none; }
 .gallery-splitter:hover, .gallery-splitter:active { background: var(--accent); }
 .gallery-preview { flex: 1; min-width: 300px; min-height: 0; display: flex; flex-direction: column; background: #111; color: #fff; }
-.gallery-preview-stage { flex: 1; min-height: 0; display: grid; place-items: center; padding: 10px; }
-.gallery-preview-stage img { width: 100%; height: 100%; object-fit: contain; display: block; user-select: none; }
+/* The stage is measured by the page and the picture placed by a transform (usePreviewZoom): nothing in the
+   layout depends on the picture's own size, so it always fits. */
+.gallery-preview-stage { flex: 1; min-height: 0; position: relative; overflow: hidden; user-select: none; touch-action: none; }
+.gallery-preview-stage.zoomed { cursor: grab; }
+.gallery-preview-stage.zoomed:active { cursor: grabbing; }
+.gallery-preview-img { position: absolute; left: 0; top: 0; transform-origin: 0 0; display: block; max-width: none; user-select: none; }
+.gallery-minimap { position: absolute; right: 10px; top: 10px; opacity: 0.75; border: 1px solid rgba(255, 255, 255, 0.5); background: #000; cursor: crosshair; touch-action: none; }
+.gallery-minimap:hover { opacity: 1; }
+.gallery-minimap img { width: 100%; height: 100%; display: block; pointer-events: none; }
+.gallery-minimap-view { position: absolute; box-sizing: border-box; border: 2px solid var(--accent); background: rgba(255, 255, 255, 0.12); pointer-events: none; }
 .gallery-preview-caption { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-top: 1px solid rgba(255, 255, 255, 0.08); }
 .gallery-preview-caption strong { min-width: 0; margin-right: 4px; }
 .gallery-preview-caption .badge { font-size: 11px; padding: 2px 7px; white-space: nowrap; background: rgba(255, 255, 255, 0.12); }

@@ -498,3 +498,50 @@ test('the map counts the shown photos that have no location', async ({ page, req
     removeTrip(dir);
   }
 });
+test('on a wide window the preview fits inside its pane; the wheel zooms with a mini map; double-click resets, then opens the viewer', async ({ page, request }) => {
+  await page.setViewportSize({ width: 2400, height: 700 });
+  const dir = await openTrip(page, request);
+  try {
+    const first = await altOf(page, 0);
+    const preview = page.getByRole('region', { name: 'Preview' });
+    const stage = preview.locator('.gallery-preview-stage');
+    const img = preview.locator('.gallery-preview-img');
+    await expect(img).toHaveAttribute('alt', first!);
+    const inside = async () => {
+      const s = (await stage.boundingBox())!;
+      const b = (await img.boundingBox())!;
+      expect(b.x).toBeGreaterThanOrEqual(s.x - 1);
+      expect(b.y).toBeGreaterThanOrEqual(s.y - 1);
+      expect(b.x + b.width).toBeLessThanOrEqual(s.x + s.width + 1);
+      expect(b.y + b.height).toBeLessThanOrEqual(s.y + s.height + 1);
+      return b;
+    };
+    // The whole picture is in the pane, not just its top half.
+    await expect.poll(async () => (await img.boundingBox())?.height ?? 0).toBeGreaterThan(100);
+    const fitted = await inside();
+    await expect(page.locator('.gallery-minimap')).toHaveCount(0);
+
+    // Wheel up over the picture zooms in: the mini map appears and the picture is larger than the stage.
+    const s = (await stage.boundingBox())!;
+    await page.mouse.move(s.x + s.width / 2, s.y + s.height / 2);
+    await page.mouse.wheel(0, -100);
+    const minimap = page.locator('.gallery-minimap');
+    await expect(minimap).toBeVisible();
+    await expect.poll(async () => (await img.boundingBox())!.height).toBeGreaterThan(fitted.height * 1.1);
+    const mm = (await minimap.boundingBox())!;
+    expect(Math.max(mm.width, mm.height)).toBeCloseTo(160, 0);
+
+    // Double-click resets to fit; the mini map is gone.
+    await stage.dblclick({ position: { x: 20, y: 20 } });
+    await expect(minimap).toHaveCount(0);
+    await expect.poll(async () => Math.round((await img.boundingBox())!.height)).toBe(Math.round(fitted.height));
+    await inside();
+
+    // At fit, double-click opens the viewer as before.
+    await stage.dblclick({ position: { x: 20, y: 20 } });
+    await expect(page.getByRole('dialog', { name: 'Photo viewer' })).toBeVisible();
+    await page.keyboard.press('Escape');
+  } finally {
+    removeTrip(dir);
+  }
+});

@@ -70,3 +70,8 @@ export const galleryApi = {
 export function thumbUrl(key: string, size: 's' | 'm' = 's'): string {
   return `/api/gallery/thumb?${qs({ key, size })}`;
 }
+
+/** The photo at full size, upright (JPEG): what the zoomed preview swaps in. */
+export function fullUrl(path: string): string {
+  return `/api/gallery/full?${qs({ path })}`;
+}
