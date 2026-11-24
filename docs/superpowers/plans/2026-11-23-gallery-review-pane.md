@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Turn the Photobook Gallery's main screen into a review screen: a large preview pane, keyboard moving and judging (F favourite, H hide), hidden photos, near-duplicate stacks that unfold in the grid, a sectioned info panel with camera details and a histogram, and a right-click menu (copy image, copy path, show in folder, delete to Recycle Bin).
+**Goal:** Turn the Photobook Gallery's main screen into a review screen: a large preview pane, keyboard moving and judging (F favourite, H hide), hidden photos, near-duplicate stacks that unfold in the grid, a sectioned info panel with camera details and a histogram, and a right-click menu (copy image, copy path, show in folder, delete to Recycle Bin), and a Map tab on OpenStreetMap tiles that the user allows once.
 
 **Architecture:** Pure rules (stacking, hidden filter, key steps, flag targets, histogram, fact formatting, trash flow) live in `src/core` / `electron/fileActions.ts` with Vitest tests. The zustand store (`src/gallery/web/store.ts`) gains hidden/stack state and actions on top of them. The screen (`GalleryApp`, `Grid`, new `Preview`, `Splitter`, `PhotoMenu`, sectioned `Details`) renders them. EXIF details come from a widened `readMetadata` stored in a new `exif` column of the gallery cache. File actions run in the Electron main process over new IPC calls, checked against the gallery server's catalogue.
 
@@ -24,6 +24,7 @@
 - Menu icons from `src/web/components/Icon.tsx`: Copy to clipboard `image`, Copy path `copy`, Show in file explorer `folder`, Delete `trash`, Favourite `star`, Hide `eye-off` (Unhide `eye`). Menu uses the existing `.ctx-menu` styles in `src/web/styles.css`.
 - Histogram clipping flag: `analysis.clippedShadows` or `analysis.clippedHighlights` ≥ 0.02.
 - Panel widths remembered in localStorage keys `gallery.gridWidth` (default 420, min 200) and `gallery.detailsWidth` (default 340, min 260, max 560); the preview keeps at least 300 px. Section open state in `gallery.sections` (JSON object of section id → boolean, all open by default). All localStorage access wrapped in try/catch.
+- Network: nothing leaves the machine except, in the gallery window only and only after the user chose **Load maps**, GET requests for `https://tile.openstreetmap.org/{z}/{x}/{y}.png`. No script, style or font from the internet ever (Leaflet is bundled from npm).
 - The hover preview is removed from the gallery only; `src/web/components/HoverPreview.tsx` stays (the editor's Library uses it).
 
 ## Review Focus
@@ -232,12 +233,44 @@ Behaviour (exact values in Global Constraints):
 
 ---
 
-### Task 7: Docs and human checks
+### Task 7: Map tab
 
 **Files:**
-- Modify: `README.md` (Photobook Gallery section: the three panes, keys F/H/arrows/Home/End/Enter, hidden filter, stacks, right-click menu, that delete uses the Recycle Bin), `docs/handoff.md` (human checks), `docs/plan.md` (mark done)
+- `package.json` (add `leaflet`, `leaflet.markercluster` and their `@types/*` dev deps; exact current versions)
+- Create: `src/gallery/web/components/MapView.tsx`, `src/core/galleryMap.ts`, `electron/mapTiles.ts`
+- Modify: `src/gallery/web/GalleryApp.tsx` (Grid | Map switch in the thumbnail column), `src/gallery/web/store.ts` (`view: 'grid' | 'map'`, `setView`), `src/gallery/web/gallery.css`
+- Modify: `electron/main.ts` / `electron/gallery.ts` (request guard, User-Agent, consent IPC), `electron/preload.ts`, `src/shared/desktopApi.ts`
+- Modify: `src/gallery/web/index.html` and `src/gallery/server/app.ts` (CSP `img-src` adds `https://tile.openstreetmap.org`)
+- Test: `tests/gallery-map.test.ts` (new), `tests/electron-shell.test.ts` (guard), `tests/e2e/gallery.spec.ts`
+
+**Interfaces:**
+- Produces:
+  - `export const OSM_TILE_ORIGIN = 'https://tile.openstreetmap.org'` and `export function isMapTileRequest(url: string, method: string): boolean` in `electron/mapTiles.ts` — true only for `GET` of `https://tile.openstreetmap.org/<int>/<int>/<int>.png` with no query, no userinfo, default port.
+  - The gallery session's `onBeforeRequest` allows a request when `isAllowedRequest(...)` OR (`mapsAllowed()` AND `isMapTileRequest(url, method)`); the editor session is unchanged. `onBeforeSendHeaders` for map-tile requests sets `User-Agent: PhotobookGallery/<app version>` (no other identifying data).
+  - Consent kept by the main process in `<gallery userData>/settings.json` as `{ "mapsOnline": boolean }` (absent = not asked yet). IPC `gallery:get-map-consent` → `boolean | null`, `gallery:set-map-consent` (boolean) — `fromApp` origin check. `DesktopApi.getMapConsent?(): Promise<boolean | null>`, `setMapConsent?(on: boolean): Promise<void>`. In a plain browser (dev/e2e) the page keeps consent in localStorage key `gallery.mapsOnline` instead.
+  - `export function locatedItems<T extends GalleryItemLike & { effectiveLon: number | null }>(items: T[]): { located: T[]; missing: number }` in `src/core/galleryMap.ts` — finite lat in [−90, 90] and lon in [−180, 180]; everything else counts as missing.
+  - Store: `view: 'grid' | 'map'` (default `'grid'`, kept across folders), `setView(view)`. The map reads `selectVisible` (Task 2), so filters and hidden apply; markers use the photos of the full visible list, unfolding stacks (every member with a location gets a marker — use the unstacked filtered list; add `selectFiltered(s)` to the store if needed, from the same memo).
+  - `MapView`: Leaflet map with `L.markerClusterGroup`; marker = `L.divIcon` holding a 36 px round `thumbUrl(key, 's')`; selected marker class `selected`; marker click → `select(path)`; when `selected` changes to a located photo not in view, `panTo` (no zoom); first render `fitBounds` of all markers (padding 24 px, max zoom 15); attribution "© OpenStreetMap contributors" (a link is not needed: the app blocks navigation); tile layer added only when consent is true; tile error → overlay "Map unavailable offline"; consent prompt (copy from the spec, buttons **Load maps** / **Not now**) when consent is null; a "Map: online / offline" toggle in the map corner changes it; count line "N photos have no location".
+  - Arrow/F/H keys keep working in map view (they act on the selection in grid order, Task 3's handler must not depend on the grid being mounted — move it to a hook used by `GalleryApp` if Task 3 put it in `Grid`, using a stored `cols` that defaults to 1 when the grid is not mounted).
+
+- [ ] **Step 1: Write the failing tests**
+  - `gallery-map.test.ts`: `isMapTileRequest` accepts `https://tile.openstreetmap.org/3/4/2.png` GET; rejects POST, `http:`, another host, `https://tile.openstreetmap.org.evil.com/1/1/1.png`, a query string, a non-png path, userinfo, a non-default port; `locatedItems` keeps valid, counts null / NaN / out-of-range as missing.
+  - `electron-shell.test.ts` (or wherever the guard is tested): with maps off, a tile URL is cancelled; with maps on, the tile URL passes and `https://example.com/` is still cancelled. If the guard wiring is not unit-testable as is, extract the decision into a pure `galleryRequestAllowed(url, method, opts & { mapsAllowed: boolean })` in `electron/mapTiles.ts` and test that.
+  - e2e (block every request to `tile.openstreetmap.org` with `page.route` so the test never uses the network): `Map tab shows the consent prompt first`; `Not now shows markers without tiles`; `clicking a marker selects the photo and the preview shows it`; `switching back to Grid keeps the selection`. The fixture photos need locations: set locations on two photos through the info panel's location editor or a seeded `photoinfo.json` in the temp copy (check what the existing e2e setup does).
+  - A source scan check: the built gallery bundle contains no `http(s)://` script or stylesheet URL other than `tile.openstreetmap.org` (extend the existing URL-scan test if there is one; find it with `grep -rn "https\\?://" tests/electron-shell.test.ts`).
+- [ ] **Step 2: Run to see them fail.**
+- [ ] **Step 3: Implement.** Import Leaflet CSS from the npm package in `MapView.tsx` (Vite bundles it); point Leaflet's default icon paths nowhere (we only use divIcons) so it never requests marker images.
+- [ ] **Step 4: Run to see them pass,** then `npm test`, `npm run typecheck`, gallery e2e, `npm run desktop:build`.
+- [ ] **Step 5: Commit** `Gallery: Map tab with OpenStreetMap tiles, allowed once by the user`.
+
+---
+
+### Task 8: Docs and human checks
+
+**Files:**
+- Modify: `README.md` (Photobook Gallery section: the three panes, keys F/H/arrows/Home/End/Enter, hidden filter, stacks, right-click menu, that delete uses the Recycle Bin, the Map tab, and replace "it never uses the network" with: the gallery uses the network only for OpenStreetMap map tiles, only after you allow it), `docs/handoff.md` (human checks), `docs/plan.md` (mark done)
 
 - [ ] **Step 1:** Update the README section and `docs/plan.md`.
-- [ ] **Step 2:** Add human checks to `docs/handoff.md`: Copy to clipboard pastes into another app (JPEG and HEIC); Show in file explorer selects the file; Delete puts the file in the Recycle Bin and it can be restored, and the gallery stays consistent after restoring and reopening; camera details on real camera and phone photos; histogram looks right on a dark and a bright photo; splitter widths survive a restart.
+- [ ] **Step 2:** Add human checks to `docs/handoff.md`: Copy to clipboard pastes into another app (JPEG and HEIC); Show in file explorer selects the file; Delete puts the file in the Recycle Bin and it can be restored, and the gallery stays consistent after restoring and reopening; camera details on real camera and phone photos; histogram looks right on a dark and a bright photo; splitter widths survive a restart; the Map tab's consent prompt, tiles loading after Load maps, nothing loading after Not now (watch the network in DevTools), "Map unavailable offline" with Wi-Fi off, and markers for real GPS photos.
 - [ ] **Step 3:** `npm test`, `npm run typecheck`.
 - [ ] **Step 4: Commit** `Docs: gallery review pane`.

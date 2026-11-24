@@ -25,6 +25,8 @@ facts and a histogram, tidied into sections that can be folded away.
 6. **Sectioned info panel.** The right panel's parts are collapsible sections, including a new
    **Histogram** and a **Camera** section with the key photo information.
 7. **Right-click menu** on a photo: copy the image, copy the path, show in file explorer, delete.
+8. **Map tab.** Swap the thumbnails for an OpenStreetMap map with a marker per located photo;
+   clicking one shows it in the preview. The only network use, and only after you allow it once.
 
 ## Non-goals
 
@@ -39,6 +41,8 @@ facts and a histogram, tidied into sections that can be folded away.
   hide or move. Same rule the grid's Enter/Space already follows.
 - Hiding must never delete or move a file. It is one field in `photoinfo.json`.
 - Delete must never erase a file beyond recovery, and never touch a file outside the open folder.
+- No network request of any kind before the map has been allowed, and never anything but map
+  tiles from `tile.openstreetmap.org`.
 - The grid must stay smooth on folders of thousands of photos (it stays virtual).
 
 ## Decisions
@@ -133,6 +137,42 @@ editor's canvas menu (`.ctx-menu`), each item with an icon from `src/web/compone
   origin check as the drag handlers, and only for paths inside the open folder (checked on the
   server, as drag-check does). In a plain browser (the dev web build) the items that need the
   desktop are greyed out.
+
+### Map tab
+Another way through a big folder: by place.
+
+- A **Grid | Map** switch at the top of the thumbnail column. Map replaces the thumbnails with an
+  OpenStreetMap map; the preview pane and info panel stay as they are.
+- Every shown photo (current filter applied, so hidden photos stay out) with a location
+  (`effectiveLat`/`effectiveLon`: a location set in the info panel, else the camera's GPS) is a
+  marker: a small round thumbnail. Photos close together merge into a bubble with a count;
+  clicking a bubble zooms in to split it. *(My call: thousands of single markers would be unusable.)*
+- Clicking a photo marker selects it: the centre preview and the info panel show it. The selected
+  photo's marker is outlined. ← / → still step through the photos in grid order; when the new
+  photo has a location the map pans to it (no zoom change).
+- The map opens fitted to all the markers. A note under the switch says how many shown photos
+  have no location.
+- Switching back to Grid keeps the selection and scrolls it into view.
+
+**Network: the one exception to "the gallery never uses the network".**
+- The first time Map is opened, the pane asks: "The map is downloaded from OpenStreetMap over the
+  internet. This shows OpenStreetMap roughly where you are looking. Load maps from the internet?"
+  with **Load maps** / **Not now**. The answer is remembered (in the gallery's own settings
+  file in its user-data folder, kept by the main process) and can be changed from a small
+  "Map: online" link on the map. Not now leaves the markers on a plain background.
+- Only the gallery window, only `https://tile.openstreetmap.org/{z}/{x}/{y}.png`, only GET, only
+  while that setting is on. The main process's request guard allows exactly that pattern for the
+  gallery session; every other request stays blocked as today. The editor never changes.
+- The gallery page's content policy (both the `index.html` meta tag and the server's header) adds
+  `https://tile.openstreetmap.org` to `img-src` only.
+- Tile requests carry a generic `User-Agent` of the form `PhotobookGallery/<version>` (OSM's tile
+  policy asks for an identifying agent; nothing personal), and the map shows the required
+  "© OpenStreetMap contributors" credit. Normal browser caching applies; no bulk or ahead-of-time
+  downloading.
+- Offline or a failed tile: the markers still show, with "Map unavailable offline" over the map.
+- The map library (Leaflet, plus its marker-cluster plugin) is an npm dependency bundled by Vite
+  into the app: no script or style ever comes from the internet.
+- README's "never uses the network" line for the gallery changes to say this, exactly.
 
 ### Camera details from the scan
 `readMetadata` reads more EXIF tags (ExposureTime, FNumber, ISOSpeedRatings/ISO, FocalLength,
