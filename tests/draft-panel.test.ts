@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { pagesForStarred } from '../src/web/components/draftPages';
+import { pageLimitWarning, pagesForStarred } from '../src/web/components/draftPages';
+
+describe('pageLimitWarning', () => {
+  const bind = { name: 'Hardcover', minPages: 24, maxPages: 240 };
+  it('warns about the target', () => {
+    expect(pageLimitWarning('Lulu', bind, 20)).toBe('Lulu Hardcover needs at least 24 pages.');
+    expect(pageLimitWarning('Lulu', bind, 250)).toBe('Lulu Hardcover allows at most 240 pages.');
+    expect(pageLimitWarning('Lulu', bind, 100)).toBeNull();
+  });
+  it('warns when a draft grew the book past the maximum, even with a smaller target', () => {
+    expect(pageLimitWarning('Lulu', bind, 100, 260)).toBe('Lulu Hardcover allows at most 240 pages. The draft now has 260.');
+    expect(pageLimitWarning('Lulu', bind, 100, 200)).toBeNull();
+  });
+  it('without limits, never warns', () => expect(pageLimitWarning('Custom', { name: 'Any' }, 900, 900)).toBeNull());
+});
 
 describe('pagesForStarred', () => {
   it('keeps the target when the photos fit', () => expect(pagesForStarred(40, 20, 7)).toBe(20));

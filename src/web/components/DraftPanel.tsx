@@ -6,7 +6,7 @@ import {
 import { useEditor } from '../store';
 import { Icon } from './Icon';
 import { BookTemplatesSection } from './BookTemplates';
-import { pagesForStarred } from './draftPages';
+import { pageLimitWarning, pagesForStarred } from './draftPages';
 import { UpdateSummary } from './UpdateSummary';
 
 /**
@@ -86,9 +86,8 @@ export function DraftPanel() {
   const bind = binding(doc.settings);
   const pr = printer(doc.settings.printerId);
   const target = evenPageCount(Math.max(4, pages));
-  const pageWarning = bind.minPages && target < bind.minPages
-    ? `${pr.name} ${bind.name} needs at least ${bind.minPages} pages.`
-    : bind.maxPages && target > bind.maxPages ? `${pr.name} ${bind.name} allows at most ${bind.maxPages} pages.` : null;
+  // After a Generate or Update, the book's actual page count counts too: it can grow past the target.
+  const pageWarning = pageLimitWarning(pr.name, bind, target, report || updateReport ? doc.spreads.length * 2 - 2 : undefined);
   const usable = assets.filter((a) => !a.excluded && !a.missing).length;
   const hasContent = doc.spreads.some((s) => !s.locked && s.elements.length);
   const drafted = doc.spreads.some((s) => s.provenance);
