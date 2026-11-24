@@ -47,7 +47,7 @@
 .gallery-tile-marks { position: absolute; left: 5px; top: 5px; display: flex; gap: 3px; }
 .gallery-star-badge, .gallery-hidden-badge { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: rgba(0, 0, 0, 0.6); color: var(--accent); }
 .gallery-star-badge .icon path { fill: currentColor; }
-.gallery-hidden-badge { width: 20px; height: 20px; border-radius: 50%; place-items: center; background: rgba(0, 0, 0, 0.6); color: #fff; }
+.gallery-hidden-badge { color: #fff; }
 .gallery-stack-badge { position: absolute; right: 5px; top: 5px; min-width: 28px; height: 20px; padding: 0 6px; border: 0; border-radius: 10px; background: rgba(0, 0, 0, 0.65); color: #fff; font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer; }
 .gallery-stack-badge:hover { background: rgba(0, 0, 0, 0.85); }
 .gallery-stack-badge.open { background: var(--accent); color: var(--accent-ink); }

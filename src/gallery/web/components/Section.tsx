@@ -19,8 +19,11 @@ function writeOpen(id: string, open: boolean) {
   }
 }
 
-/** A part of the info panel with a header that folds it; open or folded is remembered per machine. */
-export function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
+/**
+ * A part of the info panel with a header that folds it; open or folded is remembered per machine.
+ * `lazy`: nothing inside is made while folded (for a part that costs work to draw, the histogram).
+ */
+export function Section({ id, title, lazy, children }: { id: string; title: string; lazy?: boolean; children: ReactNode }) {
   const [open, setOpen] = useState(() => readOpen()[id] !== false);
   const toggle = () => {
     writeOpen(id, !open);
@@ -33,7 +36,7 @@ export function Section({ id, title, children }: { id: string; title: string; ch
         {title}
       </button>
       <div id={`gallery-section-${id}`} className="gallery-section-body" hidden={!open}>
-        {children}
+        {(open || !lazy) && children}
       </div>
     </section>
   );

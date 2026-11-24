@@ -226,7 +226,7 @@ function DetailsFor({ item }: { item: GalleryItem }) {
             <Row label="Size">{item.width} × {item.height} px · {formatSize(item.size)}</Row>
             <Row label="Resolution">{megapixels(item.width, item.height)} · {aspectRatio(item.width, item.height)}</Row>
             <Row label="Shape">{item.width === item.height ? 'Square' : item.width > item.height ? 'Landscape' : 'Portrait'}</Row>
-            <Row label="Format">{item.fileName.includes('.') ? item.fileName.split('.').pop()!.toUpperCase() : 'Unknown'}</Row>
+            <Row label="Format">{item.format && item.format !== 'unknown' ? item.format.toUpperCase() : 'Unknown'}</Row>
             {item.relDir && <Row label="Folder">{item.relDir}</Row>}
           </div>
         </Section>
@@ -243,7 +243,7 @@ function DetailsFor({ item }: { item: GalleryItem }) {
           )}
         </Section>
 
-        <Section id="histogram" title="Histogram">
+        <Section id="histogram" title="Histogram" lazy>
           <Histogram item={item} />
         </Section>
 

@@ -105,14 +105,14 @@ A second program in the desktop app, for looking through a folder of photos and 
 
 **Keys.** They work in the grid, the preview and the full-screen viewer, and are ignored while you type in a field.
 
-- **F**: favourite (star) the photo, or unfavourite it. With several photos selected, they all take the opposite of the first one's state.
+- **F**: favourite (star) the photo, or unfavourite it. With several photos selected, they all take the opposite of the state of the photo shown in the preview (the focused one). **H** works the same way.
 - **H**: hide the photo, or show it again. Hidden photos are left out of the grid until you change the **Hidden** filter. After H, the selection moves on to the next photo, so you can press H down a run of bad shots.
 - **Left**, **Right**, **Up** and **Down**: move to the previous, next, upper or lower photo.
 - **Home** and **End**: the first or last photo.
 - **Enter** (or **Space**): view the photo full screen. **Esc** closes the viewer.
-- In the full-screen viewer, **Left** and **Right** step through the photos, **S** stars the photo, and **I** shows or hides its details.
+- In the full-screen viewer, **Left** and **Right** step through the photos, **F** (or **S**) favourites the photo, **H** hides it, and **I** shows or hides its details.
 
-**Stacks.** Near-duplicates are folded into one tile with a "x N" badge, showing the favourite or else the best of the group. Click the badge to unfold the stack, and click it again to fold it. Untick **Stack near-duplicates** to see every photo on its own.
+**Stacks.** Near-duplicates are folded into one tile with a "x N" badge, showing the favourite or else the best of the group. Click the badge to unfold the stack, and click it again to fold it. Untick **Stack similar** to see every photo on its own.
 
 **Hidden.** The **Hidden** filter leaves hidden photos out (the default), shows them dimmed, or shows only them.
 
