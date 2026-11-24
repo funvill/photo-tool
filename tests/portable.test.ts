@@ -10,6 +10,7 @@ import { FONT_FAMILIES, fontFilePath } from '../src/core';
 import { createApp } from '../src/server/app';
 import { DRIVES, DRIVES_LABEL, browseParent, browsePath, expandHome } from '../src/server/folders';
 import { resolveFolder } from '../src/server/importer';
+import { licenceFiles } from '../scripts/make-notices';
 import { fontFile, libheifFile, pdfiumDir, projectRoot, resourceRoot, setResourceRoot, webDir, worldAtlasFile } from '../src/server/resources';
 
 const tmp = (name: string) => mkdtempSync(join(tmpdir(), name));
@@ -161,6 +162,18 @@ describe('resource paths', () => {
         rmSync(photos, { recursive: true, force: true });
       }
     }, 60_000);
+  });
+});
+
+describe('third-party notices (scripts/make-notices.ts)', () => {
+  it('find a licence file under any usual name, the LICENCE spelling and a prefix included', () => {
+    const dir = tmp('notices-');
+    try {
+      for (const f of ['MIT-LICENCE.txt', 'LICENSE', 'licence.md', 'COPYING', 'NOTICE', 'LICENSE-MIT', 'Apache-LICENSE.txt', 'license.js', 'README.md', 'licensed-things.txt', 'package.json', 'mylicense.txt']) writeFileSync(join(dir, f), 'x');
+      expect(licenceFiles(dir).map((f) => f.slice(dir.length + 1)).sort()).toEqual(['Apache-LICENSE.txt', 'COPYING', 'LICENSE', 'LICENSE-MIT', 'MIT-LICENCE.txt', 'NOTICE', 'licence.md'].sort());
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

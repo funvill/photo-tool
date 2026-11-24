@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { GALLERY_APP_ID, GALLERY_PRODUCT_NAME, LICENCE_FILE, MIN_WINDOW, NOTICES_BUTTON, NOTICES_FILE, dataLayout, describeAbout, describeFailure, galleryEnv, parseMode, parseSelfTest, photoInfoFallbackDir, restoreWindow, selfTestOverlap, type WindowState } from './config';
 import { GALLERY_DESCRIPTION, galleryDrag, galleryFileActions, galleryFolders, galleryMapConsent, galleryPage, launchGallery, type LaunchData } from './gallery';
-import { OSM_TILE_ORIGIN, galleryRequestAllowed, hostResolverRules, isMapTileRequest, mapTileUserAgent } from './mapTiles';
+import { OSM_TILE_ORIGIN, galleryRequestAllowed, hostResolverRules, isMapTileRequest, mapTileRequestHeaders } from './mapTiles';
 import { isAllowedRequest, isAppNavigation, requestHost } from './netGuard';
 import product from './product.json';
 import type { HostMessage, HostReply } from './server-host';
@@ -229,13 +229,11 @@ function hardenSession() {
     callback({ cancel: !ok });
   });
   if (isGallery) {
-    // A tile request names the program and its version, nothing more (OpenStreetMap's tile policy).
+    // A tile request names the program and its version, nothing more (OpenStreetMap's tile policy):
+    // only Accept and that User-Agent go out.
     ses.webRequest.onBeforeSendHeaders({ urls: [`${OSM_TILE_ORIGIN}/*`] }, (details, callback) => {
       if (!isMapTileRequest(details.url, details.method)) return callback({ cancel: true });
-      const headers: Record<string, string | string[]> = {};
-      for (const [k, v] of Object.entries(details.requestHeaders)) if (!/^(user-agent|referer|cookie)$/i.test(k)) headers[k] = v;
-      headers['User-Agent'] = mapTileUserAgent(app.getVersion());
-      callback({ requestHeaders: headers });
+      callback({ requestHeaders: mapTileRequestHeaders(details.requestHeaders, app.getVersion()) });
     });
   }
 }

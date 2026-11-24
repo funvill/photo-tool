@@ -36,6 +36,18 @@ export function mapTileUserAgent(version: string): string {
 }
 
 /**
+ * The headers a tile request goes out with: Accept as Chromium wrote it (what image formats it takes)
+ * and the program as User-Agent. Everything else (Accept-Language, the Sec-CH-UA client hints and other
+ * Sec-* headers, Referer, Cookie, Origin) is dropped: it would tell the tile server more than it needs.
+ */
+export function mapTileRequestHeaders(headers: Record<string, string | string[]>, version: string): Record<string, string | string[]> {
+  const kept: Record<string, string | string[]> = {};
+  for (const [k, v] of Object.entries(headers)) if (k.toLowerCase() === 'accept') kept[k] = v;
+  kept['User-Agent'] = mapTileUserAgent(version);
+  return kept;
+}
+
+/**
  * Chromium's host-resolver-rules: no name is ever looked up, except (in the gallery only) the tile
  * server's. A tile request still has to pass the guard first, so nothing is looked up before "Load maps".
  */

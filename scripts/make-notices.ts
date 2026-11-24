@@ -59,10 +59,13 @@ const repository = (p: Pkg) => {
   return r.replace(/^git\+/, '').replace(/^git:\/\//, 'https://').replace(/^git\+ssh:\/\/git@|^ssh:\/\/git@/, 'https://').replace(/\.git$/, '');
 };
 
-/** A package's licence, notice and copyright files (top level only). */
-function licenceFiles(dir: string): string[] {
+/**
+ * A package's licence, notice and copyright files (top level only): LICENSE or LICENCE in either
+ * spelling, also with a prefix naming the licence (MIT-LICENCE.txt, as leaflet.markercluster has it).
+ */
+export function licenceFiles(dir: string): string[] {
   return readdirSync(dir)
-    .filter((f) => /^(licen[cs]e|copying|notice|copyrightnotice|third[-_ ]?party)/i.test(f) && !/\.(js|cjs|mjs|ts|json|html)$/i.test(f))
+    .filter((f) => /^([a-z0-9]+[-_])?(licen[cs]es?(?=$|[-_.])|copying|notice|copyrightnotice|third[-_ ]?party)/i.test(f) && !/\.(js|cjs|mjs|ts|json|html)$/i.test(f))
     .sort()
     .map((f) => join(dir, f));
 }
