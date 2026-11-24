@@ -101,6 +101,15 @@ describe.runIf(existsSync(FIXTURES))('dropping files (API)', () => {
     expect((await api('GET', `/api/projects/${id}/assets`)).body).toHaveLength(3);
   });
 
+  it('says which photos came from a dropped folder and which from dropped files', async () => {
+    const id = await newProject();
+    const dir = folder('mixed', 'day1-01-arrival.jpg', 'day1-02-street.jpg');
+    const single = folder('single', 'day1-04-lunch.jpg');
+    const job = await dropPaths(id, [join(single, 'day1-04-lunch.jpg'), dir]);
+    expect(job.assetIds).toHaveLength(3);
+    expect(job.assetFolders).toEqual(['', dir, dir]);
+  });
+
   it('exact duplicate in another folder', async () => {
     const id = await newProject();
     const a = folder('orig', 'day1-03-market.jpg');

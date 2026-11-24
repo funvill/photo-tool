@@ -522,7 +522,10 @@ export function Canvas() {
     if (id !== dropTarget) setDropTarget(id);
   };
 
-  /** Photo files dropped from the file manager: import them, then place them as one undo step. */
+  /**
+   * Photo files dropped from the file manager: import them, then place them as one undo step. A dropped
+   * folder's photos are only imported into the library (importDropped returns just the dropped files).
+   */
   const onDropFiles = async (files: File[], p: Pt) => {
     const hit = hitTest(p, (el) => el.type === 'image' && !el.locked);
     if (surface.locked) return useEditor.getState().toast('error', `This ${index === COVER_INDEX ? 'cover' : 'spread'} is locked. Unlock it to change photos.`);

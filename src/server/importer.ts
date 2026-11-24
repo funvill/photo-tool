@@ -31,6 +31,8 @@ export interface ImportJob {
   failed: number;
   /** 'paths' jobs: the asset id for each input in order ('' for a file that failed); a folder input gives one entry per photo in it. */
   assetIds: string[];
+  /** 'paths' jobs: for each `assetIds` entry, the dropped folder it came from ('' for a dropped file). */
+  assetFolders?: string[];
   errors: { file: string; error: string }[];
   startedAt: string;
   finishedAt?: string;
@@ -172,6 +174,8 @@ export class Importer {
   private async runPaths(job: ImportJob, inputs: string[]) {
     try {
       const files: string[] = [];
+      /** For each entry of `files`: the dropped folder it was found in, '' for a dropped file. */
+      const from: string[] = [];
       for (const input of inputs) {
         let isDir = false;
         try {
@@ -180,13 +184,21 @@ export class Importer {
           job.failed++;
           job.errors.push({ file: basename(input), error: `${basename(input)}: not found` });
           files.push('');
+          from.push('');
           continue;
         }
-        if (isDir) files.push(...(await scanFolder(input, true)));
-        else files.push(input);
+        if (isDir) {
+          const found = await scanFolder(input, true);
+          files.push(...found);
+          from.push(...found.map(() => input));
+        } else {
+          files.push(input);
+          from.push('');
+        }
       }
       job.total = files.length;
       job.assetIds = files.map(() => '');
+      job.assetFolders = from;
       job.status = 'running';
       let next = 0;
       const worker = async () => {

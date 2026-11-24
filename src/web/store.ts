@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { CommandError, expandGroups, findSurface, reconcileCover, refreshContents, type BookDocument, type DraftReport, type PhotoAsset, type UpdateReport } from '../core';
 import { api, ApiError, type ImportJob, type LinkedFolder } from './api';
 import { desktop } from './desktop';
+import { splitDropResult } from './dropResult';
 
 // Editor state. The document is immutable; every committed edit pushes the previous document onto
 // a bounded undo stack (structural sharing keeps this cheap). Drags update the document
@@ -98,8 +99,9 @@ interface EditorState {
   /** Import a folder; `link` also keeps it in sync from now on. */
   startImport(folder: string, opts?: { link?: boolean }): Promise<void>;
   /**
-   * Import photos dropped from the file manager. Resolves to the ids of the photos now in the book
-   * (non-empty only), in drop order (a dropped folder's photos in name order); errors are shown as a toast.
+   * Import photos dropped from the file manager. Resolves to the ids of the photos from dropped files
+   * (non-empty only), in drop order; a dropped folder's photos are imported into the library only and
+   * summed up in a toast. Errors are shown as a toast.
    */
   importDropped(files: File[]): Promise<string[]>;
   refreshLinks(): Promise<void>;
@@ -403,12 +405,14 @@ export const useEditor = create<EditorState>((set, get) => ({
         set({ importJob: job });
       }
       await get().refreshAssets();
-      const ids = (job.assetIds ?? []).filter(Boolean);
+      // Photos from dropped files may go onto the page; a dropped folder's photos only join the library.
+      const { placed, folders } = splitDropResult({ ...job, assetIds: job.assetIds ?? [] });
+      for (const f of folders) get().toast('success', `Imported ${plural(f.count, 'photo')} from ${f.name} into the library`);
       const problems = [...pathless, ...job.errors.map((e) => e.error)];
       if (job.status === 'failed' || problems.length) get().toast('error', problems.slice(0, 3).join(' · ') || 'Import failed');
-      else if (!ids.length) get().toast('error', 'None of those could be read as photos');
+      else if (!placed.length && !folders.length) get().toast('error', 'None of those could be read as photos');
       setTimeout(() => set((s) => (s.importJob?.id === job.id ? { importJob: null } : {})), 2500);
-      return ids;
+      return placed;
     } catch (e) {
       get().toast('error', e instanceof Error ? e.message : String(e));
       return [];

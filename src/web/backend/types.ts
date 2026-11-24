@@ -38,6 +38,8 @@ export interface ImportJob {
   failed: number;
   /** Photos from a drop: the asset for each input in order ('' for one that failed); a dropped folder gives one entry per photo in it. */
   assetIds: string[];
+  /** Drops (desktop): for each `assetIds` entry, the dropped folder it came from ('' for a dropped file). Absent: all files. */
+  assetFolders?: string[];
   errors: { file: string; error: string }[];
   /** ISO time the job began; the library uses it for the time left. */
   startedAt: string;
