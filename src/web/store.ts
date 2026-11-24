@@ -123,9 +123,10 @@ function stopInfoWatch() {
   if (infoTimer) clearInterval(infoTimer);
   infoTimer = null;
 }
-function startInfoWatch(projectId: string) {
+/** `baseline`: the stamp read just before the photos were loaded, so a change right after loading is seen. */
+function startInfoWatch(projectId: string, baseline: string | null) {
   stopInfoWatch();
-  let last: string | null = null;
+  let last: string | null = baseline;
   let busy = false;
   infoTimer = setInterval(() => {
     const st = useEditor.getState();
@@ -199,6 +200,8 @@ export const useEditor = create<EditorState>((set, get) => ({
   async load(projectId) {
     set({ projectId, doc: null, loadError: null, past: [], future: [], selection: null, multi: [], cropElementId: null });
     try {
+      // The photo info baseline is read before the photos, so the first poll can already spot a change.
+      const baseline = await api.photoInfoStamp(projectId).catch(() => null);
       const [{ doc, revision }, assets] = await Promise.all([api.getProject(projectId), api.assets(projectId)]);
       set({
         doc, revision, assets, assetMap: new Map(assets.map((a) => [a.id, a])),
@@ -206,7 +209,7 @@ export const useEditor = create<EditorState>((set, get) => ({
       });
       await get().refreshLinks();
       void get().syncLinks({ force: true });
-      startInfoWatch(projectId);
+      startInfoWatch(projectId, baseline);
     } catch (e) {
       set({ loadError: e instanceof Error ? e.message : String(e) });
     }

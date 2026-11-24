@@ -34,10 +34,7 @@ test('draft from two starred photos, then update after starring a third', async 
   await expect(panel).toContainText('2 photos placed');
   await expect(panel.getByRole('button', { name: 'Update from stars' })).toBeVisible();
 
-  // The editor polls the file every 3 s and takes its first reading as the baseline, so let it
-  // settle (two polls) before the change.
-  await page.waitForTimeout(7000);
-  // Star a third photo in the file; the editor notices within a few seconds.
+  // Star a third photo in the file; the editor polls every 3 s and notices within a few seconds.
   write([NAMES[0], NAMES[1], NAMES[2]]);
   await expect(page.getByRole('button', { name: /Favorites|★/ }).first()).toContainText('3', { timeout: 15_000 });
   await panel.getByRole('button', { name: 'Update from stars' }).click();
