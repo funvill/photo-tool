@@ -396,6 +396,25 @@ describe('gallery server', () => {
     expect(recent.find((r) => r.folder === photos)).toMatchObject({ exists: true });
   });
 
+  it('file-check passes only photos of an open folder, in the order asked', async () => {
+    await start();
+    const { byName } = await loaded();
+    const a = byName('day1-01-arrival.jpg').path;
+    const b = byName('day1-02-street.jpg').path;
+    const ok = await api('POST', '/api/gallery/file-check', { paths: [b, 'C:\\Windows\\win.ini', a] });
+    expect(ok.status).toBe(200);
+    expect(ok.body).toEqual({ paths: [b, a] });
+    expect((await api('POST', '/api/gallery/file-check', { paths: 'x' })).status).toBe(400);
+
+    // Open four other folders: the trip folder is no longer open, though its photos stay catalogued.
+    const small = join(root, 'small');
+    mkdirSync(small);
+    cpSync(join(TRIP, 'day1-04-lunch.jpg'), join(small, 'c.jpg'));
+    for (let i = 0; i < 4; i++) await finish(await open(small));
+    expect((await api('POST', '/api/gallery/drag-check', { paths: [a] })).body.paths).toEqual([a]);
+    expect((await api('POST', '/api/gallery/file-check', { paths: [a, b, join(small, 'c.jpg')] })).body).toEqual({ paths: [join(small, 'c.jpg')] });
+  });
+
   it('keeps the 4 most recent jobs and 404s older ones', async () => {
     const small = join(root, 'small');
     mkdirSync(small);

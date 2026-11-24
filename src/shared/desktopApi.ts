@@ -28,6 +28,8 @@ export interface DesktopApi {
    * (`--gallery <folder>` at start, or from a second launch). Returns a function that stops listening.
    */
   onOpenFolder?(cb: (folder: string) => void): () => void;
+  /** Gallery window: put text (Copy path) on the clipboard; the page's own clipboard is not allowed in the app. */
+  copyText?(text: string): Promise<{ ok: boolean; error?: string }>;
   /** Gallery window: put this photo on the clipboard as a picture, at full size. */
   copyImage?(path: string): Promise<{ ok: boolean; error?: string }>;
   /**
@@ -36,8 +38,8 @@ export interface DesktopApi {
    */
   showPhotoInFolder?(path: string): Promise<{ ok: boolean; error?: string }>;
   /**
-   * Gallery window: move these photos to the Recycle Bin (Trash) after a native confirm. Only photos the
-   * gallery has catalogued; `cancelled` when the person said no (nothing was moved).
+   * Gallery window: move these photos to the Recycle Bin (Trash) after a native confirm. Only photos of
+   * the folder open now; `cancelled` when the person said no (nothing was moved).
    */
   trashPhotos?(paths: string[]): Promise<{ trashed: string[]; failed: { path: string; message: string }[]; cancelled: boolean }>;
 }

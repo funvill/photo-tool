@@ -31,10 +31,16 @@ function targetsFor(path: string): string[] {
 }
 
 /**
- * Text onto the clipboard. The desktop app turns every web permission down, which may include the
- * async clipboard's: then the old copy command (allowed right after a click) does it.
+ * Text onto the clipboard. In the desktop app the main process does it (the app turns every web
+ * permission down, the clipboard's included). In a browser, the page's own clipboard; the old copy
+ * command (allowed right after a click) when that is refused.
  */
 async function writeText(text: string) {
+  if (desktop?.copyText) {
+    const r = await desktop.copyText(text);
+    if (!r.ok) throw new Error(r.error ?? "Couldn't copy.");
+    return;
+  }
   try {
     await navigator.clipboard.writeText(text);
     return;

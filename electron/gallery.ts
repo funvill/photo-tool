@@ -7,7 +7,7 @@ import { statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { galleryLaunchCommand, parseMode } from './config';
 import { dragFiles, dragRequest, preparedDragFor, sameDragList, type DragCheck, type PreparedDrag } from './drag';
-import { trashConfirm, trashPhotos, type TrashResult } from './fileActions';
+import { copyTextRequest, trashConfirm, trashPhotos, type TrashResult } from './fileActions';
 
 export const GALLERY_DESCRIPTION = 'Look through a folder of photos, star the best ones and drag them into other programs. Works offline.';
 
@@ -207,6 +207,7 @@ export function galleryDrag(o: { fromApp: (e: IpcMainEvent) => boolean; serverPo
 }
 
 const IMAGE_TIMEOUT_MS = 60_000;
+const FILE_CHECK_TIMEOUT_MS = 3000;
 const REMOVED_TIMEOUT_MS = 10_000;
 
 /** The full-size PNG of a catalogued photo, from the gallery's own server. */
@@ -214,6 +215,22 @@ async function fullImage(port: number, path: string): Promise<Buffer> {
   const res = await fetch(`http://127.0.0.1:${port}/api/gallery/image?${new URLSearchParams({ path })}`, { signal: AbortSignal.timeout(IMAGE_TIMEOUT_MS) });
   if (!res.ok) throw new Error(`image answered ${res.status}`);
   return Buffer.from(await res.arrayBuffer());
+}
+
+/**
+ * Which of `paths` are photos of a folder the gallery has open now, in the order asked (the server's
+ * file-check). Stricter than the drag-check: a photo catalogued in an earlier session is refused.
+ */
+async function fileCheck(port: number, paths: string[]): Promise<string[]> {
+  const res = await fetch(`http://127.0.0.1:${port}/api/gallery/file-check`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ paths }),
+    signal: AbortSignal.timeout(FILE_CHECK_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`file-check answered ${res.status}`);
+  const body = (await res.json()) as { paths?: unknown };
+  return Array.isArray(body.paths) ? body.paths.filter((p): p is string => typeof p === 'string') : [];
 }
 
 /** Tell the gallery's server these photos went to the Recycle Bin. */
@@ -232,10 +249,11 @@ const NOT_A_PHOTO = "That photo is not in the open folder any more.";
 const failure = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
 /**
- * The gallery's right-click menu actions on photo files: copy the picture, show it in the file
- * manager, move photos to the Recycle Bin. Each asks the gallery's server first which paths it has
- * catalogued (the drag-check), and acts only on those that are files. Only for the gallery's own page
- * (`fromApp`) in its own window. A delete is only ever `shell.trashItem`, after a native confirm.
+ * The gallery's right-click menu actions: copy the picture or the paths, show the photo in the file
+ * manager, move photos to the Recycle Bin. A file action asks the gallery's server first which paths are
+ * photos of a folder open now (the file-check), and acts only on those that are files. Only for the
+ * gallery's own page (`fromApp`) in its own window. A delete is only ever `shell.trashItem`, after a
+ * native confirm.
  */
 export function galleryFileActions(o: { window: () => BrowserWindow | null; fromApp: (e: IpcMainInvokeEvent) => boolean; serverPort: () => number; log: (...a: unknown[]) => void }) {
   /** From the gallery's page in the gallery's window. */
@@ -243,12 +261,26 @@ export function galleryFileActions(o: { window: () => BrowserWindow | null; from
     const w = o.window();
     return o.fromApp(e) && !!w && !w.isDestroyed() && e.sender === w.webContents;
   };
-  const catalogued = async (paths: string[]) => (await dragCheck(o.serverPort(), paths)).paths.filter(isFile);
-  /** The one photo the page named, when the server has catalogued it and it is a file; else null. */
+  const inOpenFolder = async (paths: string[]) => (await fileCheck(o.serverPort(), paths)).filter(isFile);
+  /** The one photo the page named, when it is a photo of the open folder and a file; else null. */
   const onePhoto = async (raw: unknown) => {
     const [path] = dragRequest([raw]);
-    return path ? ((await catalogued([path]))[0] ?? null) : null;
+    return path ? ((await inOpenFolder([path]))[0] ?? null) : null;
   };
+
+  // Copy path: the page's own clipboard needs a web permission the desktop app turns down.
+  ipcMain.handle('gallery:copy-text', async (e, raw: unknown): Promise<ActionReply> => {
+    if (!allowed(e)) return { ok: false, error: 'Not allowed' };
+    const text = copyTextRequest(raw);
+    if (text === null) return { ok: false, error: 'Nothing to copy.' };
+    try {
+      await clipboard.writeText(text);
+      return { ok: true };
+    } catch (err) {
+      o.log('copy text failed', String(err));
+      return { ok: false, error: `Couldn't copy: ${failure(err)}` };
+    }
+  });
 
   ipcMain.handle('gallery:copy-image', async (e, raw: unknown): Promise<ActionReply> => {
     if (!allowed(e)) return { ok: false, error: 'Not allowed' };
@@ -282,7 +314,7 @@ export function galleryFileActions(o: { window: () => BrowserWindow | null; from
   ipcMain.handle('gallery:trash', async (e, raw: unknown): Promise<TrashResult> => {
     if (!allowed(e)) return { trashed: [], failed: [], cancelled: true };
     const result = await trashPhotos(raw, {
-      check: catalogued,
+      check: inOpenFolder,
       confirm: async (paths) => {
         const w = o.window();
         if (!w || w.isDestroyed()) return false;

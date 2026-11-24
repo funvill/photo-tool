@@ -1,8 +1,8 @@
-// Deleting photos from the gallery: only paths the gallery's server has catalogued go to the
-// Recycle Bin, only after the confirm, and a failure is reported rather than retried another way.
+// Deleting photos from the gallery: only photos of the folder open now (the server's file-check) go
+// to the Recycle Bin, only after the confirm, and a failure is reported rather than retried another way.
 // Every dependency is a fake here: nothing on disk is touched.
 import { describe, expect, it, vi } from 'vitest';
-import { trashConfirm, trashPhotos } from '../electron/fileActions';
+import { copyTextRequest, MAX_COPY_TEXT, trashConfirm, trashPhotos } from '../electron/fileActions';
 
 function fakes(o: { catalogued?: string[]; confirm?: boolean; failing?: string[]; removedFails?: boolean } = {}) {
   const catalogued = new Set(o.catalogued ?? ['C:\\p\\a.jpg', 'C:\\p\\b.jpg']);
@@ -109,5 +109,14 @@ describe('trashConfirm', () => {
     expect(linux.message).toBe('Move "a.jpg" to the Trash?');
     expect(linux.buttons).toEqual(['Move to Trash', 'Cancel']);
     expect(linux.detail).toBe('You can restore them from the Trash.');
+  });
+});
+
+describe('copyTextRequest', () => {
+  it('takes a non-empty string up to the cap, nothing else', () => {
+    expect(copyTextRequest('C:\\p\\a.jpg\nC:\\p\\b.jpg')).toBe('C:\\p\\a.jpg\nC:\\p\\b.jpg');
+    expect(copyTextRequest('x'.repeat(MAX_COPY_TEXT))).toHaveLength(MAX_COPY_TEXT);
+    expect(MAX_COPY_TEXT).toBeGreaterThanOrEqual(500 * 4096);
+    for (const junk of ['', 'x'.repeat(MAX_COPY_TEXT + 1), 42, null, undefined, ['a'], {}]) expect(copyTextRequest(junk)).toBeNull();
   });
 });

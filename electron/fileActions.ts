@@ -1,7 +1,7 @@
 // Deleting photos from the gallery window, the part free of Electron (see gallery.ts for the rest).
 // A photo goes to the Recycle Bin (Trash) only: never erased. Only paths the gallery's server has
 // catalogued, only after the person said yes, and a failure is reported, never retried another way.
-import { dragRequest } from './drag';
+import { dragRequest, MAX_DRAG_FILES } from './drag';
 
 export interface TrashResult {
   /** Moved to the Recycle Bin, in the order asked. */
@@ -13,7 +13,7 @@ export interface TrashResult {
 }
 
 export interface TrashDeps {
-  /** Which of these paths the gallery's server has catalogued (and are still files), in order. */
+  /** Which of these paths are photos of a folder the gallery has open (and are still files), in order. */
   check(paths: string[]): Promise<string[]>;
   /** Ask the person; true to go ahead. */
   confirm(paths: string[]): Promise<boolean>;
@@ -62,4 +62,12 @@ export function trashConfirm(paths: string[], platform: NodeJS.Platform) {
     message: paths.length === 1 ? `Move "${fileName(paths[0])}" to the ${bin}?` : `Move ${paths.length} photos to the ${bin}?`,
     detail: `You can restore them from the ${bin}.`,
   };
+}
+
+/** The longest text Copy path puts on the clipboard: 500 paths of 4096 characters, one per line. */
+export const MAX_COPY_TEXT = MAX_DRAG_FILES * 4097;
+
+/** The text the page asked to copy, when it is a non-empty string no longer than MAX_COPY_TEXT; else null. */
+export function copyTextRequest(raw: unknown): string | null {
+  return typeof raw === 'string' && raw !== '' && raw.length <= MAX_COPY_TEXT ? raw : null;
 }

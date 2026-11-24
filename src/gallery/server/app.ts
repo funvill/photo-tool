@@ -226,6 +226,17 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     res.json({ removed });
   }));
 
+  // Asked by the desktop app's main process before a file action of the right-click menu (copy, show in
+  // folder, delete): which of these paths are photos of a folder open now, in the order asked. Stricter
+  // than drag-check, which takes any photo ever catalogued (a folder opened in an earlier session too).
+  app.post('/api/gallery/file-check', wrap((req, res) => {
+    const paths: unknown = req.body?.paths;
+    if (!Array.isArray(paths) || !paths.every((p) => typeof p === 'string')) throw new HttpError(400, 'Expected { paths: string[] }');
+    const open = new Set<string>();
+    for (const id of jobIds) for (const p of scanner.get(id)?.photos ?? []) open.add(p.path);
+    res.json({ paths: (paths as string[]).slice(0, DRAG_MAX).filter((p) => open.has(p)) });
+  }));
+
   // With `job`, the reply also has that folder's stamp just before and after this write (`stamp`),
   // so the page can tell its own write from another program's change it has not seen yet.
   app.patch('/api/gallery/info', wrap((req, res) => {

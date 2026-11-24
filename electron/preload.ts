@@ -24,6 +24,7 @@ const api: DesktopApi = {
     ipcRenderer.on('gallery:drag-failed', listener);
     return () => void ipcRenderer.removeListener('gallery:drag-failed', listener);
   },
+  copyText: (text) => ipcRenderer.invoke('gallery:copy-text', String(text)),
   copyImage: (path) => ipcRenderer.invoke('gallery:copy-image', String(path)),
   showPhotoInFolder: (path) => ipcRenderer.invoke('gallery:show-in-folder', String(path)),
   trashPhotos: (paths) => ipcRenderer.invoke('gallery:trash', Array.isArray(paths) ? paths.map(String) : []),
