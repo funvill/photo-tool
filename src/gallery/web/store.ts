@@ -186,7 +186,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
     if (selection.length !== s.selection.length) set({ selection });
   };
 
-  /** Every 3 s: has any photoinfo.json of this folder changed? Then reload the photos' info, once. */
+  /** Once the folder is read, and then every 3 s: has any photoinfo.json of this folder changed? Then reload the photos' info, once. */
   const watchInfo = async (gen: number, job: string) => {
     try {
       const stamp = await galleryApi.stamp(job);
@@ -195,6 +195,11 @@ export const useGallery = create<GalleryState>()((set, get) => {
     } catch {
       // No baseline: the first successful poll takes one.
     }
+    if (!current(gen, job)) return;
+    // The photos came in poll by poll, each with its info as it was then, and the baseline above is
+    // newer: reload once so a change another program made while the folder was read is not missed.
+    // (A save made meanwhile is kept by refreshInfo's saved/saveSeq check.)
+    if (get().items.length) await get().refreshInfo();
     if (!current(gen, job)) return;
     stampTimer = setInterval(async () => {
       try {

@@ -91,25 +91,29 @@ describe('gallery store', () => {
     // The second poll asked only for the photos it had not seen yet.
     expect(calls.filter((c) => c.url.startsWith('/api/gallery/jobs/j1')).map((c) => c.url)).toEqual(['/api/gallery/jobs/j1?since=0', '/api/gallery/jobs/j1?since=1']);
 
+    // Once when the scan ends (info may have changed while the folder was read), then only on a change.
+    expect(count('GET', '/api/gallery/items')).toBe(1);
     await vi.advanceTimersByTimeAsync(3100);
-    expect(count('GET', '/api/gallery/items')).toBe(0);
+    expect(count('GET', '/api/gallery/items')).toBe(1);
 
     stamp = 'two';
     await vi.advanceTimersByTimeAsync(3100);
-    expect(count('GET', '/api/gallery/items')).toBe(1);
+    expect(count('GET', '/api/gallery/items')).toBe(2);
     expect(useGallery.getState().items[0].info.star).toBe(true);
 
     await vi.advanceTimersByTimeAsync(9100);
-    expect(count('GET', '/api/gallery/items')).toBe(1);
+    expect(count('GET', '/api/gallery/items')).toBe(2);
   });
 
-  /** Open D:\Trip (two photos, read at once) and let the info watch take its baseline. */
+  /** Open D:\Trip (two photos, read at once) and let the info watch take its baseline (and reload once: 1 GET /items). */
   async function openTrip(stamp: () => string) {
     routes['POST /api/gallery/open'] = () => ({ status: 202, json: { jobId: 'j1' } });
     routes['GET /api/gallery/recent'] = () => ({ json: [] });
     routes['GET /api/gallery/jobs/j1'] = () => ({ json: { total: 1, processed: 1, startedAt: 0, done: true, errors: [], items: [item()] } });
     routes['GET /api/gallery/stamp'] = () => ({ json: { stamp: stamp() } });
+    routes['GET /api/gallery/items'] = () => ({ json: [item()] });
     await useGallery.getState().open('D:\Trip', true);
+    expect(count('GET', '/api/gallery/items')).toBe(1);
   }
 
   it("does not reload after its own star, but still reloads for another program's change made just before it", async () => {
@@ -130,16 +134,16 @@ describe('gallery store', () => {
     expect(await starAs('one', 'two')).toBe(true);
     expect(useGallery.getState().items[0]).not.toHaveProperty('stamp');
     await vi.advanceTimersByTimeAsync(3100);
-    expect(count('GET', '/api/gallery/items')).toBe(0);
+    expect(count('GET', '/api/gallery/items')).toBe(1);
 
     // Another program writes, and we star before the next poll: that change is still picked up, once.
     stamp = 'three';
     expect(await starAs('three', 'four')).toBe(true);
     await vi.advanceTimersByTimeAsync(3100);
-    expect(count('GET', '/api/gallery/items')).toBe(1);
+    expect(count('GET', '/api/gallery/items')).toBe(2);
     expect(useGallery.getState().items[0].info.notes).toBe('from the editor');
     await vi.advanceTimersByTimeAsync(9100);
-    expect(count('GET', '/api/gallery/items')).toBe(1);
+    expect(count('GET', '/api/gallery/items')).toBe(2);
   });
 
   it('keeps a star saved while an older reload was on its way', async () => {
@@ -167,6 +171,7 @@ describe('gallery store', () => {
     routes['POST /api/gallery/open'] = () => ({ status: 202, json: { jobId: 'j1' } });
     routes['GET /api/gallery/recent'] = () => ({ json: [] });
     routes['GET /api/gallery/stamp'] = () => ({ json: { stamp: 's' } });
+    routes['GET /api/gallery/items'] = () => ({ json: [item()] });
     routes['GET /api/gallery/jobs/j1'] = () =>
       failures-- > 0 ? { status: 500, json: { error: 'busy' } } : { json: { total: 1, processed: 1, startedAt: 0, done: true, errors: [], items: [item()] } };
     await useGallery.getState().open('D:\Trip', true);
@@ -184,6 +189,33 @@ describe('gallery store', () => {
     expect(count('GET', '/api/gallery/jobs/j2')).toBe(4);
     expect(useGallery.getState().progress).toBeNull();
     expect(useGallery.getState().toasts).toEqual([expect.objectContaining({ kind: 'error', text: 'The server stopped' })]);
+  });
+
+  it("picks up another program's change to a photo delivered while the folder was still being read, with one reload when the scan ends", async () => {
+    vi.useFakeTimers();
+    let polls = 0;
+    let notes = 'old';
+    routes['POST /api/gallery/open'] = () => ({ status: 202, json: { jobId: 'j1' } });
+    routes['GET /api/gallery/recent'] = () => ({ json: [] });
+    routes['GET /api/gallery/jobs/j1'] = () => {
+      polls++;
+      if (polls === 1) return { json: { total: 2, processed: 1, startedAt: 0, done: false, cancelled: false, errors: [], items: [item({ info: { notes } })] } };
+      // Between the polls another program changes a.jpg's notes: the stamp baseline is only taken after the scan.
+      return { json: { total: 2, processed: 2, startedAt: 0, done: true, cancelled: false, errors: [], items: [item({ path: 'D:\\Trip\\b.jpg', fileName: 'b.jpg', key: 'k2' })] } };
+    };
+    routes['GET /api/gallery/stamp'] = () => ({ json: { stamp: `notes=${notes}` } });
+    routes['GET /api/gallery/items'] = () => ({ json: [item({ info: { notes } }), item({ path: 'D:\\Trip\\b.jpg', fileName: 'b.jpg', key: 'k2' })] });
+
+    await useGallery.getState().open('D:\\Trip', true);
+    expect(useGallery.getState().items[0].info.notes).toBe('old');
+    notes = 'from the editor';
+    await vi.advanceTimersByTimeAsync(600);
+    expect(useGallery.getState().progress).toBeNull();
+    expect(useGallery.getState().items.map((i) => i.info.notes)).toEqual(['from the editor', undefined]);
+    expect(count('GET', '/api/gallery/items')).toBe(1);
+    // The stamp has not changed since: no further reload.
+    await vi.advanceTimersByTimeAsync(9100);
+    expect(count('GET', '/api/gallery/items')).toBe(1);
   });
 
   it('cancels a scan still running when another folder is opened or the folder is closed', async () => {
@@ -249,9 +281,9 @@ describe('gallery store', () => {
 
     expect(await useGallery.getState().saveInfo('p/a.jpg', { date: null, people: ['Ann'] })).toBe(true);
     expect(useGallery.getState().items[0].info).toEqual({ people: ['Ann'] });
-    // The write was ours: the poll does not reload every photo for it.
+    // The write was ours: the poll does not reload every photo for it (the one reload is openTrip's).
     await vi.advanceTimersByTimeAsync(3100);
-    expect(count('GET', '/api/gallery/items')).toBe(0);
+    expect(count('GET', '/api/gallery/items')).toBe(1);
   });
 
   it("shows the server's message when a field cannot be saved, and applies nothing", async () => {
