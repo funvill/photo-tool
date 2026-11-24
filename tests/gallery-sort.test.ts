@@ -42,14 +42,16 @@ describe('colourBucket', () => {
     expect(colourBucket([40, 90, 220]).bucket).toBe('blue');
     expect(colourBucket([128, 128, 128]).bucket).toBe('neutral');
   });
-  it('uses 45 degree buckets centred on 0, 45, 90, ... 315', () => {
-    expect(colourBucket([255, 0, 20]).bucket).toBe('red'); // hue ~352, inside 337.5..22.5
-    expect(colourBucket([255, 191, 0]).bucket).toBe('orange'); // 45
-    expect(colourBucket([128, 255, 0]).bucket).toBe('yellow'); // 90
-    expect(colourBucket([0, 200, 0]).bucket).toBe('green'); // 120, inside 112.5..157.5
-    expect(colourBucket([0, 220, 220]).bucket).toBe('cyan'); // 180
-    expect(colourBucket([140, 40, 220]).bucket).toBe('purple'); // ~271
-    expect(colourBucket([240, 40, 160]).bucket).toBe('pink'); // ~323
+  it('uses perceptual hue ranges (lower bound inclusive, red wraps)', () => {
+    expect(colourBucket([255, 0, 20]).bucket).toBe('red'); // ~352
+    expect(colourBucket([255, 128, 0]).bucket).toBe('orange'); // 30
+    expect(colourBucket([255, 255, 0]).bucket).toBe('yellow'); // 60
+    expect(colourBucket([0, 255, 0]).bucket).toBe('green'); // 120
+    expect(colourBucket([0, 255, 255]).bucket).toBe('cyan'); // 180
+    expect(colourBucket([128, 0, 255]).bucket).toBe('purple'); // ~270
+    expect(colourBucket([255, 0, 128]).bucket).toBe('pink'); // ~330
+    expect(colourBucket([255, 60, 0]).bucket).toBe('red'); // 14.1
+    expect(colourBucket([255, 64, 0]).bucket).toBe('orange'); // 15.06
   });
   it('lightness is HSL lightness 0..1', () => {
     expect(colourBucket([255, 255, 255]).lightness).toBe(1);

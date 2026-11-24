@@ -35,6 +35,17 @@ export function Grid({ onOpen }: { onOpen: (path: string) => void }) {
   }, []);
   useEffect(() => () => cancelAnimationFrame(frame.current), []);
 
+  // A new order or filter starts at the top (a star or an info refresh changes neither).
+  const sort = useGallery((s) => s.sort);
+  const filter = useGallery((s) => s.filter);
+  const shownOrder = useRef({ sort, filter });
+  useLayoutEffect(() => {
+    if (shownOrder.current.sort === sort && shownOrder.current.filter === filter) return;
+    shownOrder.current = { sort, filter };
+    if (ref.current) ref.current.scrollTop = 0;
+    setScrollTop(0);
+  }, [sort, filter]);
+
   const onScroll = () => {
     hover.hide();
     cancelAnimationFrame(frame.current);

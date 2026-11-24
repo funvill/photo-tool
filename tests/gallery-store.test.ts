@@ -178,7 +178,7 @@ describe('gallery store', () => {
 
     routes['POST /api/gallery/open'] = () => ({ status: 202, json: { jobId: 'j2' } });
     routes['GET /api/gallery/jobs/j2'] = () => ({ status: 500, json: { error: 'The server stopped' } });
-    await useGallery.getState().open('D:\Other', true);
+    await useGallery.getState().open('D:\\Other', true);
     // Retries 1 s, 2 s and 4 s apart; the error toast then stays 7 s.
     await vi.advanceTimersByTimeAsync(10_000);
     expect(count('GET', '/api/gallery/jobs/j2')).toBe(4);
@@ -264,7 +264,7 @@ describe('gallery store', () => {
     routes['GET /api/gallery/recent'] = () => ({ json: [] });
     useGallery.getState().setSort('name');
     useGallery.getState().setFilter({ starred: 'yes', relDir: 'sub' });
-    await useGallery.getState().open('D:\Other', true);
+    await useGallery.getState().open('D:\\Other', true);
     expect(useGallery.getState().sort).toBe('name');
     expect(useGallery.getState().filter).toEqual({ starred: 'yes' });
     useGallery.getState().setFilter({ starred: undefined });
@@ -279,5 +279,28 @@ describe('gallery store', () => {
     expect(selectVisible({ ...base })).toBe(first);
     expect(selectVisible({ ...base, filter: { starred: 'yes' } }).map((i) => i.path)).toEqual(['b']);
     expect(selectVisible({ ...base, sort: 'date' })).not.toBe(first);
+  });
+
+  it('while a folder is being read, keeps the last facts for 2 s instead of redoing them on every update', () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));
+    const small = (path: string) => item({ path, fileName: path, width: 100, height: 80 });
+    const analysis = { sharpness: 100, meanLuma: 0.45, clippedShadows: 0, clippedHighlights: 0, dHash: '0123456789abcdef', saliencyX: 0.5, saliencyY: 0.5 };
+    const a = { ...small('a'), analysis };
+    const b = { ...small('b'), analysis: { ...analysis, dHash: 'fedcba9876543210' } };
+    const scanning = { total: 2, processed: 1, startedAt: 0 };
+    const state = { sort: 'date' as const, filter: { lowQuality: true } };
+    expect(selectVisible({ ...state, items: [a], progress: scanning }).map((i) => i.path)).toEqual(['a']);
+    // A second later b has arrived but has no facts yet, so the low-quality filter leaves it out.
+    vi.setSystemTime(Date.now() + 1000);
+    const two = [a, b];
+    expect(selectVisible({ ...state, items: two, progress: scanning }).map((i) => i.path)).toEqual(['a']);
+    expect(selectVisible({ ...state, items: two, progress: scanning })).toBe(selectVisible({ ...state, items: two, progress: scanning }));
+    // Scan finished (same items): facts are worked out for everything.
+    expect(selectVisible({ ...state, items: two, progress: null }).map((i) => i.path)).toEqual(['a', 'b']);
+    // Still scanning, but more than 2 s on: refreshed.
+    const three = [a, b, { ...small('c'), analysis: { ...analysis, dHash: '00ff00ff00ff00ff' } }];
+    vi.setSystemTime(Date.now() + 2500);
+    expect(selectVisible({ ...state, items: three, progress: scanning }).map((i) => i.path)).toEqual(['a', 'b', 'c']);
   });
 });

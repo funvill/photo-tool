@@ -57,12 +57,22 @@ export interface GalleryItemLike {
   analysis: PhotoAnalysis | null;
 }
 
-const BUCKETS: ColourBucket[] = ['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'pink'];
-const BUCKET_ORDER = new Map<ColourBucket, number>([...BUCKETS, 'neutral' as const].map((b, i) => [b, i]));
+// Perceptual hue ranges in degrees, lower bound inclusive; red wraps through 0.
+const HUE_RANGES: [ColourBucket, number][] = [
+  ['orange', 15],
+  ['yellow', 40],
+  ['green', 70],
+  ['cyan', 165],
+  ['blue', 200],
+  ['purple', 260],
+  ['pink', 290],
+  ['red', 345],
+];
+const BUCKET_ORDER = new Map<ColourBucket, number>((['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'pink', 'neutral'] as const).map((b, i) => [b, i]));
 const NEUTRAL_BELOW = 0.15;
 const MAX_RGB_DISTANCE = Math.hypot(255, 255, 255);
 
-/** Main colour of an sRGB (0–255) colour: its hue in 45° buckets centred on red (0°), orange (45°), ... pink (315°), or neutral when grey. */
+/** Main colour of an sRGB (0–255) colour: its hue range (red, orange, yellow, green, cyan, blue, purple, pink), or neutral when grey. */
 export function colourBucket(rgb: [number, number, number]): { bucket: ColourBucket; lightness: number } {
   const [r, g, b] = rgb.map((v) => Math.min(255, Math.max(0, v)) / 255);
   const max = Math.max(r, g, b);
@@ -73,7 +83,10 @@ export function colourBucket(rgb: [number, number, number]): { bucket: ColourBuc
   if (saturation < NEUTRAL_BELOW) return { bucket: 'neutral', lightness };
   let hue = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
   hue = (hue * 60 + 360) % 360;
-  return { bucket: BUCKETS[Math.floor(((hue + 22.5) % 360) / 45)], lightness };
+  let bucket: ColourBucket = 'red';
+  for (const [name, from] of HUE_RANGES) if (hue >= from) bucket = name;
+  if (hue < 15) bucket = 'red';
+  return { bucket, lightness };
 }
 
 /** Spread of the 3 × 3 colour grid: mean distance of its nine colours from their mean, over the largest possible. */

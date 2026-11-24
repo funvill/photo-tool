@@ -309,24 +309,31 @@ export const useGallery = create<GalleryState>()((set, get) => {
 // bursts) are costly on a big folder, so they are worked out only when a sort or filter reads them.
 const needsFacts = (sort: GallerySortKey, f: GalleryFilter) => sort === 'interesting' || sort === 'colour' || !!f.lowQuality || !!f.nearDuplicates;
 const NO_FACTS = new Map<string, GalleryFacts>();
-let factsMemo: { items: GalleryItem[]; facts: Map<string, GalleryFacts> } | null = null;
-let visibleMemo: { items: GalleryItem[]; sort: GallerySortKey; filter: GalleryFilter; visible: GalleryItem[] } | null = null;
+let factsMemo: { items: GalleryItem[]; facts: Map<string, GalleryFacts>; at: number } | null = null;
+let visibleMemo: { items: GalleryItem[]; sort: GallerySortKey; filter: GalleryFilter; visible: GalleryItem[]; stale: boolean } | null = null;
+/** While a folder is still being read, facts are refreshed at most this often. */
+const FACTS_SCAN_THROTTLE_MS = 2000;
 
-export function selectVisible(s: Pick<GalleryState, 'items' | 'sort' | 'filter'>): GalleryItem[] {
+export function selectVisible(s: Pick<GalleryState, 'items' | 'sort' | 'filter'> & { progress?: GalleryState['progress'] }): GalleryItem[] {
   const m = visibleMemo;
-  if (m && m.items === s.items && m.sort === s.sort && m.filter === s.filter) return m.visible;
+  if (m && m.items === s.items && m.sort === s.sort && m.filter === s.filter && !(m.stale && !s.progress)) return m.visible;
   let facts = NO_FACTS;
   if (needsFacts(s.sort, s.filter)) {
-    if (factsMemo?.items !== s.items) factsMemo = { items: s.items, facts: galleryFacts(s.items) };
-    facts = factsMemo.facts;
+    const now = Date.now();
+    // Mid-scan the list grows every half second: keep the last facts (new photos have none yet) for a while.
+    const fresh = factsMemo?.items === s.items || (!!s.progress && !!factsMemo && now - factsMemo.at < FACTS_SCAN_THROTTLE_MS);
+    if (!fresh) factsMemo = { items: s.items, facts: galleryFacts(s.items), at: now };
+    facts = factsMemo!.facts;
   }
   const visible = sortItems(filterItems(s.items, s.filter, facts), s.sort, facts);
-  visibleMemo = { items: s.items, sort: s.sort, filter: s.filter, visible };
+  // Built from stale facts: remembered (the selector must return the same list for the same state), but redone once the scan ends.
+  const stale = needsFacts(s.sort, s.filter) && factsMemo?.items !== s.items;
+  visibleMemo = { items: s.items, sort: s.sort, filter: s.filter, visible, stale };
   return visible;
 }
 
 /** The photos to show, in order: the grid and (Task 7) the viewer step through this one list. */
-export const useVisibleItems = (): GalleryItem[] => useGallery(selectVisible);
+export const useVisibleItems = (): GalleryItem[] => useGallery((s) => selectVisible(s));
 
 /**
  * Open each folder the desktop app hands the page (`--gallery <folder>`, a second launch, File >
