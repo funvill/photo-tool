@@ -95,7 +95,7 @@ Drop photos from Explorer or Finder onto a frame (replaces it), onto empty space
 
 ## Photobook Gallery
 
-A second program in the desktop app, for looking through a folder of photos and starring the best ones. It is installed with the editor and runs beside it. It never changes, renames or moves a photo (the one exception is **Delete**, which sends a photo to the Recycle Bin). It uses the network only for OpenStreetMap map tiles, and only after you choose **Load maps** on the Map tab; the editor never uses the network. Windows and Linux only; there is no web version.
+A second program in the desktop app, for looking through a folder of photos and starring the best ones. It is installed with the editor and runs beside it. It never changes, renames or moves a photo unless you ask: **Delete** sends a photo to the Recycle Bin, and editing (below) can, if you choose to save into the photo file, replace a photo with its edited version after sending the original to the Recycle Bin. It uses the network only for OpenStreetMap map tiles, and only after you choose **Load maps** on the Map tab; the editor never uses the network. Windows and Linux only; there is no web version.
 
 **Starting it.** On Windows the installer adds **Photobook Gallery** to the Start menu and the desktop. On Linux the `.deb` adds it to the applications menu. In the editor, **File → Open Gallery** starts it. From a command line, run the app with `--gallery`, or `--gallery <folder>` to open that folder straight away.
 
@@ -103,14 +103,40 @@ A second program in the desktop app, for looking through a folder of photos and 
 
 **Three panes.** The thumbnails are on the left, a large preview of the selected photo is in the middle, and its details are on the right. Drag the two dividers to change the widths; they are remembered. Click a photo to see it in the preview. Ctrl-click adds or removes a photo, and Shift-click selects a range. Drag the size slider to make thumbnails bigger or smaller. Double-click a photo or the preview, or press Enter, to view it full screen.
 
+**Zooming the preview.** Turn the mouse wheel over the preview to zoom in, from 1 to 8 times, toward the pointer. Drag to move the photo around. While zoomed, a small map in the top right corner shows where you are; click or drag it to move the view. Double-click to go back to the whole photo. (Double-click at the whole photo still opens it full screen.) The sharper full-size picture is loaded once you zoom far enough to need it.
+
 **Keys.** They work in the grid, the preview and the full-screen viewer, and are ignored while you type in a field.
 
 - **F**: favourite (star) the photo, or unfavourite it. With several photos selected, they all take the opposite of the state of the photo shown in the preview (the focused one). **H** works the same way.
 - **H**: hide the photo, or show it again. Hidden photos are left out of the grid until you change the **Hidden** filter. After H, the selection moves on to the next photo, so you can press H down a run of bad shots.
 - **Left**, **Right**, **Up** and **Down**: move to the previous, next, upper or lower photo.
 - **Home** and **End**: the first or last photo.
+- **E**: edit the photo (see Editing photos below).
 - **Enter** (or **Space**): view the photo full screen. **Esc** closes the viewer.
 - In the full-screen viewer, **Left** and **Right** step through the photos, **F** (or **S**) favourites the photo, **H** hides it, and **I** shows or hides its details.
+
+**Editing photos.** Click **Edit** under the preview, press **E**, or right-click and choose **Edit**. The whole photo is shown with a crop box over it: drag a corner or an edge to resize it, or drag inside to move it. The bar under it has:
+
+- **Aspect presets**: Free, Original, Square, 4:5, 3:2 and 16:9, and a button to swap portrait and landscape.
+- **Rotate 90°** (or **R**): turns the photo anticlockwise.
+- **Straighten**: a slider from -45° to +45° in half-degree steps. Double-click it to reset it.
+- **Reset**, **Cancel** (**Esc**) and **Done** (**Enter**). While editing, only Esc, Enter and R act as keys.
+
+**Done** keeps the edit as *unsaved*: the photo's tile gets a marker, and the preview caption says "Edited · not saved". Clicking another photo while editing does the same. Edit is unavailable for a photo while it is being saved. Nothing is written until you save:
+
+- **Save** writes the edit (where it goes depends on the setting below).
+- **Save as…** writes the edited photo to a new file you name, with a Save dialog; the original is never overwritten. Save as into the open folder makes the copy appear in the grid with the original's star, people and notes. If you type a different extension, the file gets one that fits its format (.jpg, .png or .webp), and Save as refuses a name that already exists once the extension is changed.
+- **Save all (N)** saves every unsaved edit, one after another, and says how it went.
+- **Revert to original** removes an edit saved in the info file.
+
+Unsaved edits are lost if you close the gallery window or open another folder, so both ask first ("Close without saving" or "Open without saving", or keep editing).
+
+**Settings.** The **⚙** button in the top bar opens Settings. **When I save an edit** has two choices, kept at once:
+
+- **Change only the photo's info file** (the default). The photo is untouched; the crop and rotation go into `photoinfo.json`, and the photobook editor applies them when it imports or re-syncs the photo. If you change the edit later and re-sync, the editor applies the new one. The editor renders such a photo as a JPEG, so a PNG's transparency is lost there.
+- **Change the photo file itself**. The photo is rewritten (JPEG at quality 95, PNG and WebP in their own format, EXIF kept) and the original goes to the Recycle Bin; if the bin is not available, nothing changes. A HEIC photo can only be saved with **Save as**, as a JPEG. This choice needs the desktop app.
+
+In a plain browser the gallery can edit and save to the info file, but Save as and saving into the photo file need the desktop app.
 
 **Stacks.** Near-duplicates are folded into one tile with a "x N" badge, showing the favourite or else the best of the group. Click the badge to unfold the stack, and click it again to fold it. Untick **Stack similar** to see every photo on its own.
 
@@ -125,6 +151,7 @@ A second program in the desktop app, for looking through a folder of photos and 
 
 **Right-click menu.** Right-click a photo, or the preview, for:
 
+- **Edit** (**E**), and, for a photo with an unsaved edit, **Save**, **Save as…**, **Save all** and **Revert to original** as above.
 - **Copy to clipboard**: the photo itself, to paste into a chat, a document or an image editor.
 - **Copy path to clipboard**: the file's full path (every selected path, one per line).
 - **Show in file explorer**: opens the folder with the photo selected.

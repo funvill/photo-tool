@@ -100,6 +100,21 @@ Built 2026-11-23 on branch `gallery` (eight tasks, branched from `main` at `27b3
 13. **Windows certificate checks** (OCSP/CRL) for the tile connection happen in the OS, outside the app's request filter. They only happen after Load maps. Worth knowing when reading a packet capture.
 14. **A selected photo that a filter leaves out:** the preview goes empty while the details still show it. A known small inconsistency; decide if it matters.
 
+**Zoom and editing (branch `gallery-edit`, built 2026-11-24, branched from `gallery-review`; not merged, not pushed).** Design: `docs/superpowers/specs/2026-11-24-gallery-edit-and-zoom-design.md`. Adds wheel zoom, pan and a mini map in the preview, and edit mode (crop, aspect presets, rotate 90°, straighten) with Save, Save as…, Save all and Revert to original, and a Settings dialog (`editTarget`: info file by default, or the photo file). Only unit tests and Playwright in Chrome have run; nobody has used it in the real window. Known limitation: an edit saved in the info file is rendered to a JPEG by the editor, so a transparent PNG loses its transparency there.
+
+**Checks only a person can do for zoom and editing (none done yet):**
+
+15. **Wide-screen fit:** at full screen on a wide monitor the preview and the full-screen viewer fit the photo with no cropping or stretched row.
+16. **Wheel zoom feel:** zooms smoothly toward the pointer, 1 to 8 times; drag pans; the mini map (top right) follows, and clicking or dragging it moves the view; double-click resets, and double-click at the whole photo opens full screen.
+17. **Sharpness:** zoomed far into a large photo, the full-size picture replaces the blurry one and looks sharp.
+18. **Crop handles and straighten feel:** all eight handles and the move drag are easy to grab, each aspect preset and the swap behave, Rotate 90° (and R) turns anticlockwise, and the Straighten slider feels right (double-click resets).
+19. **Save in info mode, then the editor:** Save an edit with the default setting, import the photo into the photobook editor and check the crop and rotation are applied. Change the edit in the gallery, Save again and re-sync in the editor: the new edit is applied. The original file is untouched.
+20. **Save in photo-file mode:** the edited photo is at the same path, and the original is in the Recycle Bin and can be restored. Repeat with a photo on another drive than the app data.
+21. **Save as into the open folder:** the copy appears in the grid, with the star and people copied; the original is unchanged. Repeat saving outside the folder. Type a different extension (for example `.png` for a JPEG) and check the file gets a fitting extension, and that a name that already exists is refused.
+22. **Save all with a HEIC in file mode:** the HEIC is skipped with a note, the others are saved. A HEIC can be saved with Save as (a JPEG).
+23. **Closing with unsaved edits:** closing the window shows "Close without saving" or "Keep editing"; opening another folder asks too.
+24. **A transparent PNG edited in info mode, then imported:** expect the transparency to be lost in the editor (known limitation above).
+
 ## Linux
 
 Built and tested by a subagent; the lead agent checked that the packages exist and that the tests pass on Windows, but did not rerun the container tests. Evidence is in `%TEMP%\photobook-linux\test\<name>\` (`test.log`, `result.json`, screenshots); build logs are `%TEMP%\photobook-linux-build*.log`.
