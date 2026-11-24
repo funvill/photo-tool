@@ -8,7 +8,7 @@ import { MapView } from './components/MapView';
 import { PhotoMenu } from './components/PhotoMenu';
 import { Preview } from './components/Preview';
 import { Progress } from './components/Progress';
-import { LeaveDialog } from './components/SettingsDialog';
+import { LeaveDialog } from './components/LeaveDialog';
 import { Splitter, saveWidth, savedWidth } from './components/Splitter';
 import { TidyDialog } from './components/TidyDialog';
 import { Toasts } from './components/Toasts';

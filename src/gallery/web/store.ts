@@ -58,6 +58,12 @@ export interface GalleryState {
   editTarget: EditTarget;
   /** A save of edits is on its way (the save buttons wait for it). */
   saving: boolean;
+  /** The photos whose save is on its way: they can't be edited (or saved again) until it is done. */
+  savingPaths: string[];
+  /** The edit in progress differs from where it started (it counts as an unsaved edit). */
+  editDirty: boolean;
+  /** The Settings dialog is open. */
+  settingsOpen: boolean;
   /** Opening another folder (or closing this one) waits for "without saving?": what was asked for. */
   leaving: { folder: string; recursive: boolean } | 'close' | null;
 
@@ -98,9 +104,10 @@ export interface GalleryState {
   /** Stop reading and watching the open folder, and go back to the start screen. */
   close(): void;
   setTidyOpen(open: boolean): void;
+  setSettingsOpen(open: boolean): void;
   setGridCols(cols: number): void;
   setView(view: 'grid' | 'map'): void;
-  /** Open edit mode on this photo. */
+  /** Open edit mode on this photo; not while its save is on its way. */
   startEdit(path: string): void;
   /**
    * Done: the edit (null: none) becomes the photo's unsaved edit, unless it is what is saved already
@@ -223,7 +230,7 @@ interface Before {
 
 const noSelection: Pick<GalleryState, 'selected' | 'selection' | 'anchor' | 'viewing'> = { selected: null, selection: [], anchor: null, viewing: null };
 /** A folder opened or closed: its unsaved edits, and edit mode, go with it. */
-const noEdits: Pick<GalleryState, 'editing' | 'pendingEdits' | 'leaving'> = { editing: null, pendingEdits: {}, leaving: null };
+const noEdits: Pick<GalleryState, 'editing' | 'pendingEdits' | 'leaving' | 'editDirty'> = { editing: null, pendingEdits: {}, leaving: null, editDirty: false };
 
 const without = (edits: Record<string, PhotoEdit>, path: string) => {
   const { [path]: _dropped, ...others } = edits;
@@ -307,8 +314,17 @@ function endEditAsDone(s: GalleryState): Partial<GalleryState> {
   if (path === null) return {};
   const d = draft?.path === path ? draft : null;
   draft = null;
-  if (d) return { editing: null, pendingEdits: afterDone(s, path, d.edit) };
-  return { editing: null, pendingEdits: s.items.some((i) => i.path === path) ? s.pendingEdits : without(s.pendingEdits, path) };
+  if (d) return { editing: null, editDirty: false, pendingEdits: afterDone(s, path, d.edit) };
+  return { editing: null, editDirty: false, pendingEdits: s.items.some((i) => i.path === path) ? s.pendingEdits : without(s.pendingEdits, path) };
+}
+
+/**
+ * How many photos have edits not saved: those with an unsaved edit, and the one being edited when the edit
+ * in progress changed something (once, when it has an unsaved edit already).
+ */
+export function unsavedCount(s: Pick<GalleryState, 'pendingEdits' | 'editing' | 'editDirty'>): number {
+  const n = Object.keys(s.pendingEdits).length;
+  return s.editDirty && s.editing !== null && !(s.editing in s.pendingEdits) ? n + 1 : n;
 }
 
 function stopTimers() {
@@ -434,6 +450,9 @@ export const useGallery = create<GalleryState>()((set, get) => {
     }, STAMP_POLL_MS);
   };
 
+  /** A photo's file name, as the list has it. */
+  const nameOf = (path: string) => get().items.find((i) => i.path === path)?.fileName ?? baseName(path);
+
   /** Run a save of edits, with `saving` true while any is on its way. */
   const busy = async <T,>(fn: () => Promise<T>): Promise<T> => {
     if (savingCount++ === 0) set({ saving: true });
@@ -452,7 +471,18 @@ export const useGallery = create<GalleryState>()((set, get) => {
   };
 
   /** Save one photo's unsaved edit (see saveEdit). Quiet: no error toast (Save all says it once). */
+  /** Save one photo's unsaved edit, marking it as being saved meanwhile (a second save of it is refused: false). */
   const saveOne = async (path: string, quiet: boolean): Promise<boolean> => {
+    if (get().savingPaths.includes(path)) return false;
+    set((x) => ({ savingPaths: [...x.savingPaths, path] }));
+    try {
+      return await saveOneNow(path, quiet);
+    } finally {
+      set((x) => ({ savingPaths: x.savingPaths.filter((p) => p !== path) }));
+    }
+  };
+
+  const saveOneNow = async (path: string, quiet: boolean): Promise<boolean> => {
     const s = get();
     const edit = s.pendingEdits[path];
     if (!edit) return true;
@@ -467,10 +497,13 @@ export const useGallery = create<GalleryState>()((set, get) => {
       return ok;
     }
     if (isHeic(path)) return fail(HEIC_SAVE_NOTE);
-    // No edit, in photo-file mode: the file is as it should be already.
+    // No edit, in photo-file mode: the file is as it should be already. An edit saved in its info file
+    // (from info-file mode) is what "no edit" takes away: only photoinfo.json is written.
     if (isIdentityEdit(edit)) {
-      set((x) => ({ pendingEdits: without(x.pendingEdits, path) }));
-      return true;
+      const item = s.items.find((i) => i.path === path);
+      const ok = item && parseSaved(item.info.edit) !== null ? await get().saveInfo(path, { edit: null }, { quiet }) : true;
+      if (ok && get().pendingEdits[path] === edit) set((x) => ({ pendingEdits: without(x.pendingEdits, path) }));
+      return ok;
     }
     const saveToFile = host?.saveEditToFile;
     if (!saveToFile) return fail('Saving into the photo file needs the desktop app');
@@ -484,6 +517,8 @@ export const useGallery = create<GalleryState>()((set, get) => {
     if (!r.ok && !r.saved) return fail(r.error ?? "Couldn't save the photo.");
     if (gen !== generation) return true;
     // The file now carries the edit: an unsaved edit left on it (even one changed meanwhile) would be applied twice.
+    const now = get().pendingEdits[path];
+    if (now && now !== edit && !sameEdit(now, edit)) get().toast('error', `A later change to ${nameOf(path)} was not saved`);
     set((x) => ({ pendingEdits: without(x.pendingEdits, path) }));
     const updated = r.ok ? asItem(r.item) : null;
     if (updated) applyItem(path, updated);
@@ -513,6 +548,8 @@ export const useGallery = create<GalleryState>()((set, get) => {
     ...noEdits,
     editTarget: 'info',
     saving: false,
+    savingPaths: [],
+    settingsOpen: false,
 
     async loadRecent() {
       try {
@@ -743,6 +780,10 @@ export const useGallery = create<GalleryState>()((set, get) => {
       set({ tidyOpen });
     },
 
+    setSettingsOpen(settingsOpen) {
+      set({ settingsOpen });
+    },
+
     setGridCols(cols) {
       const gridCols = Math.max(1, Math.floor(cols) || 1);
       if (gridCols !== get().gridCols) set({ gridCols });
@@ -760,6 +801,8 @@ export const useGallery = create<GalleryState>()((set, get) => {
     },
 
     startEdit(path) {
+      // Not while its save is on its way: an edit made now would be lost when the save lands.
+      if (get().savingPaths.includes(path)) return;
       // Editing another photo: that one is Done first.
       set((s) => (s.editing === path ? {} : { ...endEditAsDone(s), editing: path }));
     },
@@ -769,12 +812,12 @@ export const useGallery = create<GalleryState>()((set, get) => {
       const path = s.editing;
       if (path === null) return;
       draft = null;
-      set({ editing: null, pendingEdits: afterDone(s, path, edit) });
+      set({ editing: null, editDirty: false, pendingEdits: afterDone(s, path, edit) });
     },
 
     cancelEdit() {
       draft = null;
-      set({ editing: null });
+      set({ editing: null, editDirty: false });
     },
 
     discardEdit(path) {
@@ -782,8 +825,14 @@ export const useGallery = create<GalleryState>()((set, get) => {
     },
 
     setEditDraft(edit) {
-      const path = get().editing;
-      if (path !== null) draft = { path, edit };
+      const s = get();
+      const path = s.editing;
+      if (path === null) return;
+      draft = { path, edit };
+      // Changed from where it started (the unsaved edit, else the saved one)?
+      const item = s.items.find((i) => i.path === path);
+      const editDirty = !!item && !sameEdit(edit, shownEdit(s, item));
+      if (editDirty !== s.editDirty) set({ editDirty });
     },
 
     async loadEditTarget() {
@@ -814,7 +863,10 @@ export const useGallery = create<GalleryState>()((set, get) => {
       const s = get();
       const item = s.items.find((i) => i.path === path);
       const edit = item ? shownEdit(s, item) : null;
-      if (!item || !edit) return false;
+      if (!item || !edit) {
+        get().toast('error', `${nameOf(path)} has no edit to save as a copy`);
+        return false;
+      }
       const gen = generation;
       return busy(async () => {
         let r: Awaited<ReturnType<typeof saveAs>>;
@@ -845,19 +897,24 @@ export const useGallery = create<GalleryState>()((set, get) => {
       if (!paths.length) return;
       const gen = generation;
       const skipped = s.editTarget === 'file' ? paths.filter(isHeic) : [];
+      // A photo whose save is on its way already is left to that save.
+      const todo = paths.filter((p) => !skipped.includes(p) && !s.savingPaths.includes(p));
+      // Names are read now: a folder changed meanwhile takes its list with it.
+      const names = new Map(paths.map((p) => [p, nameOf(p)]));
+      const named = (ps: string[]) => someNames(ps.map((p) => names.get(p) ?? p));
+      if (!todo.length && !skipped.length) return;
       let ok = 0;
       const failed: string[] = [];
       await busy(async () => {
-        for (const path of paths) {
+        for (const path of todo) {
+          // Another folder opened: what was saved so far is still said.
           if (gen !== generation) return;
-          if (skipped.includes(path)) continue;
           if (await saveOne(path, true)) ok++;
           else failed.push(path);
         }
       });
-      if (gen !== generation) return;
-      let text = failed.length ? `Saved ${ok}, ${failed.length} failed: ${someNames(failed)}` : `Saved ${plural(ok, 'photo')}`;
-      if (skipped.length) text += `. Skipped ${someNames(skipped)}: ${HEIC_SAVE_NOTE}`;
+      let text = failed.length ? `Saved ${ok}, ${failed.length} failed: ${named(failed)}` : `Saved ${plural(ok, 'photo')}`;
+      if (skipped.length) text += `. Skipped ${named(skipped)}: ${HEIC_SAVE_NOTE}`;
       get().toast(failed.length ? 'error' : skipped.length ? 'info' : 'success', text);
     },
 
@@ -1029,9 +1086,9 @@ export function connectDesktop(d: Partial<DesktopApi> | undefined): () => void {
   const stopFolders = d?.onOpenFolder?.((folder) => void useGallery.getState().requestOpen(folder, useGallery.getState().recursive));
   const stopDrags = d?.onDragFailed?.((message) => useGallery.getState().toast('error', message));
   // The desktop app asks before the window closes while this count is above 0.
-  const report = () => d?.setUnsavedEdits?.(Object.keys(useGallery.getState().pendingEdits).length);
+  const report = () => d?.setUnsavedEdits?.(unsavedCount(useGallery.getState()));
   report();
-  const stopCount = d?.setUnsavedEdits ? useGallery.subscribe((s, prev) => void (s.pendingEdits !== prev.pendingEdits && report())) : undefined;
+  const stopCount = d?.setUnsavedEdits ? useGallery.subscribe((s, prev) => void (unsavedCount(s) !== unsavedCount(prev) && report())) : undefined;
   const win = typeof window === 'undefined' ? undefined : window;
   win?.addEventListener('beforeunload', guardUnload);
   return () => {
@@ -1048,7 +1105,7 @@ export function connectDesktop(d: Partial<DesktopApi> | undefined): () => void {
  * app (which sees the page held back) asks "Close without saving?" in its own dialog.
  */
 export function guardUnload(e: { preventDefault(): void; returnValue?: unknown }) {
-  if (Object.keys(useGallery.getState().pendingEdits).length === 0) return;
+  if (unsavedCount(useGallery.getState()) === 0) return;
   e.preventDefault();
   // Some browsers ask only when this is set.
   e.returnValue = '';

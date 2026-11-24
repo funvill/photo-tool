@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { desktop } from '../../../web/desktop';
 import { Icon } from '../../../web/components/Icon';
 import { THUMB_MAX, THUMB_MIN, useGallery } from '../store';
@@ -22,7 +21,7 @@ function IncludeSubfolders() {
 
 /** The bar along the top: open a folder, the folder that is open, the thumbnail size and Settings. */
 export function FolderBar() {
-  const [settings, setSettings] = useState(false);
+  const settings = useGallery((s) => s.settingsOpen);
   const root = useGallery((s) => s.root);
   const thumbSize = useGallery((s) => s.thumbSize);
   // A read-only folder's stars are kept in Photobook Studio's data folder (so the editor still sees them).
@@ -63,11 +62,11 @@ export function FolderBar() {
             </button>
           </>
         )}
-        <button type="button" className="icon-btn gallery-settings-btn" aria-label="Settings" title="Settings" onClick={() => setSettings(true)}>
+        <button type="button" className="icon-btn gallery-settings-btn" aria-label="Settings" title="Settings" onClick={() => useGallery.getState().setSettingsOpen(true)}>
           ⚙
         </button>
       </div>
-      {settings && <SettingsDialog onClose={() => setSettings(false)} />}
+      {settings && <SettingsDialog onClose={() => useGallery.getState().setSettingsOpen(false)} />}
     </header>
   );
 }

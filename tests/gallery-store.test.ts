@@ -1049,6 +1049,108 @@ describe('gallery store: saving edits', () => {
     expect(g().editTarget).toBe('info');
   });
 
+  it('no edit can start on a photo while its save is on its way; a later change that slipped in is named', async () => {
+    let release!: (v: { ok: boolean; item: unknown }) => void;
+    desktopWith({ saveEditToFile: () => new Promise((r) => (release = r)) });
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: items(), editTarget: 'file', pendingEdits: { [A]: cropped }, selected: A, selection: [A] });
+    const saving = g().saveEdit(A);
+    expect(g().savingPaths).toEqual([A]);
+    g().startEdit(A);
+    expect(g().editing).toBeNull();
+    // Another photo can still be edited.
+    g().startEdit(B);
+    expect(g().editing).toBe(B);
+    g().cancelEdit();
+    // A change that reached the photo anyway (here set directly) is dropped with the written one, and said.
+    useGallery.setState({ pendingEdits: { [A]: turned } });
+    release({ ok: true, item: items()[0] });
+    expect(await saving).toBe(true);
+    expect(g().savingPaths).toEqual([]);
+    expect(g().pendingEdits).toEqual({});
+    expect(g().toasts).toEqual([expect.objectContaining({ kind: 'error', text: 'A later change to a.jpg was not saved' })]);
+    g().startEdit(A);
+    expect(g().editing).toBe(A);
+  });
+
+  it('a save already on its way for a photo is not sent twice', async () => {
+    let release!: (v: { ok: boolean; item: unknown }) => void;
+    const saveEditToFile = vi.fn(() => new Promise((r) => (release = r)));
+    desktopWith({ saveEditToFile });
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: items(), editTarget: 'file', pendingEdits: { [A]: cropped } });
+    const first = g().saveEdit(A);
+    expect(await g().saveEdit(A)).toBe(false);
+    const all = g().saveAllEdits();
+    release({ ok: true, item: items()[0] });
+    await first;
+    await all;
+    expect(saveEditToFile).toHaveBeenCalledTimes(1);
+  });
+
+  it('photo-file mode: "no edit" over an edit saved in the info file removes that edit from the info file', async () => {
+    echoInfo();
+    const saveEditToFile = vi.fn();
+    desktopWith({ saveEditToFile });
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: [item({ info: { edit: cropped } })], editTarget: 'file', pendingEdits: { [A]: IDENTITY_EDIT } });
+    expect(await g().saveEdit(A)).toBe(true);
+    expect(saveEditToFile).not.toHaveBeenCalled();
+    expect(patches()).toEqual([{ path: A, patch: { edit: null }, job: 'j1' }]);
+    expect(g().pendingEdits).toEqual({});
+  });
+
+  it('Save all cut short by another folder still says what was saved', async () => {
+    let n = 0;
+    desktopWith({
+      saveEditToFile: async (path: string) => {
+        // The folder changes while the first photo is saved.
+        if (n++ === 0) g().close();
+        return { ok: true, item: items().find((i) => i.path === path) };
+      },
+    });
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: items(), editTarget: 'file', pendingEdits: { [A]: cropped, [B]: turned } });
+    await g().saveAllEdits();
+    expect(n).toBe(1);
+    expect(g().toasts).toEqual([expect.objectContaining({ text: 'Saved 1 photo' })]);
+  });
+
+  it('Save as with nothing to save says so', async () => {
+    desktopWith({ saveEditAs: vi.fn() });
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: [item()] });
+    expect(await g().saveEditAs(A)).toBe(false);
+    expect(g().toasts).toEqual([expect.objectContaining({ kind: 'error', text: 'a.jpg has no edit to save as a copy' })]);
+  });
+
+  it('an edit in progress that changed something counts as one unsaved photo', () => {
+    const setUnsavedEdits = vi.fn();
+    desktopWith({ setUnsavedEdits });
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: items(), selected: A, selection: [A] });
+    const e = { preventDefault: vi.fn(), returnValue: undefined as unknown };
+    g().startEdit(A);
+    g().setEditDraft(null);
+    expect(setUnsavedEdits).toHaveBeenLastCalledWith(0);
+    g().setEditDraft(cropped);
+    expect(setUnsavedEdits).toHaveBeenLastCalledWith(1);
+    guardUnload(e);
+    expect(e.preventDefault).toHaveBeenCalledTimes(1);
+    // Back to where it started: nothing unsaved.
+    g().setEditDraft(null);
+    expect(setUnsavedEdits).toHaveBeenLastCalledWith(0);
+    // A photo with an unsaved edit already is counted once.
+    useGallery.setState({ pendingEdits: { [A]: turned } });
+    g().setEditDraft(cropped);
+    expect(setUnsavedEdits).toHaveBeenLastCalledWith(1);
+    g().cancelEdit();
+    expect(setUnsavedEdits).toHaveBeenLastCalledWith(1);
+    g().discardEdit(A);
+    expect(setUnsavedEdits).toHaveBeenLastCalledWith(0);
+  });
+
+  it('Settings open is kept in the store', () => {
+    expect(g().settingsOpen).toBe(false);
+    g().setSettingsOpen(true);
+    expect(g().settingsOpen).toBe(true);
+    g().setSettingsOpen(false);
+  });
+
   it('setEditTarget saves the choice through the desktop app at once', async () => {
     const setEditTarget = vi.fn(async () => {});
     desktopWith({ setEditTarget, saveEditToFile: async () => ({ ok: true }) });

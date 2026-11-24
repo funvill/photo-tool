@@ -117,7 +117,8 @@ export function PhotoMenu({ x, y, path, onClose }: PhotoMenuProps) {
   const selectedItem = useGallery((s) => s.items.find((i) => i.path === (s.selected ?? path)));
   const starred = selectedItem?.info.star === true;
   const hidden = selectedItem?.info.hidden === true;
-  const editing = useGallery((s) => s.editing === path);
+  // Being edited, or its save is on its way (an edit started now would be lost when it lands).
+  const editing = useGallery((s) => s.editing === path || s.savingPaths.includes(path));
   // Save, Save as…, Save all and Revert to original, as the preview caption offers them for this photo.
   const actions = useGallery(useShallow((s) => {
     const item = s.items.find((i) => i.path === path);

@@ -32,6 +32,8 @@ export function Preview({ onOpen, onContextMenu }: PreviewProps) {
     return p ? `${p.place} of ${p.size} in stack` : null;
   });
   const editing = useGallery((s) => item !== undefined && s.editing === item.path);
+  // Its save is on its way: an edit started now would be lost when it lands.
+  const beingSaved = useGallery((s) => item !== undefined && s.savingPaths.includes(item.path));
   const unsaved = useGallery((s) => item !== undefined && item.path in s.pendingEdits);
   const shown = useGallery((s) => (item ? shownEdit(s, item) : null));
   const edit = shown && !isIdentityEdit(shown) ? shown : null;
@@ -55,7 +57,7 @@ export function Preview({ onOpen, onContextMenu }: PreviewProps) {
             {!editing && (
               <span className="gallery-preview-actions">
                 <SaveButtons item={item} />
-                <button type="button" className="btn btn-small gallery-preview-edit" onClick={() => useGallery.getState().startEdit(item.path)} title="Crop and rotate (E)">
+                <button type="button" className="btn btn-small gallery-preview-edit" disabled={beingSaved} onClick={() => useGallery.getState().startEdit(item.path)} title={beingSaved ? 'Saving…' : 'Crop and rotate (E)'}>
                   <Icon name="crop" size={14} />
                   Edit
                 </button>

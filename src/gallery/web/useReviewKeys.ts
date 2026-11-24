@@ -41,7 +41,7 @@ export function useReviewKeys(onOpen: (path: string) => void) {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return;
       const s = useGallery.getState();
-      if (s.viewing !== null || s.tidyOpen || s.leaving !== null || s.editing !== null) return;
+      if (s.viewing !== null || s.tidyOpen || s.settingsOpen || s.leaving !== null || s.editing !== null) return;
 
       if (e.key === 'Enter' || e.key === ' ') {
         if (e.repeat || !s.selected || inside(e, PRESSABLE)) return;
