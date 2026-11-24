@@ -1,9 +1,12 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import sharp from 'sharp';
 import { folderStamp, forgetPhotos, infoFor, PhotoInfoWriteError, readFolderInfo, updatePhotoInfo, type FolderInfo, type PhotoInfo, type PhotoInfoOptions } from '../../photoinfo';
+import { isIdentityEdit, parseEdit } from '../../core';
 import { hashFile, workingFile } from '../../server/media';
+import { editFormatFor, renderEdited } from '../../server/photoEditRender';
 import { listPlaces, suggestPlaces } from '../../server/places';
 import { setResourceRoot } from '../../server/resources';
 import { Catalog, type GalleryPhoto } from './catalog';
@@ -43,6 +46,8 @@ export interface GalleryInfoReply extends GalleryItem {
 const MAX_JOBS = 4;
 /** The most paths one drag-check looks at (a drag takes at most 500 files, see electron/drag.ts). */
 const DRAG_MAX = 500;
+/** Rendered edits in `<dataDir>/edits` are removed after this long. */
+const EDIT_FILE_MAX_AGE_MS = 60 * 60 * 1000;
 
 class HttpError extends Error {
   constructor(readonly status: number, message: string) {
@@ -119,6 +124,25 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
   const jobStamp = (photos: GalleryPhoto[]): string => {
     const folders = [...new Set(photos.map((p) => dirname(p.path)))].sort();
     return folders.map((f) => `${f}=${folderStamp(f, infoOpts)}`).join('|');
+  };
+
+  /** The photos of the folder open now (the last one opened), by path. */
+  const openPhotos = (): Map<string, GalleryPhoto> => {
+    const last = jobIds.at(-1);
+    return new Map(((last && scanner.get(last)?.photos) || []).map((p) => [p.path, p]));
+  };
+
+  /** A photo of the open folder, or a 404. */
+  const openPhoto = (path: string): GalleryPhoto => {
+    const photo = openPhotos().get(path);
+    if (!photo) throw new HttpError(404, 'That photo is not in the open folder any more.');
+    return photo;
+  };
+
+  /** The photo as sharp can read it (a HEIC through its derived JPEG). */
+  const workPathOf = async (photo: GalleryPhoto): Promise<string> => {
+    const isHeic = ['.heic', '.heif'].includes(extname(photo.path).toLowerCase());
+    return (await workingFile(photo.path, dataDir, isHeic ? await hashFile(photo.path) : '')).path;
   };
 
   app.get('/api/health', (_req, res) => res.json({ ok: true, app: 'gallery' }));
@@ -234,10 +258,56 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
   app.post('/api/gallery/file-check', wrap((req, res) => {
     const paths: unknown = req.body?.paths;
     if (!Array.isArray(paths) || !paths.every((p) => typeof p === 'string')) throw new HttpError(400, 'Expected { paths: string[] }');
-    const open = new Set<string>();
-    const last = jobIds.at(-1);
-    for (const p of (last && scanner.get(last)?.photos) || []) open.add(p.path);
+    const open = openPhotos();
     res.json({ paths: (paths as string[]).slice(0, DRAG_MAX).filter((p) => open.has(p)) });
+  }));
+
+  // Writes a photo with an edit applied into `<dataDir>/edits` and says where. The caller (the desktop
+  // app's main process) moves it into place. Files there older than an hour are removed on each call.
+  app.post('/api/gallery/edit/render', wrap(async (req, res) => {
+    const { path, edit: rawEdit } = req.body ?? {};
+    if (typeof path !== 'string') throw new HttpError(400, 'Expected { path, edit }');
+    const photo = openPhoto(path);
+    const edit = parseEdit(rawEdit);
+    if (!edit) throw new HttpError(400, 'That edit is not valid.');
+    const dir = join(dataDir, 'edits');
+    mkdirSync(dir, { recursive: true });
+    const now = Date.now();
+    for (const name of readdirSync(dir)) {
+      const file = join(dir, name);
+      try {
+        if (now - statSync(file).mtimeMs > EDIT_FILE_MAX_AGE_MS) rmSync(file, { force: true });
+      } catch {
+        // gone or busy: left for the next call
+      }
+    }
+    const format = editFormatFor(photo.path);
+    const file = join(dir, `${randomUUID()}.${format === 'jpeg' ? 'jpg' : format}`);
+    await renderEdited(await workPathOf(photo), edit, file, format, { keepMetadata: true });
+    res.json({ file, format });
+  }));
+
+  // Reads these photos again after the desktop app changed them on disk (an edit saved, a file added):
+  // new key and thumbnails. Replies with the photos now in the open folder, in the order asked.
+  app.post('/api/gallery/refresh', wrap(async (req, res) => {
+    const paths: unknown = req.body?.paths;
+    if (!Array.isArray(paths) || !paths.every((p) => typeof p === 'string')) throw new HttpError(400, 'Expected { paths: string[] }');
+    const last = jobIds.at(-1);
+    const out: GalleryPhoto[] = [];
+    for (const path of (paths as string[]).slice(0, DRAG_MAX)) {
+      const photo = last ? await scanner.refresh(last, path) : null;
+      if (photo) out.push(photo);
+    }
+    res.json(itemsFor(out));
+  }));
+
+  // A photo of the open folder at full size, upright, as JPEG (the zoomed view).
+  app.get('/api/gallery/full', wrap(async (req, res) => {
+    const photo = openPhoto(q(req, 'path'));
+    if (!existsSync(photo.path)) throw new HttpError(404, 'That photo is not in the open folder any more.');
+    const jpeg = await sharp(await workPathOf(photo), { failOn: 'none' }).rotate().jpeg({ quality: 90 }).toBuffer();
+    res.setHeader('Cache-Control', 'private, max-age=3600');
+    res.type('image/jpeg').send(jpeg);
   }));
 
   // With `job`, the reply also has that folder's stamp just before and after this write (`stamp`),
@@ -247,10 +317,17 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     if (typeof path !== 'string' || !patch || typeof patch !== 'object' || Array.isArray(patch)) throw new HttpError(400, 'Expected { path, patch }');
     const photo = catalog.get(path);
     if (!photo) throw new HttpError(404, 'Unknown photo');
+    // An edit must be null or valid; one that changes nothing is stored as no edit.
+    let toWrite: Record<string, unknown> = patch;
+    if ('edit' in patch && patch.edit !== null) {
+      const edit = parseEdit(patch.edit);
+      if (!edit) throw new HttpError(400, 'That edit is not valid.');
+      toWrite = { ...patch, edit: isIdentityEdit(edit) ? null : edit };
+    }
     const job = typeof jobId === 'string' && jobIds.includes(jobId) ? scanner.get(jobId) : undefined;
     const before = job ? jobStamp(job.photos) : undefined;
     try {
-      updatePhotoInfo(dirname(photo.path), basename(photo.path), patch, infoOpts);
+      updatePhotoInfo(dirname(photo.path), basename(photo.path), toWrite, infoOpts);
     } catch (e) {
       if (e instanceof PhotoInfoWriteError) throw new HttpError(409, e.message);
       throw e;

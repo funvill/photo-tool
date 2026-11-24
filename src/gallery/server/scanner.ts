@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { statSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
-import { basename, dirname, extname, relative, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, relative, resolve } from 'node:path';
 import type { PhotoAnalysis } from '../../core';
-import { analyze as defaultAnalyze, fileStat, hashFile, orientedSize, readMetadata, THUMB_SIZES, workingFile, writeJpegThumb, type ThumbSize } from '../../server/media';
+import { analyze as defaultAnalyze, fileStat, hashFile, isSupported, orientedSize, readMetadata, THUMB_SIZES, workingFile, writeJpegThumb, type ThumbSize } from '../../server/media';
 import { photoKey, type Catalog, type GalleryPhoto } from './catalog';
 import { GalleryFolderError, listPhotos, type ReadDir } from './walk';
 
@@ -144,10 +144,36 @@ export class Scanner {
     return photo;
   }
 
-  private async scanOne(job: ScanJob, path: string): Promise<GalleryPhoto> {
+  /**
+   * Reads one photo again, ignoring the cache, after the file was changed (an edit saved over it) or
+   * added. The job's entry for the path is replaced, or added at the end for a new file. A path outside
+   * the job's folder (or its subfolders, when the scan is recursive), one that is not a supported photo,
+   * and one that is not there are skipped (null).
+   */
+  async refresh(jobId: string, path: string): Promise<GalleryPhoto | null> {
+    const job = this.jobs.get(jobId);
+    if (!job) return null;
+    const file = resolve(path);
+    const rel = relative(job.root, file);
+    if (!rel || rel.startsWith('..') || isAbsolute(rel)) return null;
+    if (!job.recursive && relDirOf(job.root, file) !== '') return null;
+    if (!isSupported(file)) return null;
+    try {
+      if (!(await stat(file)).isFile()) return null;
+    } catch {
+      return null;
+    }
+    const photo = await this.scanOne(job, file, true);
+    const at = job.photos.findIndex((p) => p.path === photo.path);
+    if (at >= 0) job.photos[at] = photo;
+    else job.photos.push(photo);
+    return photo;
+  }
+
+  private async scanOne(job: ScanJob, path: string, fresh = false): Promise<GalleryPhoto> {
     const st = await fileStat(path);
     const relDir = relDirOf(job.root, path);
-    const hit = this.catalog.lookup(path, st.size, st.mtimeMs);
+    const hit = fresh ? null : this.catalog.lookup(path, st.size, st.mtimeMs);
     // A cached row is reused as long as its thumbnails are still on disk.
     if (hit && (await this.thumbsExist(hit.key))) {
       const photo = { ...hit, folder: job.root, relDir };
