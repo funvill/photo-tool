@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { PhotoAnalysis } from '../../core';
+import type { PhotoAnalysis, PhotoExif } from '../../core';
 
 // The gallery's own cache: one row per photo file, keyed by path and validated by size + mtime.
 // Lives under the gallery's data dir, never in the editor's database.
@@ -22,6 +22,8 @@ export interface GalleryPhoto {
   gpsLat: number | null;
   gpsLon: number | null;
   camera: string | null;
+  /** Lens and exposure settings; null only for a row cached before they were read. */
+  exif: PhotoExif | null;
   analysis: PhotoAnalysis | null;
   /** sha1(path|size|mtimeMs): names the thumbnails, changes when the file does. */
   key: string;
@@ -34,13 +36,13 @@ const RECENT_MAX = 12;
 interface PhotoRow {
   path: string; folder: string; file_name: string; rel_dir: string; size: number; mtime_ms: number;
   width: number; height: number; format: string; captured_at: string | null; gps_lat: number | null;
-  gps_lon: number | null; camera: string | null; analysis: string | null; key: string;
+  gps_lon: number | null; camera: string | null; exif: string | null; analysis: string | null; key: string;
 }
 
 const toPhoto = (r: PhotoRow): GalleryPhoto => ({
   path: r.path, folder: r.folder, fileName: r.file_name, relDir: r.rel_dir, size: r.size, mtimeMs: r.mtime_ms,
   width: r.width, height: r.height, format: r.format, capturedAt: r.captured_at, gpsLat: r.gps_lat, gpsLon: r.gps_lon,
-  camera: r.camera, analysis: r.analysis ? (JSON.parse(r.analysis) as PhotoAnalysis) : null, key: r.key,
+  camera: r.camera, exif: r.exif ? (JSON.parse(r.exif) as PhotoExif) : null, analysis: r.analysis ? (JSON.parse(r.analysis) as PhotoAnalysis) : null, key: r.key,
 });
 
 export class Catalog {
@@ -55,13 +57,16 @@ export class Catalog {
       CREATE TABLE IF NOT EXISTS photos (
         path TEXT PRIMARY KEY, folder TEXT NOT NULL, file_name TEXT NOT NULL, rel_dir TEXT NOT NULL,
         size INTEGER NOT NULL, mtime_ms INTEGER NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL,
-        format TEXT NOT NULL, captured_at TEXT, gps_lat REAL, gps_lon REAL, camera TEXT, analysis TEXT,
+        format TEXT NOT NULL, captured_at TEXT, gps_lat REAL, gps_lon REAL, camera TEXT, exif TEXT, analysis TEXT,
         key TEXT NOT NULL UNIQUE
       );
       CREATE TABLE IF NOT EXISTS recent (
         folder TEXT PRIMARY KEY, recursive INTEGER NOT NULL, opened_at TEXT NOT NULL, seq INTEGER NOT NULL
       );
     `);
+    // A cache made before exif was read has no such column.
+    const columns = this.db.prepare('PRAGMA table_info(photos)').all() as { name: string }[];
+    if (!columns.some((c) => c.name === 'exif')) this.db.exec('ALTER TABLE photos ADD COLUMN exif TEXT');
   }
 
   get(path: string): GalleryPhoto | null {
@@ -83,10 +88,10 @@ export class Catalog {
   put(p: GalleryPhoto): void {
     this.db
       .prepare(
-        `INSERT OR REPLACE INTO photos (path, folder, file_name, rel_dir, size, mtime_ms, width, height, format, captured_at, gps_lat, gps_lon, camera, analysis, key)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR REPLACE INTO photos (path, folder, file_name, rel_dir, size, mtime_ms, width, height, format, captured_at, gps_lat, gps_lon, camera, exif, analysis, key)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(p.path, p.folder, p.fileName, p.relDir, p.size, p.mtimeMs, p.width, p.height, p.format, p.capturedAt, p.gpsLat, p.gpsLon, p.camera, p.analysis ? JSON.stringify(p.analysis) : null, p.key);
+      .run(p.path, p.folder, p.fileName, p.relDir, p.size, p.mtimeMs, p.width, p.height, p.format, p.capturedAt, p.gpsLat, p.gpsLon, p.camera, p.exif ? JSON.stringify(p.exif) : null, p.analysis ? JSON.stringify(p.analysis) : null, p.key);
   }
 
   thumbPath(key: string, size: 's' | 'm'): string {

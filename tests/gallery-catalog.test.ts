@@ -1,3 +1,4 @@
+import { DatabaseSync } from 'node:sqlite';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { readdir as fsReaddir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -35,6 +36,35 @@ describe('readMetadata camera', () => {
   it('reads Make and Model, and gives null without EXIF', async () => {
     expect((await readMetadata(join(TRIP, 'day1-01-arrival.jpg'))).camera).toBe('Photobook Fixture Synthetic');
     expect((await readMetadata(join(TRIP, 'undated-scan.png'))).camera).toBeNull();
+  });
+});
+
+describe('catalog exif column', () => {
+  it('opens a cache made without the exif column and adds it', () => {
+    const dir = join(root, 'old');
+    mkdirSync(dir, { recursive: true });
+    const db = new DatabaseSync(join(dir, 'gallery.sqlite'));
+    db.exec(`CREATE TABLE photos (
+      path TEXT PRIMARY KEY, folder TEXT NOT NULL, file_name TEXT NOT NULL, rel_dir TEXT NOT NULL,
+      size INTEGER NOT NULL, mtime_ms INTEGER NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL,
+      format TEXT NOT NULL, captured_at TEXT, gps_lat REAL, gps_lon REAL, camera TEXT, analysis TEXT,
+      key TEXT NOT NULL UNIQUE);
+      INSERT INTO photos VALUES ('/p/a.jpg', '/p', 'a.jpg', '', 1, 2, 3, 4, 'jpeg', NULL, NULL, NULL, 'Cam', NULL, 'k');`);
+    db.close();
+    const old = new Catalog(dir);
+    try {
+      expect(old.get('/p/a.jpg')).toMatchObject({ camera: 'Cam', exif: null });
+    } finally {
+      old.close();
+    }
+  });
+
+  it('put and get round-trip exif', () => {
+    const photo = { path: '/p/b.jpg', folder: '/p', fileName: 'b.jpg', relDir: '', size: 1, mtimeMs: 2, width: 3, height: 4, format: 'jpeg', capturedAt: null, gpsLat: null, gpsLon: null, camera: null, analysis: null, key: 'kb' };
+    catalog.put({ ...photo, exif: { iso: 100, flash: false, exposureBias: 0 } });
+    expect(catalog.get('/p/b.jpg')?.exif).toEqual({ iso: 100, flash: false, exposureBias: 0 });
+    catalog.put({ ...photo, path: '/p/c.jpg', key: 'kc', exif: null });
+    expect(catalog.get('/p/c.jpg')?.exif).toBeNull();
   });
 });
 

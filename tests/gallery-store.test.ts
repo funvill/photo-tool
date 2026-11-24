@@ -9,7 +9,7 @@ const { useGallery, connectDesktop, selectVisible, selectStackInfo } = await imp
 function item(over: Partial<GalleryItem> = {}): GalleryItem {
   return {
     path: 'D:\\Trip\\a.jpg', folder: 'D:\\Trip', fileName: 'a.jpg', relDir: '', size: 1000, mtimeMs: 1, width: 400, height: 300,
-    format: 'jpeg', capturedAt: null, gpsLat: null, gpsLon: null, camera: null, analysis: null, key: 'k1',
+    format: 'jpeg', capturedAt: null, gpsLat: null, gpsLon: null, camera: null, exif: null, analysis: null, key: 'k1',
     info: {}, infoSource: 'folder', effectiveDate: null, effectiveLat: null, effectiveLon: null, ...over,
   };
 }

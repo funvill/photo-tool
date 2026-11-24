@@ -151,7 +151,15 @@ export class Scanner {
     // A cached row is reused as long as its thumbnails are still on disk.
     if (hit && (await this.thumbsExist(hit.key))) {
       const photo = { ...hit, folder: job.root, relDir };
-      if (photo.folder !== hit.folder || photo.relDir !== hit.relDir) this.catalog.put(photo);
+      // A row cached before exif was read: read just that, leaving thumbnails and analysis alone.
+      let upgraded = false;
+      if (!photo.exif) {
+        const meta = await readMetadata(path);
+        photo.exif = meta.exif;
+        photo.camera = meta.camera;
+        upgraded = true;
+      }
+      if (upgraded || photo.folder !== hit.folder || photo.relDir !== hit.relDir) this.catalog.put(photo);
       return photo;
     }
     // The content hash is only needed to name a HEIC's derived JPEG.
@@ -164,7 +172,7 @@ export class Scanner {
     const photo: GalleryPhoto = {
       path, folder: job.root, fileName: basename(path), relDir, size: st.size, mtimeMs: st.mtimeMs,
       width: dims.width, height: dims.height, format: isHeic ? 'heif' : dims.format, capturedAt: meta.capturedAt, gpsLat: meta.gpsLat,
-      gpsLon: meta.gpsLon, camera: meta.camera, analysis, key,
+      gpsLon: meta.gpsLon, camera: meta.camera, exif: meta.exif, analysis, key,
     };
     this.catalog.put(photo);
     return photo;

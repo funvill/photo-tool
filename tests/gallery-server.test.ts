@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
+import { DatabaseSync } from 'node:sqlite';
+import { statSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createGalleryApp, type GalleryAppOptions } from '../src/gallery/server/app';
 import { PhotoInfoIndex } from '../src/server/photoInfoIndex';
@@ -94,6 +96,30 @@ describe('gallery server', () => {
     expect(new Set(seen.map((i) => i.path)).size).toBe(COUNT);
     expect(seen.every((i) => i.infoSource === 'none' && i.info && Object.keys(i.info).length === 0)).toBe(true);
     expect(seen[0].effectiveDate).toBe(seen[0].capturedAt);
+  });
+
+  it('a cached photo without exif gets it on the next scan and keeps its thumbnail files', async () => {
+    await start();
+    const first = await loaded();
+    const arrival = first.byName('day1-01-arrival.jpg');
+    expect(arrival.exif).toBeTruthy();
+    const thumbs = ['s', 'm'].map((s) => join(root, 'data', 'thumbs', `${arrival.key}_${s}.jpg`));
+    const mtimes = () => thumbs.map((t) => statSync(t).mtimeMs);
+    const before = mtimes();
+    await new Promise<void>((r) => (server ? server.close(() => r()) : r()));
+    server = undefined;
+    closeApp?.();
+    closeApp = undefined;
+    const db = new DatabaseSync(join(root, 'data', 'gallery.sqlite'));
+    db.prepare('UPDATE photos SET exif = NULL, camera = NULL').run();
+    db.close();
+    await start();
+    const second = await loaded();
+    const again = second.byName('day1-01-arrival.jpg');
+    expect(again.exif).not.toBeNull();
+    expect(again.camera).toBe('Photobook Fixture Synthetic');
+    expect(again.key).toBe(arrival.key);
+    expect(mtimes()).toEqual(before);
   });
 
   it('cancels a scan on request: it ends done and cancelled, and GET jobs/:id says so', async () => {

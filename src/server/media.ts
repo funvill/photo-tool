@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import { basename, extname, join } from 'node:path';
 import sharp from 'sharp';
 import exifr from 'exifr';
-import type { PhotoAnalysis } from '../core';
+import type { PhotoAnalysis, PhotoExif } from '../core';
 import { heicToJpeg } from './heic';
 
 // Media pipeline: everything runs locally. Originals are only ever read.
@@ -97,6 +97,33 @@ export interface ExtractedMetadata {
   gpsLon: number | null;
   /** "Make Model" from EXIF (Model alone when it already starts with the make), or null. */
   camera: string | null;
+  /** Lens and exposure settings; `{}` when the file has none. */
+  exif: PhotoExif;
+}
+
+const positive = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined);
+
+/** Lens, focal length, aperture, shutter, ISO, exposure bias and flash from exifr's tags. Anything missing or nonsense is left out. */
+export function exifFromTags(tags: Record<string, unknown> | null | undefined): PhotoExif {
+  const out: PhotoExif = {};
+  if (!tags) return out;
+  const model = typeof tags.LensModel === 'string' ? tags.LensModel.trim() : '';
+  const make = typeof tags.LensMake === 'string' ? tags.LensMake.trim() : '';
+  if (model) out.lens = make && !model.toLowerCase().startsWith(make.toLowerCase()) ? `${make} ${model}` : model;
+  const focalLength = positive(tags.FocalLength);
+  if (focalLength !== undefined) out.focalLength = focalLength;
+  const focalLength35 = positive(tags.FocalLengthIn35mmFormat);
+  if (focalLength35 !== undefined) out.focalLength35 = focalLength35;
+  const aperture = positive(tags.FNumber);
+  if (aperture !== undefined) out.aperture = aperture;
+  const exposureTime = positive(tags.ExposureTime);
+  if (exposureTime !== undefined) out.exposureTime = exposureTime;
+  const iso = positive(Array.isArray(tags.ISO) ? tags.ISO[0] : tags.ISO);
+  if (iso !== undefined) out.iso = iso;
+  if (typeof tags.ExposureBiasValue === 'number' && Number.isFinite(tags.ExposureBiasValue)) out.exposureBias = tags.ExposureBiasValue;
+  if (typeof tags.Flash === 'number' && Number.isFinite(tags.Flash)) out.flash = (tags.Flash & 1) === 1;
+  else if (typeof tags.Flash === 'string') out.flash = tags.Flash.startsWith('Flash fired');
+  return out;
 }
 
 function cameraName(make: unknown, model: unknown): string | null {
@@ -112,18 +139,20 @@ export async function readMetadata(originalPath: string): Promise<ExtractedMetad
   let gpsLat: number | null = null;
   let gpsLon: number | null = null;
   let camera: string | null = null;
+  let exif: PhotoExif = {};
   // exifr is given the bytes, not the path: with a path it leaves file handles for the garbage
   // collector to close, which newer Node versions (26.13+) treat as an error.
   let data: Buffer;
   try {
     data = await readFile(originalPath);
   } catch {
-    return { capturedAt, gpsLat, gpsLon, camera };
+    return { capturedAt, gpsLat, gpsLon, camera, exif };
   }
   try {
-    const tags = await exifr.parse(data, { reviveValues: false, pick: ['DateTimeOriginal', 'CreateDate', 'DateTimeDigitized', 'ModifyDate', 'DateTime', 'Make', 'Model'] });
+    const tags = await exifr.parse(data, { reviveValues: false, pick: ['DateTimeOriginal', 'CreateDate', 'DateTimeDigitized', 'ModifyDate', 'DateTime', 'Make', 'Model', 'LensModel', 'LensMake', 'FocalLength', 'FocalLengthIn35mmFormat', 'FNumber', 'ExposureTime', 'ISO', 'ExposureBiasValue', 'Flash'] });
     if (tags) capturedAt = exifDate(tags.DateTimeOriginal) ?? exifDate(tags.CreateDate) ?? exifDate(tags.DateTimeDigitized) ?? exifDate(tags.ModifyDate) ?? exifDate(tags.DateTime);
     if (tags) camera = cameraName(tags.Make, tags.Model);
+    exif = exifFromTags(tags);
   } catch {
     // no EXIF — fine
   }
@@ -136,7 +165,7 @@ export async function readMetadata(originalPath: string): Promise<ExtractedMetad
   } catch {
     // no GPS — fine
   }
-  return { capturedAt, gpsLat, gpsLon, camera };
+  return { capturedAt, gpsLat, gpsLon, camera, exif };
 }
 
 /** Dimensions after applying EXIF orientation. */
