@@ -22,7 +22,8 @@ export interface LaunchData {
 /**
  * Folders for the page to open: one given at start (`--gallery <folder>`), from a second launch,
  * or from File > Open folder. Each goes to the page over 'gallery:open-folder' once the page
- * listens (its preload says 'gallery:ready-for-folders'); until then the latest one waits.
+ * listens (its preload says 'gallery:ready-for-folders'); until then the latest one waits. It waits
+ * again once the page stops listening ('gallery:not-ready-for-folders') or reloads.
  */
 export function galleryFolders(o: { window: () => BrowserWindow | null; fromApp: (e: IpcMainEvent) => boolean; log: (...a: unknown[]) => void }, startFolder: string | null) {
   let pending: string | null = startFolder ? resolve(startFolder) : null;
@@ -40,6 +41,11 @@ export function galleryFolders(o: { window: () => BrowserWindow | null; fromApp:
     listening = true;
     if (pending) e.sender.send('gallery:open-folder', pending);
     pending = null;
+  });
+  // The page's last listener stopped (its preload says so): folders wait again until it listens.
+  ipcMain.on('gallery:not-ready-for-folders', (e) => {
+    if (!o.fromApp(e)) return;
+    listening = false;
   });
 
   return {

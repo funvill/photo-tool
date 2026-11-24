@@ -1,24 +1,38 @@
 import { useEffect } from 'react';
 import { desktop } from '../../web/desktop';
+import { FolderBar, RecentFolders } from './components/FolderBar';
+import { Grid } from './components/Grid';
+import { Progress } from './components/Progress';
+import { Toasts } from './components/Toasts';
+import { connectDesktop, useGallery } from './store';
 
-// The gallery window's shell: a title bar and "Open folder". Opening a folder is wired up later;
-// for now the chosen folder (or one handed over by a second `--gallery <folder>` launch) is logged.
+/** Double-click on a photo. The viewer arrives with Task 7; until then this does nothing. */
+const openViewer = (_path: string) => undefined;
+
+// The gallery window: the start screen (recent folders) until a folder is open, then its photos.
+// A folder can also arrive from outside the page: `--gallery <folder>`, a second launch, File > Open folder.
 export function GalleryApp() {
-  useEffect(() => desktop?.onOpenFolder?.((folder) => console.info('gallery: open folder', folder)), []);
+  const root = useGallery((s) => s.root);
+  const empty = useGallery((s) => s.items.length === 0 && s.progress === null);
 
-  const openFolder = async () => {
-    const folder = await desktop?.pickFolder({ title: 'Open a folder of photos' });
-    if (folder) console.info('gallery: open folder', folder);
-  };
+  useEffect(() => connectDesktop(desktop), []);
+  useEffect(() => {
+    void useGallery.getState().loadRecent();
+  }, []);
 
   return (
     <div className="gallery">
-      <header className="topbar">
-        <strong>Photobook Gallery</strong>
-        <button type="button" className="btn btn-primary" onClick={() => void openFolder()} disabled={!desktop}>
-          Open folder
-        </button>
-      </header>
+      <FolderBar />
+      <Progress />
+      {!root ? (
+        <RecentFolders />
+      ) : empty ? (
+        <p className="muted pad">No photos in this folder.</p>
+      ) : (
+        // A new folder starts at the top.
+        <Grid key={root} onOpen={openViewer} />
+      )}
+      <Toasts />
     </div>
   );
 }

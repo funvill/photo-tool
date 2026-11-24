@@ -5,7 +5,7 @@ import { useEditor } from '../store';
 import { ASSET_MIME } from './Canvas';
 import { FolderPicker } from './FolderPicker';
 import { Icon } from './Icon';
-import { HoverPreview, formatTaken } from './HoverPreview';
+import { HoverPreview, formatSize, formatTaken } from './HoverPreview';
 import { estimateRemaining, formatRemaining } from '../eta';
 import { CleanupDialog } from './CleanupDialog';
 import { Shelf, tildePath } from './Shelf';
@@ -171,7 +171,7 @@ export function Library() {
         </div>
       )}
       <PreviewPane usage={usage} />
-      {hover.shown && <HoverPreview asset={hover.shown.asset} left={hover.shown.left} />}
+      {hover.shown && <HoverPreview {...previewOf(hover.shown.asset)} left={hover.shown.left} />}
       {cleanup && <CleanupDialog usage={usage} onClose={() => setCleanup(false)} />}
       {picker && (
         <FolderPicker
@@ -307,6 +307,20 @@ function importLabel(job: { processed: number; total: number; startedAt: string 
   const base = `Importing ${job.processed} / ${job.total}`;
   const left = estimateRemaining(job.processed, job.total, Date.parse(job.startedAt), Date.now());
   return left === null ? base : `${base} · ${formatRemaining(left)}`;
+}
+
+/** What the hover preview shows for a library photo. */
+function previewOf(asset: PhotoAsset) {
+  return {
+    src: thumbUrl(asset.id, 'm'),
+    title: asset.fileName,
+    takenAt: asset.capturedAt ?? null,
+    checker: !!asset.analysis?.transparent,
+    details: [
+      `${asset.widthPx} × ${asset.heightPx} · ${formatSize(asset.fileSizeBytes)}`,
+      ...(asset.people && asset.people.length > 0 ? [asset.people.join(', ')] : []),
+    ],
+  };
 }
 
 const HOVER_DELAY_MS = 400;

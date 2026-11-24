@@ -1,0 +1,40 @@
+/* Photobook Gallery — the gallery window's own layout. Colours, buttons, toasts and the hover
+   preview come from the editor's styles.css (imported first), so both programs look alike. */
+
+.gallery { height: 100%; display: flex; flex-direction: column; min-height: 0; }
+.gallery-bar-title { min-width: 0; flex: 1; }
+.gallery-bar-title strong { white-space: nowrap; }
+.gallery-bar-title .muted { min-width: 0; }
+.gallery-check { gap: 6px; white-space: nowrap; color: var(--muted); cursor: pointer; }
+.gallery-check input { accent-color: var(--accent); margin: 0; }
+.gallery-size { gap: 6px; color: var(--muted); }
+.gallery-size input { width: 120px; accent-color: var(--accent); }
+
+/* Reading a folder */
+.gallery-progress { flex: none; display: flex; align-items: center; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line-soft); background: var(--panel); }
+.gallery-progress-bar { flex: 1; max-width: 420px; height: 6px; border-radius: 3px; background: var(--panel-3); overflow: hidden; }
+.gallery-progress-bar span { display: block; height: 100%; background: var(--accent); transition: width 0.3s; }
+
+/* Start screen */
+.gallery-start { flex: 1; overflow-y: auto; display: flex; flex-direction: column; align-items: flex-start; gap: 14px; padding: 48px max(24px, calc(50% - 360px)); }
+.gallery-start h1 { font-size: 20px; }
+.gallery-start p { margin: 0; max-width: 560px; }
+.gallery-recent { width: 100%; margin-top: 18px; display: flex; flex-direction: column; gap: 8px; }
+.gallery-recent ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.gallery-recent-item { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: var(--radius); border: 1px solid var(--line-soft); background: var(--panel); text-align: left; cursor: pointer; }
+.gallery-recent-item:hover:not(:disabled) { background: var(--panel-2); border-color: var(--line); }
+.gallery-recent-item .ellipsis { flex: 1; min-width: 0; }
+.gallery-recent-item:disabled { cursor: default; color: var(--muted); opacity: 0.6; }
+
+/* The grid: tiles are placed absolutely by Grid.tsx; only the rows on screen exist. */
+.gallery-grid { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; background: var(--stage); }
+.gallery-grid-inner { position: relative; }
+.gallery-tile { position: absolute; left: 0; top: 0; border-radius: 6px; overflow: hidden; background: var(--panel-2); cursor: pointer; outline: 1px solid var(--line-soft); contain: strict; }
+.gallery-tile img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+.gallery-tile.selected { outline: 2px solid var(--select); outline-offset: -2px; }
+.gallery-star-badge { position: absolute; left: 5px; top: 5px; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: rgba(0, 0, 0, 0.6); color: var(--accent); }
+.gallery-star-badge .icon path { fill: currentColor; }
+.gallery-tile-actions { position: absolute; right: 4px; bottom: 4px; display: flex; gap: 2px; opacity: 0; transition: opacity 0.12s; }
+.gallery-tile:hover .gallery-tile-actions, .gallery-tile-actions:focus-within { opacity: 1; }
+.gallery-tile-actions .icon-btn { width: 26px; height: 26px; background: rgba(0, 0, 0, 0.6); color: #fff; }
+.gallery-tile-actions .icon-btn.on { color: var(--accent); }

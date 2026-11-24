@@ -513,11 +513,12 @@ if (!app.requestSingleInstanceLock(isGallery ? ({ argv: process.argv, cwd: proce
   app.quit();
 } else {
   app.on('second-instance', (_e, _argv, _cwd, data) => {
+    // First: a folder handed over while this copy is still starting waits for the page instead of being dropped.
+    folders?.secondInstance(data);
     if (!win) return;
     if (win.isMinimized()) win.restore();
     win.show();
     win.focus();
-    folders?.secondInstance(data);
   });
   app.on('web-contents-created', (_e, contents) => hardenContents(contents));
   app.on('window-all-closed', () => {

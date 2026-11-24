@@ -6,6 +6,9 @@ import type { DesktopApi } from '../src/shared/desktopApi';
 const VERSION_FLAG = '--photobook-version=';
 const version = process.argv.find((a) => a.startsWith(VERSION_FLAG))?.slice(VERSION_FLAG.length) ?? '';
 
+/** The page's onOpenFolder listeners still subscribed. */
+let folderListeners = 0;
+
 const api: DesktopApi = {
   version,
   pickFolder: (options) => ipcRenderer.invoke('desktop:pick-folder', { title: options?.title, defaultPath: options?.defaultPath }),
@@ -20,9 +23,17 @@ const api: DesktopApi = {
       if (typeof folder === 'string') cb(folder);
     };
     ipcRenderer.on('gallery:open-folder', listener);
+    folderListeners++;
     // Now that someone listens, the main process hands over a folder it was given before the page was ready.
     ipcRenderer.send('gallery:ready-for-folders');
-    return () => void ipcRenderer.removeListener('gallery:open-folder', listener);
+    let stopped = false;
+    return () => {
+      if (stopped) return;
+      stopped = true;
+      ipcRenderer.removeListener('gallery:open-folder', listener);
+      // Nobody listens any more: the main process keeps the next folder until someone does.
+      if (--folderListeners === 0) ipcRenderer.send('gallery:not-ready-for-folders');
+    };
   },
 };
 
