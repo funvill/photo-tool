@@ -1,5 +1,5 @@
 // The photoinfo.json module: round trips, preservation of unknown data, safe writes, and the read-only fallback.
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -14,6 +14,8 @@ import {
   updatePhotoInfo,
   type PhotoInfoOptions,
 } from '../src/photoinfo';
+import { PhotoInfoIndex } from '../src/server/photoInfoIndex';
+import { fakeAsset } from './helpers';
 
 describe('photoinfo', () => {
   let dir: string;
@@ -123,7 +125,18 @@ describe('photoinfo', () => {
 
   it('existing read-only photoinfo.json: edit lands in fallback and is visible on the next read', () => {
     writeFileSync(file(), JSON.stringify({ format: 'photoinfo/1', photos: { 'a.jpg': { star: true } } }));
-    updatePhotoInfo(dir, 'b.jpg', { notes: 'new' }, readOnlyOpts());
+    const index = new PhotoInfoIndex(opts);
+    const photo = join(dir, 'b.jpg');
+    const asset = fakeAsset({ favorite: false });
+    expect(index.apply(asset, photo).favorite).toBe(false);
+    const stampBefore = folderStamp(dir, opts);
+    updatePhotoInfo(dir, 'b.jpg', { notes: 'new', star: true }, readOnlyOpts());
+    // The folder's own file did not change, but the fallback did: the stamp must say so,
+    // and an index that already read the folder sees the star.
+    expect(folderStamp(dir, opts)).not.toBe(stampBefore);
+    expect(index.apply(asset, photo).favorite).toBe(true);
+    expect(new PhotoInfoIndex(opts).apply(asset, photo).favorite).toBe(true);
+    updatePhotoInfo(dir, 'b.jpg', { star: null }, readOnlyOpts());
     for (const o of [readOnlyOpts(), opts]) {
       const info = readFolderInfo(dir, o);
       expect(info.source).toBe('fallback');
@@ -155,6 +168,36 @@ describe('photoinfo', () => {
     };
     expect(() => updatePhotoInfo(dir, 'a.jpg', { star: true }, { fallbackDir, writeFile })).toThrow(PhotoInfoWriteError);
     expect(readdirSync(fallbackDir)).toEqual([]);
+  });
+
+  it('a busy photoinfo.json (rename refused) is retried, not sent to the fallback', () => {
+    let calls = 0;
+    const rename = (from: string, to: string) => {
+      if (++calls <= 2) throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+      renameSync(from, to);
+    };
+    updatePhotoInfo(dir, 'a.jpg', { star: true }, { fallbackDir, rename });
+    expect(calls).toBe(3);
+    expect(readdirSync(fallbackDir)).toEqual([]);
+    expect(readFolderInfo(dir, opts).source).toBe('folder');
+    expect(infoFor(readFolderInfo(dir, opts), 'a.jpg')?.star).toBe(true);
+    expect(readdirSync(dir)).toEqual([PHOTOINFO_NAME]);
+  });
+
+  it('a photoinfo.json that stays busy gives a clear error, no fallback and no temp file', () => {
+    const rename = () => {
+      throw Object.assign(new Error('operation not permitted'), { code: 'EPERM' });
+    };
+    let err: unknown;
+    try {
+      updatePhotoInfo(dir, 'a.jpg', { star: true }, { fallbackDir, rename });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeInstanceOf(PhotoInfoWriteError);
+    expect((err as Error).message).toContain('is in use by another program; try again');
+    expect(readdirSync(fallbackDir)).toEqual([]);
+    expect(readdirSync(dir)).toEqual([]);
   });
 
   it('stamp changes after a write', () => {
