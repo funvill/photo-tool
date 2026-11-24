@@ -417,6 +417,8 @@ test('Not now shows markers without tiles', async ({ page, request }) => {
     await expect(page.getByRole('region', { name: 'Online maps' })).toHaveCount(0);
     await expect(page.locator('.gallery-map-marker')).toHaveCount(2);
     await expect(marker(page, PARIS)).toHaveAttribute('src', /\/api\/gallery\/thumb\?.*size=s/);
+    // Fetched only once the marker is drawn.
+    await expect(marker(page, PARIS)).toHaveAttribute('loading', 'lazy');
     await expect(page.getByRole('button', { name: 'Map: offline' })).toBeVisible();
     await expect(page.locator('.leaflet-tile')).toHaveCount(0);
     // The answer is remembered: after a reload the map opens without asking.

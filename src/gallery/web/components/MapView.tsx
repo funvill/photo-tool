@@ -21,13 +21,16 @@ const MARKER_PX = 36;
 const CLUSTER_PX = 40;
 const FIT = { padding: L.point(24, 24), maxZoom: 15, animate: false };
 
-/** A photo's marker: its small thumbnail in a circle, outlined when it is the selected photo. */
+const escapeHtml = (text: string) => text.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
+/**
+ * A photo's marker: its small thumbnail in a circle, outlined when it is the selected photo. Markup, not
+ * an element: the picture is asked for only once Leaflet draws the marker (one in view, not merged into
+ * a bubble), not for every located photo as the map opens.
+ */
 function markerIcon(item: GalleryItem, selected: boolean): L.DivIcon {
-  const img = document.createElement('img');
-  img.src = thumbUrl(item.key, 's');
-  img.alt = item.fileName;
-  img.draggable = false;
-  return L.divIcon({ className: selected ? 'gallery-map-marker selected' : 'gallery-map-marker', html: img, iconSize: L.point(MARKER_PX, MARKER_PX) });
+  const html = `<img src="${escapeHtml(thumbUrl(item.key, 's'))}" alt="${escapeHtml(item.fileName)}" loading="lazy" draggable="false">`;
+  return L.divIcon({ className: selected ? 'gallery-map-marker selected' : 'gallery-map-marker', html, iconSize: L.point(MARKER_PX, MARKER_PX) });
 }
 
 interface Placed {
