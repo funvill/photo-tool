@@ -143,9 +143,16 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     // `done` first: a photo that lands after this line is simply picked up by the next poll.
     const done = job.done;
     res.json({
-      total: job.total, processed: job.processed, startedAt: job.startedAt, done, errors: job.errors,
+      total: job.total, processed: job.processed, startedAt: job.startedAt, done, cancelled: job.cancelled, errors: job.errors,
       items: itemsFor(job.photos.slice(since)),
     });
+  }));
+
+  // Stops a scan nobody wants any more (the page closed the folder or is opening another).
+  app.post('/api/gallery/jobs/:id/cancel', wrap((req, res) => {
+    const job = requireJob(String(req.params.id));
+    scanner.cancel(job.id);
+    res.json({ cancelled: job.cancelled });
   }));
 
   app.get('/api/gallery/items', wrap((req, res) => {

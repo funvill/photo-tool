@@ -186,6 +186,37 @@ describe('gallery store', () => {
     expect(useGallery.getState().toasts).toEqual([expect.objectContaining({ kind: 'error', text: 'The server stopped' })]);
   });
 
+  it('cancels a scan still running when another folder is opened or the folder is closed', async () => {
+    vi.useFakeTimers();
+    let next = 'j1';
+    routes['POST /api/gallery/open'] = () => ({ status: 202, json: { jobId: next } });
+    routes['GET /api/gallery/recent'] = () => ({ json: [] });
+    const running = () => ({ json: { total: 5, processed: 1, startedAt: 0, done: false, cancelled: false, errors: [], items: [] } });
+    routes['GET /api/gallery/jobs/j1'] = running;
+    routes['GET /api/gallery/jobs/j2'] = running;
+    routes['POST /api/gallery/jobs/j1/cancel'] = () => ({ json: { cancelled: true } });
+    routes['POST /api/gallery/jobs/j2/cancel'] = () => ({ json: { cancelled: true } });
+
+    await useGallery.getState().open('D:\\Trip', true);
+    expect(useGallery.getState().progress).not.toBeNull();
+    next = 'j2';
+    await useGallery.getState().open('D:\\Other', true);
+    expect(count('POST', '/api/gallery/jobs/j1/cancel')).toBe(1);
+    // The cancel goes out before the new folder is asked for.
+    expect(calls.findIndex((c) => c.url === '/api/gallery/jobs/j1/cancel')).toBeLessThan(calls.map((c) => c.url).lastIndexOf('/api/gallery/open'));
+
+    useGallery.getState().close();
+    expect(count('POST', '/api/gallery/jobs/j2/cancel')).toBe(1);
+    expect(useGallery.getState().toasts).toEqual([]);
+  });
+
+  it('does not cancel a scan that has finished', async () => {
+    vi.useFakeTimers();
+    await openTrip(() => 's');
+    useGallery.getState().close();
+    expect(calls.some((c) => c.url.endsWith('/cancel'))).toBe(false);
+  });
+
   it('opens a folder the desktop app hands over', async () => {
     routes['POST /api/gallery/open'] = () => ({ status: 202, json: { jobId: 'j9' } });
     routes['GET /api/gallery/recent'] = () => ({ json: [] });

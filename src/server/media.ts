@@ -1,6 +1,6 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';
-import { readFile, rm, stat } from 'node:fs/promises';
+import { readFile, rename, rm, stat } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { basename, extname, join } from 'node:path';
@@ -150,13 +150,26 @@ export async function orientedSize(path: string): Promise<{ width: number; heigh
 const jpegQuality = (size: ThumbSize) => (size === 's' ? 78 : 84);
 
 /** Writes the opaque JPEG thumbnail of `size` to `outFile` (shared by the editor and the gallery). */
+/**
+ * Writes a JPEG thumbnail to a temp file beside `outFile`, then renames it into place: a thumbnail
+ * that exists is always complete (one cut off half way would otherwise be treated as cached for good).
+ */
 export async function writeJpegThumb(workPath: string, size: ThumbSize, outFile: string) {
-  await sharp(workPath, { failOn: 'none' })
-    .rotate()
-    .resize(THUMB_SIZES[size], THUMB_SIZES[size], { fit: 'inside', withoutEnlargement: true })
-    .flatten({ background: '#ffffff' })
-    .jpeg({ quality: jpegQuality(size), mozjpeg: true })
-    .toFile(outFile);
+  const tmp = `${outFile}.${randomUUID()}.tmp`;
+  try {
+    await sharp(workPath, { failOn: 'none' })
+      .rotate()
+      .resize(THUMB_SIZES[size], THUMB_SIZES[size], { fit: 'inside', withoutEnlargement: true })
+      .flatten({ background: '#ffffff' })
+      .jpeg({ quality: jpegQuality(size), mozjpeg: true })
+      .toFile(tmp);
+    // Written by two at once (or open for reading on Windows): the one already in place is just as good.
+    await rename(tmp, outFile).catch((e) => {
+      if (!existsSync(outFile)) throw e;
+    });
+  } finally {
+    await rm(tmp, { force: true });
+  }
 }
 
 export async function makeThumbnails(workPath: string, dataDir: string, assetId: string, transparent = false) {

@@ -148,6 +148,47 @@ describe('gallery scan', () => {
     await expect(listPhotos(photos, true, denied)).rejects.toThrow(GalleryFolderError);
   });
 
+  it('a second open of the same folder cancels the first, and no photo is analysed twice', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const spy = vi.fn(async (workPath: string) => {
+      await gate;
+      return analyze(workPath);
+    });
+    const scanner = new Scanner(catalog, dataDir, { analyze: spy });
+    const first = scanner.open(photos, false);
+    // The first scan has photos half done when the folder is opened again.
+    await vi.waitFor(() => expect(spy).toHaveBeenCalled());
+    const second = scanner.open(photos, false);
+    release();
+    const done = await scanner.wait(second.id);
+    const old = await scanner.wait(first.id);
+    expect(old).toMatchObject({ done: true, cancelled: true });
+    expect(old.photos.length).toBeLessThan(21);
+    expect(done).toMatchObject({ done: true, cancelled: false, errors: [] });
+    expect(done.photos).toHaveLength(21);
+    expect(new Set(done.photos.map((p) => p.path)).size).toBe(21);
+    expect(spy).toHaveBeenCalledTimes(21);
+    // Every thumbnail is under its final name only: no half-written temp file is left behind.
+    const thumbs = readdirSync(join(dataDir, 'thumbs')).sort();
+    expect(thumbs).toEqual(done.photos.flatMap((p) => [`${p.key}_m.jpg`, `${p.key}_s.jpg`]).sort());
+  });
+
+  it('cancel stops a running scan at the next photo and keeps the photos read so far', async () => {
+    const scanner = new Scanner(catalog, dataDir, { concurrency: 1 });
+    const job = scanner.open(photos, false);
+    await vi.waitFor(() => expect(job.processed).toBeGreaterThan(0), { timeout: 20_000 });
+    scanner.cancel(job.id);
+    const ended = await scanner.wait(job.id);
+    expect(ended).toMatchObject({ done: true, cancelled: true });
+    expect(ended.processed).toBeLessThan(21);
+    expect(ended.photos.length).toBe(ended.processed);
+    // Cancelling a finished scan changes nothing.
+    const full = await scanner.wait(scanner.open(photos, false).id);
+    scanner.cancel(full.id);
+    expect(full.cancelled).toBe(false);
+  });
+
   it('lists recent folders newest first', () => {
     catalog.touchRecent('/a', false);
     catalog.touchRecent('/b', true);

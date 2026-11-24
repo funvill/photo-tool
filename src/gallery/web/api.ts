@@ -29,6 +29,8 @@ export interface JobUpdate {
   processed: number;
   startedAt: number;
   done: boolean;
+  /** Stopped before the end (the folder was closed, or another one opened). */
+  cancelled: boolean;
   errors: { path: string; message: string }[];
   /** The photos finished after the first `since`. */
   items: GalleryItem[];
@@ -51,6 +53,7 @@ export const galleryApi = {
   recent: () => call<RecentFolder[]>('GET', '/api/gallery/recent'),
   open: (folder: string, recursive: boolean) => call<{ jobId: string }>('POST', '/api/gallery/open', { folder, recursive }),
   job: (id: string, since: number) => call<JobUpdate>('GET', `/api/gallery/jobs/${encodeURIComponent(id)}?${qs({ since })}`),
+  cancel: (job: string) => call<{ cancelled: boolean }>('POST', `/api/gallery/jobs/${encodeURIComponent(job)}/cancel`),
   items: (job: string) => call<GalleryItem[]>('GET', `/api/gallery/items?${qs({ job })}`),
   stamp: async (job: string) => (await call<{ stamp: string }>('GET', `/api/gallery/stamp?${qs({ job })}`)).stamp,
   people: (job: string) => call<string[]>('GET', `/api/gallery/people?${qs({ job })}`),

@@ -96,6 +96,20 @@ describe('gallery server', () => {
     expect(seen[0].effectiveDate).toBe(seen[0].capturedAt);
   });
 
+  it('cancels a scan on request: it ends done and cancelled, and GET jobs/:id says so', async () => {
+    await start();
+    const jobId = await open();
+    const res = await api('POST', `/api/gallery/jobs/${jobId}/cancel`);
+    expect(res.status).toBe(200);
+    const job = await finish(jobId);
+    expect(job).toMatchObject({ done: true, cancelled: true });
+    expect(job.processed).toBeLessThan(COUNT);
+    expect((await api('POST', '/api/gallery/jobs/nope/cancel')).status).toBe(404);
+    // A finished scan reports cancelled: false.
+    const next = await finish(await open());
+    expect(next).toMatchObject({ done: true, cancelled: false });
+  });
+
   it('PATCH writes photoinfo.json beside the photo and keeps other entries and unknown fields', async () => {
     writeFileSync(infoFile(), JSON.stringify({ format: 'photoinfo/1', extra: { keep: 1 }, photos: { 'other.jpg': { star: true, custom: 'x' } } }));
     await start();

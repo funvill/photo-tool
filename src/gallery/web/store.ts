@@ -170,6 +170,13 @@ export const useGallery = create<GalleryState>()((set, get) => {
     await watchInfo(gen, job);
   };
 
+  /** Tell the server to stop reading the open folder when that is still going on (it is no longer wanted). */
+  const cancelScan = () => {
+    const { job, progress } = get();
+    // A failed cancel is harmless: the server cancels it anyway when the next folder is opened.
+    if (job && progress) void galleryApi.cancel(job).catch(() => {});
+  };
+
   /** After a filter change: photos it hides leave the selection (what a drag would take). */
   const pruneSelection = () => {
     const s = get();
@@ -225,6 +232,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
     },
 
     async open(folder, recursive) {
+      cancelScan();
       stopTimers();
       const gen = generation;
       // The subfolders of the old folder mean nothing in this one.
@@ -356,6 +364,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
     },
 
     close() {
+      cancelScan();
       stopTimers();
       set({ job: null, root: null, items: [], progress: null, ...noSelection, tidyOpen: false });
     },
