@@ -517,7 +517,12 @@ test('on a wide window the preview fits inside its pane; the wheel zooms with a 
       return b;
     };
     // The whole picture is in the pane, not just its top half.
-    await expect.poll(async () => (await img.boundingBox())?.height ?? 0).toBeGreaterThan(100);
+    await expect(img).toBeVisible();
+    await expect.poll(async () => {
+      const s0 = await stage.boundingBox();
+      const b0 = await img.boundingBox();
+      return !!s0 && !!b0 && b0.height > 100 && b0.x >= s0.x - 1 && b0.y >= s0.y - 1 && b0.x + b0.width <= s0.x + s0.width + 1 && b0.y + b0.height <= s0.y + s0.height + 1;
+    }).toBe(true);
     const fitted = await inside();
     await expect(page.locator('.gallery-minimap')).toHaveCount(0);
 
@@ -530,6 +535,22 @@ test('on a wide window the preview fits inside its pane; the wheel zooms with a 
     await expect.poll(async () => (await img.boundingBox())!.height).toBeGreaterThan(fitted.height * 1.1);
     const mm = (await minimap.boundingBox())!;
     expect(Math.max(mm.width, mm.height)).toBeCloseTo(160, 0);
+
+    // Zoom in more so there is room to pan; dragging the picture moves it.
+    for (let i = 0; i < 4; i++) await page.mouse.wheel(0, -100);
+    await expect.poll(async () => (await img.boundingBox())!.height).toBeGreaterThan(fitted.height * 2);
+    const before = (await img.boundingBox())!;
+    await page.mouse.move(s.x + s.width / 2, s.y + s.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(s.x + s.width / 2 + 60, s.y + s.height / 2 + 30, { steps: 5 });
+    await page.mouse.up();
+    await expect.poll(async () => Math.round((await img.boundingBox())!.x - before.x)).not.toBe(0);
+    // A click on the mini map moves the view (its rectangle moves).
+    const rect = page.locator('.gallery-minimap-view');
+    const rectBefore = (await rect.boundingBox())!;
+    const m = (await minimap.boundingBox())!;
+    await page.mouse.click(m.x + 3, m.y + 3);
+    await expect.poll(async () => Math.round((await rect.boundingBox())!.x - rectBefore.x)).not.toBe(0);
 
     // Double-click resets to fit; the mini map is gone.
     await stage.dblclick({ position: { x: 20, y: 20 } });

@@ -32,6 +32,7 @@ export function MiniMap({ itemKey, img, visible, onCentre }: MiniMapProps) {
       // Its own pointer work: the stage behind must not start a pan, or open the viewer on a double-click.
       onPointerDown={(e) => {
         e.stopPropagation();
+        if (e.button !== 0) return;
         e.currentTarget.setPointerCapture(e.pointerId);
         point(e);
       }}

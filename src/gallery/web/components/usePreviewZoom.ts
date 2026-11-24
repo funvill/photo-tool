@@ -43,6 +43,8 @@ export function usePreviewZoom(img: Size | null) {
       e.preventDefault();
       const r = el.getBoundingClientRect();
       const next = zoomAt(v, e.deltaY < 0 ? WHEEL_STEP : 1 / WHEEL_STEP, e.clientX - r.left, e.clientY - r.top, i, p);
+      // Kept current here too: a second notch before the next render must start from this one.
+      live.current.view = next;
       setZoomed(next.zoom > 1 ? next : null);
     };
     el.addEventListener('wheel', onWheel, { passive: false });
