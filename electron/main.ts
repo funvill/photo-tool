@@ -11,7 +11,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSy
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { GALLERY_PRODUCT_NAME, LICENCE_FILE, MIN_WINDOW, NOTICES_BUTTON, NOTICES_FILE, dataLayout, describeAbout, describeFailure, galleryEnv, parseMode, parseSelfTest, photoInfoFallbackDir, restoreWindow, type WindowState } from './config';
-import { GALLERY_DESCRIPTION, galleryFolders, galleryPage, launchGallery, type LaunchData } from './gallery';
+import { GALLERY_DESCRIPTION, galleryDrag, galleryFolders, galleryPage, launchGallery, type LaunchData } from './gallery';
 import { isAllowedRequest, isAppNavigation, requestHost } from './netGuard';
 import product from './product.json';
 import type { HostMessage, HostReply } from './server-host';
@@ -389,6 +389,9 @@ function registerDesktopApi() {
     ipcMain.handle('desktop:open-gallery', (e) => {
       if (fromApp(e) && !selfTest) launchGallery(log);
     });
+  } else {
+    // Dragging photos out: the main process asks the gallery's own server which files it may drag.
+    galleryDrag({ fromApp, serverPort: () => serverPort, log });
   }
 }
 

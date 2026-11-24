@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { dragPaths } from '../../../core/galleryViewer';
 import { HoverPreview, formatSize } from '../../../web/components/HoverPreview';
+import { desktop } from '../../../web/desktop';
 import { gridWindow } from '../../../web/virtualGrid';
 import { thumbUrl, type GalleryItem } from '../api';
-import { useGallery, useVisibleItems } from '../store';
+import { selectVisible, useGallery, useVisibleItems } from '../store';
 import { Tile } from './Tile';
 
 const GAP = 6;
@@ -18,6 +20,7 @@ export function Grid({ onOpen }: { onOpen: (path: string) => void }) {
   const items = useVisibleItems();
   const thumbSize = useGallery((s) => s.thumbSize);
   const selected = useGallery((s) => s.selected);
+  const selection = useGallery((s) => s.selection);
   const ref = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ width: 0, height: 0 });
   const [scrollTop, setScrollTop] = useState(0);
@@ -52,11 +55,51 @@ export function Grid({ onOpen }: { onOpen: (path: string) => void }) {
     frame.current = requestAnimationFrame(() => setScrollTop(Math.max(0, (ref.current?.scrollTop ?? 0) - PAD)));
   };
 
-  const onSelect = useCallback((path: string) => useGallery.getState().select(path), []);
+  const onSelect = useCallback((path: string, mods: { ctrl: boolean; shift: boolean }) => useGallery.getState().clickSelect(path, mods), []);
   const onStar = useCallback((path: string, star: boolean) => void useGallery.getState().setStar(path, star), []);
+  // A selected tile drags every selected photo (in grid order); any other tile drags just itself.
+  const onDragOut = useCallback((path: string) => {
+    const s = useGallery.getState();
+    desktop?.startDrag?.(dragPaths(selectVisible(s).map((i) => i.path), s.selection, path));
+  }, []);
+
+  // Enter or Space opens the selected photo in the viewer (not while typing, or while the viewer is open).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.key !== 'Enter' && e.key !== ' ') || e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey || e.repeat) return;
+      const s = useGallery.getState();
+      if (s.viewing !== null || s.tidyOpen || !s.selected) return;
+      if ((e.target as HTMLElement | null)?.closest?.('input, textarea, select, button, a, [contenteditable="true"], [role="dialog"]')) return;
+      if (!selectVisible(s).some((i) => i.path === s.selected)) return;
+      e.preventDefault();
+      onOpen(s.selected);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onOpen]);
 
   const w = gridWindow({ count: items.length, width: box.width, tile: thumbSize, gap: GAP, scrollTop, viewport: box.height });
   const stride = w.rowHeight + GAP;
+
+  // Closing the viewer selects the last photo it showed: scroll the grid so that photo is in view.
+  const viewing = useGallery((s) => s.viewing);
+  const wasViewing = useRef(viewing);
+  useLayoutEffect(() => {
+    const was = wasViewing.current;
+    wasViewing.current = viewing;
+    const el = ref.current;
+    if (was === null || viewing !== null || !el) return;
+    const i = items.findIndex((item) => item.path === useGallery.getState().selected);
+    if (i < 0) return;
+    const top = PAD + Math.floor(i / w.cols) * stride;
+    const bottom = top + w.rowHeight + PAD;
+    if (top - PAD < el.scrollTop) el.scrollTop = top - PAD;
+    else if (bottom > el.scrollTop + el.clientHeight) el.scrollTop = bottom - el.clientHeight;
+    else return;
+    setScrollTop(Math.max(0, el.scrollTop - PAD));
+  }, [viewing]);
+
+  const picked = useMemo(() => new Set(selection), [selection]);
   const tiles = [];
   for (let i = w.firstIndex; i <= w.lastIndex; i++) {
     const item = items[i];
@@ -68,9 +111,11 @@ export function Grid({ onOpen }: { onOpen: (path: string) => void }) {
         y={Math.floor(i / w.cols) * stride}
         size={w.rowHeight}
         selected={item.path === selected}
+        picked={picked.has(item.path)}
         onSelect={onSelect}
         onStar={onStar}
         onOpen={onOpen}
+        onDragOut={onDragOut}
         onHoverStart={hover.start}
         onHoverEnd={hover.hide}
       />,

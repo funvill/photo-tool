@@ -10,15 +10,27 @@ import { PeopleInput } from './PeopleInput';
 /** The country list is the same for every photo: fetched once. */
 let allPlaces: Promise<{ id: string; name: string }[]> | null = null;
 
-/** A draft of a text field that starts again from `source` whenever the saved value changes. */
-function useDraft(source: string): [string, (v: string) => void] {
-  const [draft, setDraft] = useState(source);
+interface Draft {
+  value: string;
+  set(v: string): void;
+  /** The value last sent to be saved and not confirmed yet, so it is not sent twice. */
+  sent: { current: string | null };
+}
+
+/**
+ * A draft of a text field that follows the saved value `source` while it holds nothing unsaved: the
+ * reply to a save, or another program's change, never overwrites what is still being typed.
+ */
+function useDraft(source: string): Draft {
+  const [value, set] = useState(source);
   const [seen, setSeen] = useState(source);
+  const sent = useRef<string | null>(null);
   if (seen !== source) {
     setSeen(source);
-    setDraft(source);
+    if (value === seen || value === sent.current) set(source);
+    if (source === sent.current) sent.current = null;
   }
-  return [draft, setDraft];
+  return { value, set, sent };
 }
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
@@ -106,11 +118,16 @@ function DetailsFor({ item }: { item: GalleryItem }) {
     if (JSON.stringify(clean) !== JSON.stringify(savedPeople)) void save('people', { people: clean.length ? clean : null });
   };
 
-  const [description, setDescription] = useDraft(typeof info.description === 'string' ? info.description : '');
-  const [notes, setNotes] = useDraft(typeof info.notes === 'string' ? info.notes : '');
-  const saveText = (field: 'description' | 'notes', value: string) => {
+  const description = useDraft(typeof info.description === 'string' ? info.description : '');
+  const notes = useDraft(typeof info.notes === 'string' ? info.notes : '');
+  const saveText = (field: 'description' | 'notes', draft: Draft) => {
+    const value = draft.value;
     const current = typeof info[field] === 'string' ? (info[field] as string) : '';
-    if (value !== current) void save(field, { [field]: value.trim() === '' ? null : value });
+    if (value === current || value === draft.sent.current) return;
+    draft.sent.current = value;
+    void save(field, { [field]: value.trim() === '' ? null : value }).then((ok) => {
+      if (!ok && draft.sent.current === value) draft.sent.current = null;
+    });
   };
 
   // An uncontrolled input: a half-typed date reads as '' and a controlled input would wipe it.
@@ -136,8 +153,24 @@ function DetailsFor({ item }: { item: GalleryItem }) {
       return;
     }
     setDateError('');
+    dateSent.current = iso;
     void save('date', { date: iso });
   };
+  const dateSent = useRef<string | null>(null);
+  // Kept after the input goes, so a date being typed can still be read when the panel closes.
+  const dateInput = useRef<HTMLInputElement | null>(null);
+
+  // Another photo selected (Shift-click, closing the viewer) or the panel closed does not always blur
+  // the field being typed in first: whatever a field holds unsaved is saved as the panel goes.
+  const flush = useRef<() => void>(() => undefined);
+  flush.current = () => {
+    saveText('description', description);
+    saveText('notes', notes);
+    const el = dateInput.current;
+    const iso = el && el.value !== shownDate && el.value !== '' ? fromDateTimeLocal(el.value) : null;
+    if (iso && iso !== info.date && iso !== dateSent.current) void save('date', { date: iso });
+  };
+  useEffect(() => () => flush.current(), []);
 
   const locationFields = {
     lat: item.effectiveLat === null ? '' : String(item.effectiveLat),
@@ -177,6 +210,9 @@ function DetailsFor({ item }: { item: GalleryItem }) {
         <Field label="Date and time" saved={flashed === 'date'}>
           <input
             key={shownDate}
+            ref={(el) => {
+              if (el) dateInput.current = el;
+            }}
             type="datetime-local"
             step={1}
             defaultValue={shownDate}
@@ -199,16 +235,16 @@ function DetailsFor({ item }: { item: GalleryItem }) {
         <Field label="Description" saved={flashed === 'description'}>
           <input
             type="text"
-            value={description}
+            value={description.value}
             aria-label="Description"
-            onChange={(e) => setDescription(e.target.value)}
+            onChange={(e) => description.set(e.target.value)}
             onBlur={() => saveText('description', description)}
             onKeyDown={(e) => e.key === 'Enter' && e.currentTarget.blur()}
           />
         </Field>
 
         <Field label="Notes" saved={flashed === 'notes'}>
-          <textarea rows={4} value={notes} aria-label="Notes" onChange={(e) => setNotes(e.target.value)} onBlur={() => saveText('notes', notes)} />
+          <textarea rows={4} value={notes.value} aria-label="Notes" onChange={(e) => notes.set(e.target.value)} onBlur={() => saveText('notes', notes)} />
         </Field>
       </div>
     </aside>

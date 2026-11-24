@@ -35,9 +35,11 @@
 /* The grid: tiles are placed absolutely by Grid.tsx; only the rows on screen exist. */
 .gallery-grid { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; background: var(--stage); }
 .gallery-grid-inner { position: relative; }
-.gallery-tile { position: absolute; left: 0; top: 0; border-radius: 6px; overflow: hidden; background: var(--panel-2); cursor: pointer; outline: 1px solid var(--line-soft); contain: strict; }
+.gallery-tile { position: absolute; left: 0; top: 0; border-radius: 6px; overflow: hidden; background: var(--panel-2); cursor: pointer; outline: 1px solid var(--line-soft); contain: strict; user-select: none; }
 .gallery-tile img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
-.gallery-tile.selected { outline: 2px solid var(--select); outline-offset: -2px; }
+/* Picked: one of the selected photos (what a drag takes). Selected: the one the details panel shows. */
+.gallery-tile.picked { outline: 2px solid var(--select); outline-offset: -2px; }
+.gallery-tile.selected { outline: 3px solid var(--select); outline-offset: -3px; }
 .gallery-star-badge { position: absolute; left: 5px; top: 5px; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: rgba(0, 0, 0, 0.6); color: var(--accent); }
 .gallery-star-badge .icon path { fill: currentColor; }
 .gallery-tile-actions { position: absolute; right: 4px; bottom: 4px; display: flex; gap: 2px; opacity: 0; transition: opacity 0.12s; }
@@ -67,6 +69,30 @@
 .gallery-chip { display: inline-flex; align-items: center; gap: 2px; padding: 1px 2px 1px 9px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; }
 .gallery-chip .icon-btn { width: 18px; height: 18px; }
 .gallery-edit textarea { resize: vertical; }
+
+/* The full-screen viewer: over the whole window (below the toasts, so a failed star still shows). */
+.gallery-viewer { position: fixed; inset: 0; z-index: 55; background: #000; color: #fff; display: grid; place-items: center; overflow: hidden; }
+.gallery-viewer-img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.gallery-viewer-bar { position: absolute; left: 0; right: 0; top: 0; display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: linear-gradient(rgba(0, 0, 0, 0.7), transparent); }
+.gallery-viewer-bar strong { min-width: 0; }
+.gallery-viewer-starred { display: inline-grid; color: var(--accent); }
+.gallery-viewer-starred .icon path { fill: currentColor; }
+.gallery-viewer-count { color: rgba(255, 255, 255, 0.75); white-space: nowrap; }
+.gallery-viewer-keys { margin-left: auto; color: rgba(255, 255, 255, 0.6); white-space: nowrap; }
+.gallery-viewer-bar .icon-btn { color: #fff; }
+.gallery-viewer-details { position: absolute; right: 16px; bottom: 16px; width: 320px; max-height: calc(100% - 80px); overflow-y: auto; padding: 14px 16px; border-radius: 10px; background: rgba(20, 20, 22, 0.88); border: 1px solid rgba(255, 255, 255, 0.15); }
+.gallery-viewer-details dl { margin: 10px 0 0; display: grid; grid-template-columns: 84px 1fr; gap: 6px 10px; }
+.gallery-viewer-details dt { color: rgba(255, 255, 255, 0.6); }
+.gallery-viewer-details dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.gallery-viewer-name { overflow-wrap: anywhere; }
+.gallery-viewer-mark { position: absolute; left: 50%; top: 50%; pointer-events: none; color: var(--accent); filter: drop-shadow(0 4px 24px rgba(0, 0, 0, 0.6)); animation: gallery-mark 0.8s ease-out forwards; }
+.gallery-viewer-mark.on .icon path { fill: currentColor; }
+.gallery-viewer-mark.off { color: #fff; }
+@keyframes gallery-mark {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.7); }
+  20% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -50%) scale(1.08); }
+}
 
 /* Tidy photo info */
 .gallery-orphans { max-height: 50vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }

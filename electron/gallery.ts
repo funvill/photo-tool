@@ -1,10 +1,12 @@
 // The gallery program's part of the main process (`--gallery [folder]`): its page, its File menu,
 // handing it folders to open, and starting it from the editor. main.ts runs everything else
 // (the server, hardening, the window) the same way for both programs.
-import { app, dialog, ipcMain, type BrowserWindow, type IpcMainEvent, type MenuItemConstructorOptions } from 'electron';
+import { app, dialog, ipcMain, nativeImage, type BrowserWindow, type IpcMainEvent, type MenuItemConstructorOptions, type NativeImage } from 'electron';
 import { spawn } from 'node:child_process';
+import { statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseMode } from './config';
+import { dragFiles, MAX_DRAG_FILES, type DragCheck } from './drag';
 
 export const GALLERY_DESCRIPTION = 'Look through a folder of photos, star the best ones and drag them into other programs. Works offline.';
 
@@ -77,6 +79,72 @@ export function galleryFolders(o: { window: () => BrowserWindow | null; fromApp:
       ];
     },
   };
+}
+
+/** The drag icon's longest side, in px (the small thumbnail is 400 px). */
+const DRAG_ICON_PX = 128;
+const DRAG_CHECK_TIMEOUT_MS = 3000;
+
+const isFile = (p: string) => {
+  try {
+    return statSync(p).isFile();
+  } catch {
+    return false;
+  }
+};
+
+/** The first photo's small thumbnail, or (when it has none) a plain grey square: a drag needs an icon. */
+function dragIcon(thumb: string | null): NativeImage {
+  const image = thumb ? nativeImage.createFromPath(thumb) : nativeImage.createEmpty();
+  if (!image.isEmpty()) {
+    const { width, height } = image.getSize();
+    return width >= height ? image.resize({ width: Math.min(width, DRAG_ICON_PX) }) : image.resize({ height: Math.min(height, DRAG_ICON_PX) });
+  }
+  const side = 48;
+  return nativeImage.createFromBitmap(Buffer.alloc(side * side * 4, 0x88), { width: side, height: side });
+}
+
+/** Which of `paths` the gallery's own server (on 127.0.0.1) has catalogued, and the first one's thumbnail. */
+async function dragCheck(port: number, paths: string[]): Promise<DragCheck> {
+  const res = await fetch(`http://127.0.0.1:${port}/api/gallery/drag-check`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ paths }),
+    signal: AbortSignal.timeout(DRAG_CHECK_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`drag-check answered ${res.status}`);
+  const body = (await res.json()) as Partial<DragCheck>;
+  return {
+    paths: Array.isArray(body.paths) ? body.paths.filter((p): p is string => typeof p === 'string') : [],
+    icon: typeof body.icon === 'string' ? body.icon : null,
+  };
+}
+
+/**
+ * Dragging photos out of the gallery window ('gallery:start-drag', sent by the page on a tile's
+ * dragstart): the original files, only those the gallery's server has catalogued and that are still
+ * on disk, at most MAX_DRAG_FILES. Nothing happens when none is left.
+ */
+export function galleryDrag(o: { fromApp: (e: IpcMainEvent) => boolean; serverPort: () => number; log: (...a: unknown[]) => void }) {
+  ipcMain.on('gallery:start-drag', (e, requested: unknown) => {
+    if (!o.fromApp(e) || !Array.isArray(requested)) return;
+    const paths = requested.filter((p): p is string => typeof p === 'string' && p !== '').slice(0, MAX_DRAG_FILES);
+    if (!paths.length) return;
+    void (async () => {
+      let check: DragCheck;
+      try {
+        check = await dragCheck(o.serverPort(), paths);
+      } catch (err) {
+        o.log('drag: could not check the files with the server', String(err));
+        return;
+      }
+      const catalogued = new Set(check.paths);
+      const files = dragFiles(paths, (p) => catalogued.has(p), isFile);
+      if (!files.length || e.sender.isDestroyed()) return;
+      o.log('drag', { files: files.length });
+      e.sender.startDrag({ file: files[0], files, icon: dragIcon(check.icon) });
+    })();
+  });
 }
 
 /**

@@ -250,6 +250,63 @@ describe('gallery store', () => {
     expect(useGallery.getState().items[0].info.description).toBe('Beach');
   });
 
+  it("sends a photo's saves one after another and applies only the last reply, so an older reply never undoes a newer save", async () => {
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: [item({ info: { description: 'old' } })] });
+    const replies: ((description: string) => void)[] = [];
+    routes['PATCH /api/gallery/info'] = (body) =>
+      new Promise((done) => replies.push(() => done({ json: item({ info: { description: (body as { patch: { description: string } }).patch.description } }) })));
+
+    const first = useGallery.getState().saveInfo('D:\\Trip\\a.jpg', { description: 'a' });
+    const second = useGallery.getState().saveInfo('D:\\Trip\\a.jpg', { description: 'ab' });
+    await vi.waitFor(() => expect(count('PATCH', '/api/gallery/info')).toBe(1));
+    // The second save waits for the first: the server writes them in the order they were made.
+    await new Promise((r) => setTimeout(r, 20));
+    expect(count('PATCH', '/api/gallery/info')).toBe(1);
+
+    replies[0]('a');
+    expect(await first).toBe(true);
+    // The newer save is still on its way: the photo (and a field showing it) is not reset to 'a'.
+    expect(useGallery.getState().items[0].info.description).toBe('old');
+    await vi.waitFor(() => expect(count('PATCH', '/api/gallery/info')).toBe(2));
+
+    replies[1]('ab');
+    expect(await second).toBe(true);
+    expect(useGallery.getState().items[0].info.description).toBe('ab');
+  });
+
+  it('applies the last good reply when a later save of the same photo fails', async () => {
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: [item()] });
+    let n = 0;
+    routes['PATCH /api/gallery/info'] = () => (++n === 1 ? { json: item({ info: { star: true } }) } : { status: 409, json: { error: 'busy' } });
+
+    const [a, b] = await Promise.all([useGallery.getState().setStar('D:\\Trip\\a.jpg', true), useGallery.getState().saveInfo('D:\\Trip\\a.jpg', { notes: 'x' })]);
+
+    expect([a, b]).toEqual([true, false]);
+    expect(useGallery.getState().items[0].info).toEqual({ star: true });
+  });
+
+  it('builds the selection from clicks, and a filter change drops the photos it hides', () => {
+    const items = [item({ path: 'a', fileName: 'a.jpg', info: { star: true } }), item({ path: 'b', fileName: 'b.jpg' }), item({ path: 'c', fileName: 'c.jpg', info: { star: true } })];
+    useGallery.setState({ items, sort: 'name', filter: {} });
+    const g = () => useGallery.getState();
+    g().clickSelect('a', {});
+    g().clickSelect('c', { shift: true });
+    expect(g().selection).toEqual(['a', 'b', 'c']);
+    expect(g().selected).toBe('c');
+    g().setFilter({ starred: 'yes' });
+    expect(g().selection).toEqual(['a', 'c']);
+    g().clearFilter();
+    expect(g().selection).toEqual(['a', 'c']);
+  });
+
+  it('closing the viewer selects the last photo viewed', () => {
+    useGallery.setState({ items: [item({ path: 'a' }), item({ path: 'b' })], selected: 'a', selection: ['a', 'b'] });
+    useGallery.getState().openViewer('a');
+    expect(useGallery.getState().viewing).toBe('a');
+    useGallery.getState().closeViewer('b');
+    expect(useGallery.getState()).toMatchObject({ viewing: null, selected: 'b', selection: ['b'] });
+  });
+
   it('keeps the thumbnail size within 96–320 px', () => {
     useGallery.getState().setThumbSize(20);
     expect(useGallery.getState().thumbSize).toBe(96);

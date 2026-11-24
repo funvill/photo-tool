@@ -39,6 +39,8 @@ export interface GalleryInfoReply extends GalleryItem {
 
 /** Scan results kept in memory per server; asking for an older one is a 404. */
 const MAX_JOBS = 4;
+/** The most paths one drag-check looks at (a drag takes at most 500 files, see electron/drag.ts). */
+const DRAG_MAX = 500;
 
 class HttpError extends Error {
   constructor(readonly status: number, message: string) {
@@ -160,6 +162,17 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     // The key changes whenever the file does, so a thumbnail never goes stale.
     res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
     res.type('image/jpeg').sendFile(file);
+  }));
+
+  // Asked by the desktop app's main process before it drags files out of the window: which of these
+  // paths are photos this gallery has catalogued (in the order asked; a HEIC is its own .heic path),
+  // and the first one's small thumbnail for the drag icon. POST, because a drag may carry 500 paths.
+  app.post('/api/gallery/drag-check', wrap((req, res) => {
+    const paths: unknown = req.body?.paths;
+    if (!Array.isArray(paths) || !paths.every((p) => typeof p === 'string')) throw new HttpError(400, 'Expected { paths: string[] }');
+    const photos = (paths as string[]).slice(0, DRAG_MAX).map((p) => catalog.get(p)).filter((p): p is GalleryPhoto => !!p);
+    const icon = photos.length ? catalog.thumbPath(photos[0].key, 's') : null;
+    res.json({ paths: photos.map((p) => p.path), icon: icon && existsSync(icon) ? icon : null });
   }));
 
   // With `job`, the reply also has that folder's stamp just before and after this write (`stamp`),

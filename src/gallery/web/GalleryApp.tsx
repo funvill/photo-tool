@@ -7,10 +7,11 @@ import { Grid } from './components/Grid';
 import { Progress } from './components/Progress';
 import { TidyDialog } from './components/TidyDialog';
 import { Toasts } from './components/Toasts';
+import { Viewer } from './components/Viewer';
 import { connectDesktop, useGallery } from './store';
 
-/** Double-click on a photo. The viewer arrives with Task 7; until then this does nothing. */
-const openViewer = (_path: string) => undefined;
+/** Double-click on a photo, or Enter or Space on the selected one. */
+const openViewer = (path: string) => useGallery.getState().openViewer(path);
 
 // The gallery window: the start screen (recent folders) until a folder is open, then its photos.
 // A folder can also arrive from outside the page: `--gallery <folder>`, a second launch, File > Open folder.
@@ -40,6 +41,7 @@ export function GalleryApp() {
           <Details />
         </div>
       )}
+      {root && !empty && <Viewer />}
       {root && tidyOpen && <TidyDialog />}
       <Toasts />
     </div>

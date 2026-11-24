@@ -8,11 +8,16 @@ export interface TileProps {
   x: number;
   y: number;
   size: number;
+  /** The photo the details panel shows. */
   selected: boolean;
-  onSelect(path: string): void;
+  /** One of the selected photos (Ctrl/Shift-click). */
+  picked: boolean;
+  onSelect(path: string, mods: { ctrl: boolean; shift: boolean }): void;
   onStar(path: string, star: boolean): void;
   /** Double-click: open the photo in the viewer. */
   onOpen(path: string): void;
+  /** The tile is being dragged: the desktop app drags the photo files out instead. */
+  onDragOut(path: string): void;
   onHoverStart(path: string, el: HTMLElement): void;
   onHoverEnd(): void;
 }
@@ -20,16 +25,23 @@ export interface TileProps {
 const onActions = (e: SyntheticEvent) => !!(e.target as HTMLElement).closest('.gallery-tile-actions');
 
 /** One photo in the grid: its thumbnail, a star badge when starred, and a star button on hover. */
-export const Tile = memo(function Tile({ item, x, y, size, selected, onSelect, onStar, onOpen, onHoverStart, onHoverEnd }: TileProps) {
+export const Tile = memo(function Tile({ item, x, y, size, selected, picked, onSelect, onStar, onOpen, onDragOut, onHoverStart, onHoverEnd }: TileProps) {
   const starred = item.info.star === true;
   return (
     <div
-      className={`gallery-tile ${selected ? 'selected' : ''} ${starred ? 'starred' : ''}`}
+      className={`gallery-tile ${selected ? 'selected' : ''} ${picked ? 'picked' : ''} ${starred ? 'starred' : ''}`}
       style={{ transform: `translate(${x}px, ${y}px)`, width: size, height: size }}
       title={item.relDir ? `${item.relDir}/${item.fileName}` : item.fileName}
       data-path={item.path}
-      onClick={(e) => !onActions(e) && onSelect(item.path)}
+      draggable
+      onClick={(e) => !onActions(e) && onSelect(item.path, { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey })}
       onDoubleClick={(e) => !onActions(e) && onOpen(item.path)}
+      onDragStart={(e) => {
+        // The page's own drag would carry a picture of the tile; the desktop app drags the files.
+        e.preventDefault();
+        onHoverEnd();
+        onDragOut(item.path);
+      }}
       onPointerEnter={(e) => e.pointerType === 'mouse' && onHoverStart(item.path, e.currentTarget)}
       onPointerLeave={onHoverEnd}
     >
