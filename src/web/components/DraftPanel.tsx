@@ -59,7 +59,8 @@ function runUpdate(assets: PhotoAsset[], saved: GenerationSettings) {
     report = res.report;
     return res.doc;
   });
-  if (ok && report) useEditor.setState({ updateReport: report, draftReport: null, draftNotes: { fellBack: starredPool(assets).fellBack, addedPages: 0 } });
+  // An update never falls back to every photo; its own notes (shown in the summary) say when nothing is starred.
+  if (ok && report) useEditor.setState({ updateReport: report, draftReport: null, draftNotes: { fellBack: false, addedPages: 0 } });
 }
 
 /**

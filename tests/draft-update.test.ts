@@ -389,15 +389,68 @@ describe('updateDraft', () => {
     expect(a.report).toEqual(b.report);
   });
 
-  it('falls back to every photo when nothing is starred, and says so', () => {
+  it('leaves the book as it is when nothing is starred, and says so', () => {
     const { starred, doc } = book();
     const none = starred.map((a) => ({ ...a, favorite: false }));
     const { doc: next, report } = updateDraft(doc, none, SETTINGS);
     expect(noGen(next)).toEqual(noGen(doc));
     expect(report).toEqual({
       added: [], removed: [], replaced: [], relaidPages: [], addedSpreads: [], removedSpreads: 0, emptiedFrames: [],
-      pages: doc.spreads.length * 2 - 2, notes: ['No photos are starred, so every photo was used.'],
+      pages: doc.spreads.length * 2 - 2, notes: ['Nothing is starred yet, so the book was left as it is.'],
     });
+  });
+
+  it('with nothing starred, unplaced library photos are not added', () => {
+    const { starred, doc } = book();
+    const loose = Array.from({ length: 6 }, (_, k) => fakeAsset({ day: 2, minute: 45 + k * 30, favorite: false, ...LAND }));
+    const none = [...starred.map((a) => ({ ...a, favorite: false })), ...loose];
+    const { doc: next, report } = updateDraft(doc, none, SETTINGS);
+    expect(noGen(next)).toEqual(noGen(doc));
+    expect(report.added).toEqual([]);
+    expect(report.removed).toEqual([]);
+    expect(report.notes).toEqual(['Nothing is starred yet, so the book was left as it is.']);
+  });
+
+  it('never removes a photo whose file is missing', () => {
+    const { starred, doc } = book();
+    const { s } = pagePick(doc, 2);
+    const [gone, unstarred] = images(s).map((e) => e.assetId!);
+    // The file of one is gone (its star still reads); another is unstarred as usual.
+    const assets = unstar(starred, [unstarred]).map((a) => (a.id === gone ? { ...a, missing: true } : a));
+    const { doc: next, report } = updateDraft(doc, assets, SETTINGS);
+    expect(placedIds(next)).toContain(gone);
+    expect(placedIds(next)).not.toContain(unstarred);
+    expect(report.removed).toEqual([unstarred]);
+  });
+
+  it('an offline folder (every photo missing, stars unreadable) leaves the book unchanged', () => {
+    const { starred, doc } = book();
+    const offline = starred.map((a) => ({ ...a, favorite: false, missing: true, infoUnavailable: true }));
+    const { doc: next, report } = updateDraft(doc, offline, SETTINGS);
+    expect(noGen(next)).toEqual(noGen(doc));
+    expect(new Set(placedIds(next)).size).toBe(40);
+    expect(report.removed).toEqual([]);
+    expect(report.notes).toContain("40 photos were left alone because their folder or photoinfo.json couldn't be read.");
+  });
+
+  it('one of two folders unreadable: nothing is removed from it, the other folder updates as usual', () => {
+    const { starred, doc } = book();
+    // Days 1–2 live in a folder whose photoinfo.json can't be read; days 3–4 are readable.
+    const unreadable = new Set(starred.slice(0, 20).map((a) => a.id));
+    const dropped = starred[25].id;
+    const fresh = fakeAsset({ day: 1, minute: 50, favorite: false, infoUnavailable: true, ...LAND });
+    const assets = [
+      ...starred.map((a) => (unreadable.has(a.id) ? { ...a, favorite: false, infoUnavailable: true } : a.id === dropped ? { ...a, favorite: false } : a)),
+      fresh,
+    ];
+    const { doc: next, report } = updateDraft(doc, assets, SETTINGS);
+    const ids = placedIds(next);
+    for (const id of unreadable) expect(ids).toContain(id);
+    expect(ids).not.toContain(dropped);
+    expect(ids).not.toContain(fresh.id);
+    expect(report.removed).toEqual([dropped]);
+    expect(report.added).toEqual([]);
+    expect(report.notes).toContain("21 photos were left alone because their folder or photoinfo.json couldn't be read.");
   });
 });
 

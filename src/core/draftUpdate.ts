@@ -249,10 +249,32 @@ function hasUndraftedContent(doc: BookDocument, s: Spread): boolean {
   return (['left', 'right'] as const).some((k) => !s.layout?.[k] && pageElements(doc, s, k).length > 0);
 }
 
+export const NOTHING_STARRED_NOTE = 'Nothing is starred yet, so the book was left as it is.';
+
+/** Note for photos whose star could not be read (their folder or its photoinfo.json is unreadable). */
+export function unreadableNote(count: number): string {
+  return `${count} photo${count === 1 ? ' was' : 's were'} left alone because their folder or photoinfo.json couldn't be read.`;
+}
+
 export function updateDraft(doc: BookDocument, assets: PhotoAsset[], settings: GenerationSettings): { doc: BookDocument; report: UpdateReport } {
   const ctx = makeCtx(doc, assets, settings);
   const { cap } = ctx;
-  const { photos: wantedPhotos, fellBack } = starredPool(assets);
+  // Photos whose star is unknown (folder or photoinfo.json unreadable) are neither added nor removed,
+  // and a photo whose file is missing is never removed: an offline drive must not empty the book.
+  const unknown = new Set(assets.filter((a) => a.infoUnavailable).map((a) => a.id));
+  const keep = new Set([...unknown, ...assets.filter((a) => a.missing).map((a) => a.id)]);
+  const notes = unknown.size ? [unreadableNote(unknown.size)] : [];
+  const wantedPhotos = curatePool(assets).pool.filter((a) => a.favorite && !unknown.has(a.id));
+  if (!wantedPhotos.length) {
+    // Nothing starred: unlike a first draft, an update does not fall back to every photo.
+    return {
+      doc,
+      report: {
+        added: [], removed: [], replaced: [], relaidPages: [], addedSpreads: [], removedSpreads: 0, emptiedFrames: [],
+        pages: doc.spreads.length * 2 - 2, notes: [NOTHING_STARRED_NOTE, ...notes],
+      },
+    };
+  }
   const wanted = new Set(wantedPhotos.map((a) => a.id));
   const placed = new Set(doc.spreads.flatMap((s) => imagesOf(s).map((e) => e.assetId!)));
   const removedIds: string[] = [];
@@ -275,7 +297,7 @@ export function updateDraft(doc: BookDocument, assets: PhotoAsset[], settings: G
   for (const w of works) {
     for (const el of imagesOf(w.spread)) {
       const id = el.assetId!;
-      if (wanted.has(id) || !w.assetIds.has(id)) continue;
+      if (wanted.has(id) || keep.has(id) || !w.assetIds.has(id)) continue;
       if (!removedIds.includes(id)) removedIds.push(id);
       const side: Side = w.spread.layout?.spread ? 'spread' : el.xMm + el.widthMm / 2 < doc.settings.trimWidthMm ? 'left' : 'right';
       const page = w.pages.find((p) => p.side === side);
@@ -428,9 +450,8 @@ export function updateDraft(doc: BookDocument, assets: PhotoAsset[], settings: G
   const now = new Date().toISOString();
   const report: UpdateReport = {
     added: added.map((a) => a.id), removed: removedIds, replaced: [], relaidPages: [], addedSpreads: [], removedSpreads,
-    emptiedFrames: [], pages: kept.length * 2 - 2, notes: [],
+    emptiedFrames: [], pages: kept.length * 2 - 2, notes,
   };
-  if (fellBack) report.notes.push('No photos are starred, so every photo was used.');
   const grew = report.pages - (doc.spreads.length * 2 - 2);
   if (grew) report.notes.push(`${grew > 0 ? 'Added' : 'Removed'} ${Math.abs(grew)} pages, now ${report.pages}.`);
   const spreads = kept.map((w) => w.spread);
