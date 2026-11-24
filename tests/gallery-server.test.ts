@@ -231,6 +231,21 @@ describe('gallery server', () => {
     expect((await api('GET', `/api/gallery/orphans?job=${jobId}`)).body).toEqual([]);
   });
 
+  it('leaves a deleted photo out of GET items, and keeps its photoinfo.json entry', async () => {
+    await start();
+    const { jobId, byName } = await loaded();
+    const gone = byName('day1-02-street.jpg');
+    await api('PATCH', '/api/gallery/info', { path: gone.path, patch: { star: true } });
+    const before = readFileSync(infoFile(), 'utf8');
+    unlinkSync(gone.path);
+    const items = (await api<any[]>('GET', `/api/gallery/items?job=${jobId}`)).body;
+    expect(items).toHaveLength(COUNT - 1);
+    expect(items.some((i) => i.path === gone.path)).toBe(false);
+    // Nothing is written: the entry stays until "Tidy photo info" removes it.
+    expect(readFileSync(infoFile(), 'utf8')).toBe(before);
+    expect((await api('GET', `/api/gallery/orphans?job=${jobId}`)).body).toEqual([{ folder: photos, fileNames: ['day1-02-street.jpg'] }]);
+  });
+
   it('forget refuses a name whose file still exists, and writes nothing', async () => {
     await start();
     const { jobId, byName } = await loaded();

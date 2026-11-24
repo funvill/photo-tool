@@ -155,8 +155,10 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     res.json({ cancelled: job.cancelled });
   }));
 
+  // The page reloads every photo's info from here, so a photo deleted since the scan drops out of the
+  // grid. Its photoinfo.json entry is kept (nothing is written); "Tidy photo info" offers to remove it.
   app.get('/api/gallery/items', wrap((req, res) => {
-    res.json(itemsFor(requireJob(q(req, 'job')).photos));
+    res.json(itemsFor(requireJob(q(req, 'job')).photos.filter((p) => existsSync(p.path))));
   }));
 
   app.get('/api/gallery/thumb', wrap((req, res) => {
