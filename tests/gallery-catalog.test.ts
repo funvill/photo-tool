@@ -1,9 +1,12 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { readdir as fsReaddir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Catalog } from '../src/gallery/server/catalog';
 import { GalleryFolderError, Scanner } from '../src/gallery/server/scanner';
+import { listPhotos, type ReadDir } from '../src/gallery/server/walk';
+import { scanFolder } from '../src/server/importer';
 import { analyze, readMetadata } from '../src/server/media';
 
 const TRIP = join(process.cwd(), 'fixtures', 'generated', 'trip');
@@ -104,6 +107,45 @@ describe('gallery scan', () => {
     const inner = deep.photos.filter((p) => p.relDir === 'sub');
     expect(inner.map((p) => p.fileName)).toEqual(['inner.jpg']);
     expect(deep.photos).toHaveLength(22);
+  });
+
+  it('skips a subfolder it may not read, reports it, and still reads the rest', async () => {
+    mkdirSync(join(photos, 'System Volume Information'));
+    cpSync(join(TRIP, 'day1-01-arrival.jpg'), join(photos, 'System Volume Information', 'hidden.jpg'));
+    mkdirSync(join(photos, 'sub'));
+    cpSync(join(TRIP, 'day1-01-arrival.jpg'), join(photos, 'sub', 'inner.jpg'));
+    const denied = join(photos, 'System Volume Information');
+    const readdir: ReadDir = async (dir) => {
+      if (dir === denied) throw Object.assign(new Error(`EPERM: operation not permitted, scandir '${dir}'`), { code: 'EPERM' });
+      return fsReaddir(dir, { withFileTypes: true });
+    };
+    const scanner = new Scanner(catalog, dataDir, { readdir });
+    const job = await scanner.wait(scanner.open(photos, true).id);
+    expect(job.photos).toHaveLength(22);
+    expect(job.photos.some((p) => p.fileName === 'inner.jpg')).toBe(true);
+    expect(job.photos.some((p) => p.fileName === 'hidden.jpg')).toBe(false);
+    expect(job.errors).toEqual([{ path: denied, message: expect.stringContaining('EPERM') }]);
+  });
+
+  it('walks like the editor (supported files, no dotfiles, numeric order) and throws GalleryFolderError for an unreadable root', async () => {
+    mkdirSync(join(photos, '.hidden'));
+    cpSync(join(TRIP, 'day1-01-arrival.jpg'), join(photos, '.hidden', 'x.jpg'));
+    cpSync(join(TRIP, 'day1-01-arrival.jpg'), join(photos, 'img10.jpg'));
+    cpSync(join(TRIP, 'day1-01-arrival.jpg'), join(photos, 'img9.jpg'));
+    cpSync(join(TRIP, 'day1-01-arrival.jpg'), join(photos, '.dot.jpg'));
+    writeFileSync(join(photos, 'notes.txt'), 'x');
+    const listing = await listPhotos(photos, true);
+    expect(listing.errors).toEqual([]);
+    expect(listing.files).toEqual(await scanFolder(photos, true));
+    const names = listing.files.map((f) => basename(f));
+    expect(names.indexOf('img9.jpg')).toBeLessThan(names.indexOf('img10.jpg'));
+    expect(names).not.toContain('x.jpg');
+    expect(names).not.toContain('.dot.jpg');
+    expect(names).not.toContain('notes.txt');
+    const denied: ReadDir = async () => {
+      throw new Error('EPERM: operation not permitted');
+    };
+    await expect(listPhotos(photos, true, denied)).rejects.toThrow(GalleryFolderError);
   });
 
   it('lists recent folders newest first', () => {

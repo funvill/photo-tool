@@ -3,14 +3,14 @@ import { statSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { basename, dirname, extname, relative, resolve } from 'node:path';
 import type { PhotoAnalysis } from '../../core';
-import { scanFolder } from '../../server/importer';
 import { analyze as defaultAnalyze, fileStat, hashFile, orientedSize, readMetadata, THUMB_SIZES, workingFile, writeJpegThumb, type ThumbSize } from '../../server/media';
 import { photoKey, type Catalog, type GalleryPhoto } from './catalog';
+import { GalleryFolderError, listPhotos, type ReadDir } from './walk';
 
 // Background folder scan for the gallery: walks a folder, and for each photo either reuses the
 // catalog row (same path, size and mtime) or runs the editor's image pipeline once.
 
-export class GalleryFolderError extends Error {}
+export { GalleryFolderError };
 
 export interface ScanJob {
   id: string;
@@ -28,16 +28,20 @@ export interface ScanJob {
 interface ScannerOptions {
   concurrency?: number;
   analyze?: (workPath: string) => Promise<PhotoAnalysis>;
+  /** How folders are listed. A seam for tests (a subfolder that can't be read). */
+  readdir?: ReadDir;
 }
 
 export class Scanner {
   private jobs = new Map<string, ScanJob>();
   private concurrency: number;
   private analyze: (workPath: string) => Promise<PhotoAnalysis>;
+  private readdir?: ReadDir;
 
   constructor(private catalog: Catalog, private dataDir: string, opts: ScannerOptions = {}) {
     this.concurrency = Math.max(1, opts.concurrency ?? 4);
     this.analyze = opts.analyze ?? defaultAnalyze;
+    this.readdir = opts.readdir;
   }
 
   /** Starts a scan and returns at once; poll `get` for progress. */
@@ -77,7 +81,8 @@ export class Scanner {
 
   private async run(job: ScanJob) {
     try {
-      const files = await scanFolder(job.root, job.recursive);
+      const { files, errors } = await listPhotos(job.root, job.recursive, this.readdir);
+      job.errors.push(...errors);
       job.total = files.length;
       let next = 0;
       const worker = async () => {
