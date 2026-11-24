@@ -36,7 +36,7 @@ export class Scanner {
   private analyze: (workPath: string) => Promise<PhotoAnalysis>;
 
   constructor(private catalog: Catalog, private dataDir: string, opts: ScannerOptions = {}) {
-    this.concurrency = opts.concurrency ?? 4;
+    this.concurrency = Math.max(1, opts.concurrency ?? 4);
     this.analyze = opts.analyze ?? defaultAnalyze;
   }
 
@@ -59,6 +59,11 @@ export class Scanner {
 
   get(id: string): ScanJob | undefined {
     return this.jobs.get(id);
+  }
+
+  /** Drops a job's result from memory. A scan still running carries on; it just can't be polled any more. */
+  forget(id: string): void {
+    this.jobs.delete(id);
   }
 
   async wait(id: string): Promise<ScanJob> {
