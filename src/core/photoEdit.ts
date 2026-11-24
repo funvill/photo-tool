@@ -268,8 +268,11 @@ export function editCss(
   const outH = e.crop.h * fh;
   // Box pixels per frame pixel.
   const f = Math.min(boxW / outW, boxH / outH);
-  const width = picW * k * f;
-  const height = picH * k * f;
+  // The frame is cut from the turned picture at full size (no shrinking), so the picture is drawn at f only.
+  const width = picW * f;
+  const height = picH * f;
+  // Turning happens about the picture's centre, which is also the frame's centre, so the centre sits at
+  // the frame's middle minus the crop's offset into the frame.
   const tx = (fw / 2 - e.crop.x * fw) * f;
   const ty = (fh / 2 - e.crop.y * fh) * f;
   const deg = e.rotate + e.straighten;

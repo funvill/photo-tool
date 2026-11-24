@@ -213,4 +213,57 @@ describe('editCss', () => {
     expect(c.img.height).toBe(300);
     expect(c.img.transform).toBe('translate(0px, 150px) rotate(0deg) translate(-200px, -150px)');
   });
+
+  it('shows the same region as editPlan extracts, for a turned, straightened crop', () => {
+    const picW = 4000;
+    const picH = 3000;
+    const e: PhotoEdit = { rotate: 90, straighten: 10, crop: { x: 0.1, y: 0.2, w: 0.5, h: 0.4 } };
+    const plan = editPlan(picW, picH, e);
+    const css = editCss(e, picW, picH, 800, 800);
+    const f = css.box.w / plan.out.w; // box px per picture px
+
+    // Picture px of a point, going back from the box through the CSS transform.
+    const m = css.img.transform.match(/translate\(([-\d.]+)px, ([-\d.]+)px\) rotate\(([-\d.]+)deg\) translate\(([-\d.]+)px, ([-\d.]+)px\)/)!;
+    const [tx, ty, deg, cx, cy] = m.slice(1).map(Number);
+    const rad = (deg * Math.PI) / 180;
+    const fromBox = (bx: number, by: number) => {
+      const x = bx - tx;
+      const y = by - ty;
+      // Undo the turn, then the centring translate; divide by f for picture px.
+      const ux = x * Math.cos(rad) + y * Math.sin(rad) - cx;
+      const uy = -x * Math.sin(rad) + y * Math.cos(rad) - cy;
+      return [ux / f, uy / f];
+    };
+    // Picture px of a point of the frame, going back through editPlan's steps.
+    const fromFrame = (u: number, v: number) => {
+      const r = ((e.rotate + e.straighten) * Math.PI) / 180;
+      const x = u - plan.frame.w / 2;
+      const y = v - plan.frame.h / 2;
+      return [picW / 2 + x * Math.cos(r) + y * Math.sin(r), picH / 2 - x * Math.sin(r) + y * Math.cos(r)];
+    };
+
+    const { left, top, width, height } = plan.extract;
+    const pairs: [number[], number[]][] = [
+      [fromBox(0, 0), fromFrame(left, top)],
+      [fromBox(css.box.w, 0), fromFrame(left + width, top)],
+      [fromBox(0, css.box.h), fromFrame(left, top + height)],
+      [fromBox(css.box.w, css.box.h), fromFrame(left + width, top + height)],
+    ];
+    for (const [a, b] of pairs) {
+      expect(Math.abs(a[0] - b[0])).toBeLessThan(2);
+      expect(Math.abs(a[1] - b[1])).toBeLessThan(2);
+    }
+  });
+
+  it('draws a straightened picture at the box scale, not shrunk', () => {
+    const e: PhotoEdit = { rotate: 0, straighten: 10, crop: { x: 0, y: 0, w: 1, h: 1 } };
+    const s = straightenScale(400, 300, 10);
+    const c = editCss(e, 400, 300, 200, 150);
+    expect(c.box.w).toBeCloseTo(200, 3);
+    expect(c.box.h).toBeCloseTo(150, 3);
+    // Frame is 400 s wide, shown 200 wide, so the picture is drawn at 200 / s.
+    expect(c.img.width).toBeCloseTo(200 / s, 2);
+    expect(c.img.height).toBeCloseTo(150 / s, 2);
+    expect(c.img.transform).toContain('rotate(10deg)');
+  });
 });
