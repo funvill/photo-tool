@@ -1,4 +1,4 @@
-# Handoff: desktop app work, state at end of 2026-11-22
+# Handoff: desktop app work, state at end of 2026-11-22 (gallery added 2026-11-23)
 
 For whoever picks this up next, person or agent. Read this first, then [electron-plan.md](electron-plan.md) for the reasoning and [plan.md](plan.md) for the photo-book work this tool exists to serve.
 
@@ -32,6 +32,7 @@ Checked by the lead agent after all subagent work landed: `npm run typecheck` is
 | Stars and photoinfo.json | `src/photoinfo/`, `src/server/photoInfoIndex.ts`, `src/server/app.ts`, `src/web/store.ts` | Done on branch `editor-photoinfo`, not merged. A per-folder `photoinfo.json` (star, people, date, location, description, notes; unknown fields kept; read-only folders fall back to `<dataDir>/photoinfo/`). The server overlays it on the library and writes the star on PATCH; the editor polls `/photoinfo-stamp` every 3 s. The web (browser) version ignores it. Design: `docs/superpowers/specs/2026-11-23-gallery-and-photo-info-design.md`. |
 | Draft from stars, update in place | `src/core/draftUpdate.ts` (`updateDraft`, `relayPage`), `src/core/draftState.ts` (page fingerprints), `src/web/components/DraftPanel.tsx`, `UpdateSummary.tsx` | Done on the same branch. Auto draft panel: Generate, Update from stars, Rebuild all pages, Another variation; Re-lay this page; unstarred empty frames marked. Hand-edited pages are never re-laid. |
 | Drag in from Explorer | `POST /import-paths`, `src/web/` library and frames | Done on the same branch: drop onto a frame, empty space or the library; import ETA, resizable library, hover preview. Desktop and local app only. |
+| Photobook Gallery | `src/gallery/`, `src/core/gallery*.ts`, `electron/gallery.ts`, `electron/drag.ts`, `electron/installer.nsh`, `electron/linux/photobook-gallery.desktop` | **Built on branch `gallery`, not merged.** A second program in the same build (`--gallery`): open a folder, virtual grid, star, details, sorts and filters, full-screen viewer, drag files out. See "Photobook Gallery" below. |
 | End-to-end tests | `playwright.config.ts` | Now run on Windows. Both milestone tests pass. The 500-photo drag performance test failed (11.8 ms per step against a limit of 8) on a busy PC; not known to be a real regression. |
 | README and docs | `README.md`, `docs/WEB_VERSION.md` | Corrected; desktop section added. |
 | CI | `.github/workflows/test.yml` (matrix), `.github/workflows/desktop.yml` (installers and self-tests) | **Written, never run.** There is no GitHub copy of this fork. |
@@ -62,6 +63,23 @@ Earlier the same day, on an older build: every request in a net log went to `127
 - A full-size book in the desktop app. The largest run inside Electron is 100 photos (Linux); 403 photos was only run through the server before Electron existed.
 - A net log on the final Windows build. A DNS lookup the first audit missed was found later on Linux (see "Things that will bite"); the fix is in the final build but its effect on Windows is inferred, not measured.
 - macOS, after all these changes. The Mac paths were kept but not run.
+
+## Photobook Gallery
+
+Built 2026-11-23 on branch `gallery` (eight tasks, branched from `main` at `27b366c`). **Not merged and not pushed.** Plan: `docs/superpowers/plans/2026-11-23-gallery-program.md`; design: `docs/superpowers/specs/2026-11-23-gallery-and-photo-info-design.md`.
+
+- **One build, two programs.** `"Photobook Studio.exe" --gallery [folder]` starts the gallery with its own name, data folder (`%APPDATA%\Photobook Gallery\data`), Chromium profile, single-instance lock, local server and Windows taskbar id (`app.photobookstudio.gallery`). The editor's **File → Open Gallery** starts it.
+- **Stars go to `photoinfo.json`** through `src/photoinfo`, the same as the editor. Read-only folders use the editor's `<dataDir>/photoinfo`, so a star still reaches the editor.
+- **Installer.** The Windows installer adds "Photobook Gallery" shortcuts (Start menu and desktop) to the same exe with `--gallery` and removes them on uninstall (`electron/installer.nsh`). The `.deb` installs `/usr/share/applications/photobook-gallery.desktop` (mapped in through `deb.fpm` in `electron-builder.config.cjs`). The AppImage has no second launcher; run it with `--gallery`.
+- **Self-test.** `--self-test <photos> --self-test-out <folder> --gallery` opens a copy of the photos (`<out>/photos`), waits for the scan, stars one photo in the viewer with S, checks the star in the copy's `photoinfo.json`, checks the original folder was not touched, and fails on the same rules as the editor's (console errors, failed loads, cancelled or off-host requests, licence files, the server not stopping cleanly).
+
+**Checks only a person can do (none done yet):**
+
+1. **Real drag out** of the grid into Explorer and into the editor: one photo, many photos, a HEIC photo, and a quick flick (press and move at once).
+2. **Editor File → Open Gallery** starts the gallery, and a second click brings the open one forward.
+3. **The installer's two shortcuts:** "Photobook Studio" and "Photobook Gallery" on the Start menu and the desktop, each opening its own program with its own taskbar button; both gone after uninstall, and both programs' data left in place.
+4. **A folder of several thousand photos:** first scan time, scrolling, sorting by Most interesting and Main colour, and a second opening from the cache.
+5. **A read-only folder:** a star set in the gallery shows the read-only badge and reaches the editor (kept in the editor's `photoinfo/` folder).
 
 ## Linux
 

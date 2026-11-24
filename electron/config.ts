@@ -5,15 +5,17 @@ import { join, resolve } from 'node:path';
 // ---- command line
 
 export interface SelfTestArgs {
-  /** Folder of photos to import. */
+  /** Folder of photos to import (the editor) or to open (the gallery, which opens a copy of it). */
   photos: string;
   /** Where result.json, the screenshots, the browser profile and the test's own data folder go. */
   out: string;
+  /** Which program is tested: the editor, or with `--gallery` the gallery. */
+  mode: AppMode;
 }
 
 /**
  * The self-test runs only when asked for by flag, with both folders given:
- *   --self-test <photo folder> --self-test-out <folder>
+ *   --self-test <photo folder> --self-test-out <folder> [--gallery]
  */
 export function parseSelfTest(argv: readonly string[]): SelfTestArgs | null {
   const value = (flag: string) => {
@@ -23,7 +25,7 @@ export function parseSelfTest(argv: readonly string[]): SelfTestArgs | null {
   };
   const photos = value('--self-test');
   const out = value('--self-test-out');
-  return photos && out ? { photos: resolve(photos), out: resolve(out) } : null;
+  return photos && out ? { photos: resolve(photos), out: resolve(out), mode: parseMode(argv).mode } : null;
 }
 
 /** The same build runs two programs: the editor, and with `--gallery` the photo gallery. */
@@ -31,6 +33,12 @@ export type AppMode = 'editor' | 'gallery';
 
 /** The gallery's own name: its own data, Chromium profile and single-instance lock. */
 export const GALLERY_PRODUCT_NAME = 'Photobook Gallery';
+
+/**
+ * The gallery's Windows AppUserModelID, so the taskbar keeps its windows apart from the editor's.
+ * electron/installer.nsh gives the Gallery shortcuts the same one (tests/electron-shell.test.ts checks).
+ */
+export const GALLERY_APP_ID = 'app.photobookstudio.gallery';
 
 /** `--gallery [folder]` starts the gallery (opening that folder); anything else, the editor. */
 export function parseMode(argv: readonly string[]): { mode: AppMode; folder: string | null } {
@@ -125,19 +133,25 @@ export interface Failure {
   advice: string;
 }
 
-/** Put a start-up or run-time failure into words. `detail` is the technical text (kept for copying). */
-export function describeFailure(detail: string, ctx: { productName: string; dataDir: string; phase: 'start' | 'run' | 'page' }): Failure {
+/**
+ * Put a start-up or run-time failure into words. `detail` is the technical text (kept for copying).
+ * `mode` is the program that failed (the editor unless given): the gallery has no books to save.
+ */
+export function describeFailure(detail: string, ctx: { productName: string; dataDir: string; phase: 'start' | 'run' | 'page'; mode?: AppMode }): Failure {
   const name = ctx.productName;
+  const gallery = ctx.mode === 'gallery';
   if (ctx.phase === 'run') {
     return {
       title: `${name} stopped working`,
-      message: `The part of ${name} that saves your book stopped unexpectedly. Changes up to your last edit are saved.`,
+      message: gallery
+        ? `The part of ${name} that reads your photos stopped unexpectedly. Stars and notes up to your last change are saved.`
+        : `The part of ${name} that saves your book stopped unexpectedly. Changes up to your last edit are saved.`,
       advice: `Restart ${name}. If this keeps happening, send the details below to the person who gave you the app.`,
     };
   }
   if (ctx.phase === 'page') {
     return {
-      title: `${name} could not show the editor`,
+      title: `${name} could not show the ${gallery ? 'gallery' : 'editor'}`,
       message: `${name} started, but its window could not load.`,
       advice: `Restart ${name}. If this keeps happening, reinstall it.`,
     };
@@ -183,7 +197,7 @@ export interface About {
  * the licence, a later one the copyright holder); `repository` is where the project the app is
  * built from lives, as product.json has it ("github:owner/name").
  */
-export function describeAbout(o: { productName: string; version: string; description: string; dataDir: string; licence: string | null; repository?: string; hasNotices: boolean }): About {
+export function describeAbout(o: { productName: string; version: string; description: string; dataDir: string; licence: string | null; repository?: string; hasNotices: boolean; mode?: AppMode }): About {
   const lines = (o.licence ?? '').split(/\r?\n/).map((l) => l.trim());
   const licenceName = lines.find(Boolean)?.replace(/\blicense\b/i, 'licence');
   const copyright = lines.find((l) => /^copyright\b/i.test(l));
@@ -197,7 +211,7 @@ export function describeAbout(o: { productName: string; version: string; descrip
   return {
     title: `About ${o.productName}`,
     message: `${o.productName} ${o.version}`,
-    detail: [o.description, `Everything stays on this computer. ${o.productName} never uses the network.`, `Your books are kept in:\n${o.dataDir}`, credit.join('\n')].filter(Boolean).join('\n\n'),
+    detail: [o.description, `Everything stays on this computer. ${o.productName} never uses the network.`, o.mode === 'gallery' ? `Its thumbnails and recent folders are kept in:\n${o.dataDir}` : `Your books are kept in:\n${o.dataDir}`, credit.join('\n')].filter(Boolean).join('\n\n'),
     buttons: o.hasNotices ? ['OK', NOTICES_BUTTON] : ['OK'],
   };
 }

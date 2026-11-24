@@ -1,5 +1,6 @@
 // Posters made in the desktop editor open here as designed: hand cut-outs, inverted photos, and a
 // background photo moved into place with its own adjustments, and the demo's tea poster recipe.
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { backgroundFrame, gradeColor, gradeFromPreset, isNeutralGrade, maskPath } from '../src/core';
 import recipe from '../src/web/demo/tea-poster.json';
@@ -29,5 +30,28 @@ describe('desktop features, drawn on the web', () => {
     const files = new Set(r.photos);
     const refs = [r.sheet.backgroundImage.assetId, ...r.sheet.elements.filter((e) => e.type === 'image').map((e) => e.assetId!)];
     expect(refs.every((ref) => ref.startsWith('file:') && files.has(ref.slice(5)))).toBe(true);
+  });
+});
+
+describe('README: Photobook Gallery', () => {
+  const readme = readFileSync('README.md', 'utf8');
+  const section = /^## Photobook Gallery$([\s\S]*?)^## /m.exec(readme)?.[1] ?? '';
+
+  it('has a section of its own', () => {
+    expect(section.length).toBeGreaterThan(500);
+  });
+
+  it('lists the viewer keys', () => {
+    for (const key of ['**Left**', '**Right**', '**S**', '**I**', '**Esc**']) expect(section, key).toContain(key);
+  });
+
+  it('says where the info is kept, including for read-only folders', () => {
+    expect(section).toContain('photoinfo.json');
+    expect(section).toMatch(/read-only/i);
+    expect(section).toContain('photoinfo/');
+  });
+
+  it('covers opening folders, filters, sorts and dragging into the editor', () => {
+    for (const words of [/--gallery/, /Open folder/, /Include subfolders/, /filter/i, /sort/i, /drag/i, /Explorer/, /Open Gallery/]) expect(section).toMatch(words);
   });
 });

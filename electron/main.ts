@@ -10,7 +10,7 @@ import { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, screen, session, 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
-import { GALLERY_PRODUCT_NAME, LICENCE_FILE, MIN_WINDOW, NOTICES_BUTTON, NOTICES_FILE, dataLayout, describeAbout, describeFailure, galleryEnv, parseMode, parseSelfTest, photoInfoFallbackDir, restoreWindow, type WindowState } from './config';
+import { GALLERY_APP_ID, GALLERY_PRODUCT_NAME, LICENCE_FILE, MIN_WINDOW, NOTICES_BUTTON, NOTICES_FILE, dataLayout, describeAbout, describeFailure, galleryEnv, parseMode, parseSelfTest, photoInfoFallbackDir, restoreWindow, type WindowState } from './config';
 import { GALLERY_DESCRIPTION, galleryDrag, galleryFolders, galleryPage, launchGallery, type LaunchData } from './gallery';
 import { isAllowedRequest, isAppNavigation, requestHost } from './netGuard';
 import product from './product.json';
@@ -19,17 +19,29 @@ import type { HostMessage, HostReply } from './server-host';
 const launch = parseMode(process.argv);
 const isGallery = launch.mode === 'gallery';
 const NAME = isGallery ? GALLERY_PRODUCT_NAME : product.productName;
-// The self-test is the editor's.
-const selfTest = isGallery ? null : parseSelfTest(process.argv);
+/** What the window shows, in messages: "the editor" or "the gallery". */
+const WHAT = isGallery ? 'gallery' : 'editor';
+// The self-test of whichever program this is (`--gallery` picks the gallery's).
+const selfTest = parseSelfTest(process.argv);
+// The gallery's self-test opens a copy of the photos given, made in main() (see prepareGalleryPhotos).
+const galleryTestPhotos = isGallery && selfTest ? join(selfTest.out, 'photos') : null;
 // Development (`npm run dev:desktop`): the page comes from the Vite dev server.
 const devUrl = !app.isPackaged ? process.env.PHOTOBOOK_DESKTOP_DEV_URL : undefined;
 
 // The name and the folders below decide the single-instance lock, so they are set before it is asked for.
 app.setName(NAME);
+// Windows groups taskbar buttons by this id: the gallery's own keeps it apart from the editor
+// (the installer's Gallery shortcuts carry the same one).
+if (isGallery && process.platform === 'win32') app.setAppUserModelId(GALLERY_APP_ID);
 const appData = app.getPath('appData');
 const layout = dataLayout({ appData, productName: NAME, packaged: app.isPackaged, env: isGallery ? galleryEnv(process.env) : process.env, selfTestOut: selfTest?.out });
-// The gallery keeps photo info for read-only folders in the editor's data folder, so stars reach the editor.
-const editorDataDir = isGallery ? dataLayout({ appData, productName: product.productName, packaged: app.isPackaged, env: process.env }).dataDir : layout.dataDir;
+// The gallery keeps photo info for read-only folders in the editor's data folder, so stars reach the
+// editor. Its self-test keeps even that inside its output folder, away from a real user's editor.
+const editorDataDir = !isGallery
+  ? layout.dataDir
+  : selfTest
+    ? join(selfTest.out, 'editor-data')
+    : dataLayout({ appData, productName: product.productName, packaged: app.isPackaged, env: process.env }).dataDir;
 // Chromium's own files go beside the app's data, never into it. Must be set before the app is ready.
 app.setPath('userData', layout.profileDir);
 
@@ -276,11 +288,11 @@ function createWindow(): BrowserWindow {
     if (code === -3) return; // aborted: a navigation replaced by another, or one the app blocked
     keep(seen.failedLoads, `${code} ${description} ${url}`);
     log('failed load', { code, description, url, isMainFrame });
-    if (isMainFrame && !selfTest) void fatal('page', `The editor did not load: ${description} (${code})\n${url}`);
+    if (isMainFrame && !selfTest) void fatal('page', `The ${WHAT} did not load: ${description} (${code})\n${url}`);
   });
   w.webContents.on('render-process-gone', (_e, details) => {
     log('page process gone', details);
-    if (!quitting && details.reason !== 'clean-exit') void fatal('page', `The editor's page process ended: ${details.reason} (exit code ${details.exitCode}).`);
+    if (!quitting && details.reason !== 'clean-exit') void fatal('page', `The ${WHAT}'s page process ended: ${details.reason} (exit code ${details.exitCode}).`);
   });
   w.once('ready-to-show', () => {
     if (!selfTest) w.show();
@@ -309,6 +321,7 @@ function aboutBox() {
     licence: licence ? readFileSync(licence, 'utf8') : null,
     repository: (product as { repository?: string }).repository,
     hasNotices: !!legalFile(NOTICES_FILE),
+    mode: launch.mode,
   });
 }
 
@@ -352,7 +365,7 @@ function buildMenu(fileItems: MenuItemConstructorOptions[]) {
 const fromApp = (e: { senderFrame: Electron.WebFrameMain | null }) => !!e.senderFrame && isAppNavigation(e.senderFrame.url, appOrigin());
 
 /** The gallery's folders to open (null in the editor). */
-const folders = isGallery ? galleryFolders({ window: () => win, fromApp, log }, launch.folder) : null;
+const folders = isGallery ? galleryFolders({ window: () => win, fromApp, log }, galleryTestPhotos ?? launch.folder) : null;
 
 function registerDesktopApi() {
   /** An export's file name → its full path, or null when it is not a file in the exports folder. */
@@ -403,7 +416,7 @@ let startupFailure: Record<string, unknown> | null = null;
 async function fatal(phase: 'start' | 'run' | 'page', detail: string) {
   if (failing || quitting) return;
   failing = true;
-  const f = describeFailure(detail, { productName: NAME, dataDir: layout.dataDir, phase });
+  const f = describeFailure(detail, { productName: NAME, dataDir: layout.dataDir, phase, mode: launch.mode });
   const technical = [`${NAME} ${app.getVersion()} (${process.platform} ${process.arch}, Electron ${process.versions.electron})`, `Data folder: ${layout.dataDir}`, `Log file: ${openLog() || '(none)'}`, '', detail].join('\n');
   log('FATAL', phase, f.title, '\n' + technical);
   if (selfTest) {
@@ -454,7 +467,10 @@ async function finishSelfTest(steps: Record<string, { ok: boolean }>) {
     folders: { dataDir: layout.dataDir, profileDir: layout.profileDir, resourceRoot: resourceRoot() ?? null, logFile: openLog() },
     // What Help > About shows, and the licence files it reads and opens.
     about: { ...aboutBox(), licenceFile: legalFile(LICENCE_FILE), noticesFile: notices, noticesBytes: notices ? statSync(notices).size : 0 },
+    mode: selfTest.mode,
     photos: selfTest.photos,
+    // The gallery works on a copy (see prepareGalleryPhotos), never on the photos given.
+    ...(galleryTestPhotos ? { photosCopy: galleryTestPhotos } : {}),
     startupFailure,
     steps,
     serverStoppedCleanly,
@@ -482,9 +498,19 @@ async function finishSelfTest(steps: Record<string, { ok: boolean }>) {
 
 async function main() {
   log(`${NAME} ${app.getVersion()} starting`, { packaged: app.isPackaged, dataDir: layout.dataDir, profileDir: layout.profileDir, resourceRoot: resourceRoot() ?? '(source)', devUrl: devUrl ?? null, selfTest: !!selfTest });
+  let galleryTest: { sourceBefore: Record<string, string> } | null = null;
   if (selfTest) {
     mkdirSync(selfTest.out, { recursive: true });
     setTimeout(() => void fatal('start', 'The self-test did not finish within 15 minutes.'), 15 * 60_000).unref();
+    if (galleryTestPhotos) {
+      // Before the page can ask for the folder (galleryFolders hands it over once the page listens).
+      const { prepareGalleryPhotos } = await import('./selfTest');
+      try {
+        galleryTest = prepareGalleryPhotos(selfTest.photos, selfTest.out);
+      } catch (e) {
+        return fatal('start', `Could not copy the photos for the self-test: ${String((e as Error)?.message ?? e)}`);
+      }
+    }
   }
   hardenSession();
   buildMenu(folders ? folders.fileMenu() : [{ label: 'Open &Gallery', click: () => launchGallery(log) }, { type: 'separator' }]);
@@ -504,8 +530,9 @@ async function main() {
     return fatal('page', String((e as Error)?.message ?? e));
   }
   if (selfTest) {
-    const { runSelfTest } = await import('./selfTest');
-    const steps = await runSelfTest({ base: `http://127.0.0.1:${serverPort}`, photos: selfTest.photos, out: selfTest.out, win, session: session.defaultSession, log });
+    const { runGallerySelfTest, runSelfTest } = await import('./selfTest');
+    const ctx = { base: `http://127.0.0.1:${serverPort}`, photos: selfTest.photos, out: selfTest.out, win, session: session.defaultSession, log };
+    const steps = galleryTest && galleryTestPhotos ? await runGallerySelfTest({ ...ctx, photos: galleryTestPhotos, source: selfTest.photos, sourceBefore: galleryTest.sourceBefore }) : await runSelfTest(ctx);
     await finishSelfTest(steps);
   }
 }

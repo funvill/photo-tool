@@ -93,6 +93,44 @@ Drop photos from Explorer or Finder onto a frame (replaces it), onto empty space
 - **Web version:** dropped files are imported by their contents (copied into the browser's storage); folders can't be dropped there.
 - **Local app in a plain browser:** drops are refused, because the browser does not say where a dropped file lives. Use **Import** to choose a folder instead.
 
+## Photobook Gallery
+
+A second program in the desktop app, for looking through a folder of photos and starring the best ones. It is installed with the editor and runs beside it. It never changes, renames or moves a photo, and it never uses the network. Windows and Linux only; there is no web version.
+
+**Starting it.** On Windows the installer adds **Photobook Gallery** to the Start menu and the desktop. On Linux the `.deb` adds it to the applications menu. In the editor, **File → Open Gallery** starts it. From a command line, run the app with `--gallery`, or `--gallery <folder>` to open that folder straight away.
+
+**Opening a folder.** Click **Open folder**, or use **File → Open folder…** (Ctrl+O). Tick **Include subfolders** first to see the photos in every folder below it. The start screen lists recent folders; one that can't be found (a drive that isn't plugged in) is greyed out. Photos appear while the folder is read, and a bar shows how far along it is. A folder opened before is quick: its thumbnails are kept.
+
+**The grid.** Drag the size slider to make thumbnails bigger or smaller. Click a photo to see its details on the right. Ctrl-click adds or removes a photo, and Shift-click selects a range. Hover a photo and click its star to star it. Double-click a photo, or press Enter, to view it full screen.
+
+**The viewer keys:**
+
+- **Left** and **Right**: the previous or next photo.
+- **S**: star or unstar the photo.
+- **I**: show or hide its details.
+- **Esc**: close the viewer.
+
+**Details.** The panel shows the date, camera, size and folder. You can type people, a date and time, a place, a description and notes. Each is saved when you leave the field.
+
+**Sorting and filters.** Sort by **Date taken** (the default), **Most interesting**, **Main colour** or **File name**. Filters can be combined:
+
+- starred or not starred;
+- a date range (**From** and **To**);
+- portrait or landscape;
+- **Low quality** (blurry, too dark, too bright or low resolution, by the same rules as the editor's Clean up);
+- **Near-duplicates**;
+- **Has location** and **Has people**;
+- one subfolder;
+- a search of descriptions and notes.
+
+**Clear** turns every filter off.
+
+**Where the info is kept.** Stars and everything you type go into `photoinfo.json` in the same folder as the photo, the same file the editor reads (see Stars and photoinfo.json above). A star set in the gallery shows up in the editor within about 3 seconds, and the other way round. If the folder is read-only, the info goes into the editor's data folder instead, under `photoinfo/` (`%APPDATA%\Photobook Studio\data\photoinfo` on Windows). The gallery shows "Read-only folder: stars kept in Photobook Studio" when that happens, and the editor still sees the stars. **Tidy photo info…** removes info kept for photos that are no longer in the folder. The gallery's own thumbnails and recent folders are in `%APPDATA%\Photobook Gallery\data` (`~/.config/Photobook Gallery/data` on Linux); **File → Open the data folder** shows it.
+
+**Dragging photos out.** Drag a photo from the grid into the editor or into Explorer. Select several first to drag them all, up to 500 at a time. The original files are dragged, so a HEIC photo arrives as its `.heic` file. Dropped on the editor, they go onto a frame, a page or the library, as described in Dragging photos in above. Dropped in Explorer, they are copied there.
+
+**Checking it works.** `"Photobook Studio.exe" --self-test <photo folder> --self-test-out <folder> --gallery` opens a copy of the folder, stars one photo and checks the star reached the copy's `photoinfo.json`. It writes `result.json` and exits 0 or 1, like the editor's self-test.
+
 ## Using it
 
 1. **New book** → choose a printer (Lulu, Blurb, or custom), binding, size and style.

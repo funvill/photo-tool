@@ -1,13 +1,18 @@
 // The acceptance test built into the app, run only with explicit flags:
 //
-//   "Photobook Studio.exe" --self-test <photo folder> --self-test-out <folder>
+//   "Photobook Studio.exe" --self-test <photo folder> --self-test-out <folder>            the editor
+//   "Photobook Studio.exe" --self-test <photo folder> --self-test-out <folder> --gallery  the gallery
 //
-// It does what a person would: makes a book, imports the folder, drafts it, exports the PDFs, a
-// poster image and the flipbook, and looks at the home page and the editor in the real window. main.ts adds what it saw (console
-// messages, failed loads, requests the offline filter cancelled) and writes <folder>/result.json.
+// The editor's does what a person would: makes a book, imports the folder, drafts it, exports the
+// PDFs, a poster image and the flipbook, and looks at the home page and the editor in the real
+// window. The gallery's opens a copy of the folder (<folder>/photos: the photos given are never
+// written), waits for it to be read, stars one photo in the viewer and checks the star in that
+// copy's photoinfo.json. main.ts adds what it saw (console messages, failed loads, requests the
+// offline filter cancelled, whether the server stopped cleanly) and writes <folder>/result.json,
+// failing either test on the same rules.
 import type { BrowserWindow, Session } from 'electron';
-import { existsSync, statSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { cpSync, existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join, relative } from 'node:path';
 
 export interface Step {
   ok: boolean;
@@ -32,9 +37,10 @@ const TITLE = 'Self-test book';
 const BLURB_LARGE_SQUARE_TRIM_MM = 11.75 * 25.4;
 const sleep = (ms: number) => new Promise((d) => setTimeout(d, ms));
 
-export async function runSelfTest(ctx: SelfTestContext): Promise<Record<string, Step>> {
+/** What both tests use: named steps, code run in the page, waiting on the page, and screenshots. */
+function harness(ctx: SelfTestContext) {
   const steps: Record<string, Step> = {};
-  const { base, win, log } = ctx;
+  const { win, log } = ctx;
   const js = <T = any>(code: string): Promise<T> => win.webContents.executeJavaScript(code, true);
 
   async function step(name: string, fn: () => Promise<Omit<Step, 'ok'> & { ok?: boolean }>) {
@@ -50,7 +56,7 @@ export async function runSelfTest(ctx: SelfTestContext): Promise<Record<string, 
   }
 
   async function api<T = any>(method: string, path: string, body?: unknown): Promise<T> {
-    const res = await fetch(base + path, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    const res = await fetch(ctx.base + path, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
     const json = (await res.json()) as T;
     if (!res.ok) throw new Error(`${method} ${path} failed (${res.status}): ${JSON.stringify(json)}`);
     return json;
@@ -77,6 +83,42 @@ export async function runSelfTest(ctx: SelfTestContext): Promise<Record<string, 
     writeFileSync(file, img.toPNG());
     return { screenshot: file, screenshotBytes: statSync(file).size, screenshotSize: img.getSize() };
   }
+
+  return { steps, step, js, api, waitFor, screenshot };
+}
+
+type Harness = ReturnType<typeof harness>;
+
+/**
+ * Proof that the offline filter is switched on, without touching the network: a request to a port
+ * on this computer that is not the app's must be cancelled before it is sent, and the window must
+ * not navigate there.
+ */
+async function offlineChecks({ step, js }: Harness, ctx: SelfTestContext) {
+  await step('filterControl', async () => {
+    const url = 'http://127.0.0.1:9/self-test-control';
+    try {
+      await ctx.session.fetch(url);
+      return { ok: false, url, outcome: 'the request was sent' };
+    } catch (e) {
+      const outcome = String((e as Error)?.message ?? e);
+      return { ok: /ERR_BLOCKED_BY_CLIENT/.test(outcome), url, outcome };
+    }
+  });
+
+  await step('navigationBlocked', async () => {
+    const before = ctx.win.webContents.getURL();
+    await js(`void (location.href = 'http://127.0.0.1:9/self-test-navigation')`);
+    await sleep(800);
+    const after = ctx.win.webContents.getURL();
+    return { ok: after === before, before, after };
+  });
+}
+
+export async function runSelfTest(ctx: SelfTestContext): Promise<Record<string, Step>> {
+  const h = harness(ctx);
+  const { steps, step, js, api, waitFor, screenshot } = h;
+  const { base, win } = ctx;
 
   /**
    * Decode an image the app serves (or a data: URI from a flipbook) in the page, and measure it:
@@ -291,27 +333,118 @@ export async function runSelfTest(ctx: SelfTestContext): Promise<Record<string, 
     };
   });
 
-  // Proof that the offline filter is switched on, without touching the network: a request to a
-  // port on this computer that is not the app's must be cancelled before it is sent.
-  await step('filterControl', async () => {
-    const url = 'http://127.0.0.1:9/self-test-control';
-    try {
-      await ctx.session.fetch(url);
-      return { ok: false, url, outcome: 'the request was sent' };
-    } catch (e) {
-      const outcome = String((e as Error)?.message ?? e);
-      return { ok: /ERR_BLOCKED_BY_CLIENT/.test(outcome), url, outcome };
+  await offlineChecks(h, ctx);
+  return steps;
+}
+
+// ---- the gallery's self-test
+
+/** Every file under `dir` (relative path → size and time changed): to show the photos given were left alone. */
+function folderSnapshot(dir: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const e of readdirSync(dir, { withFileTypes: true, recursive: true })) {
+    if (!e.isFile()) continue;
+    const path = join(e.parentPath, e.name);
+    const s = statSync(path);
+    out[relative(dir, path)] = `${s.size}:${s.mtimeMs}`;
+  }
+  return out;
+}
+
+/**
+ * The folder the gallery's self-test opens: a fresh copy of the photos given, in <out>/photos, so
+ * the star it sets (and photoinfo.json) lands in the copy and never beside the original photos.
+ * Returns the copy and a snapshot of the original, for runGallerySelfTest to compare at the end.
+ */
+export function prepareGalleryPhotos(source: string, out: string): { folder: string; sourceBefore: Record<string, string> } {
+  const folder = join(out, 'photos');
+  rmSync(folder, { recursive: true, force: true });
+  const sourceBefore = folderSnapshot(source);
+  cpSync(source, folder, { recursive: true });
+  return { folder, sourceBefore };
+}
+
+/**
+ * The gallery, as a person would use it: the copy in `ctx.photos` is opened at start (main.ts hands
+ * it to the page like `--gallery <folder>`), the scan is waited for, one photo is opened in the viewer
+ * and starred with S, and the star must reach that photo's photoinfo.json.
+ */
+export async function runGallerySelfTest(ctx: SelfTestContext & { source: string; sourceBefore: Record<string, string> }): Promise<Record<string, Step>> {
+  const h = harness(ctx);
+  const { steps, step, js, api, waitFor, screenshot } = h;
+  const key = (k: string) => js(`window.dispatchEvent(new KeyboardEvent('keydown', { key: ${JSON.stringify(k)}, bubbles: true }))`);
+  let starred = '';
+
+  await step('health', async () => {
+    const r = await api('GET', '/api/health');
+    return { ok: r.ok === true && r.app === 'gallery', app: r.app };
+  });
+
+  await step('openFolder', async () => {
+    const probe = `({
+      root: document.querySelector('.gallery-bar-title .muted')?.textContent ?? null,
+      scanning: !!document.querySelector('.gallery-progress'),
+      tiles: document.querySelectorAll('.gallery-tile').length,
+      thumbsLoaded: [...document.querySelectorAll('.gallery-tile img')].filter((i) => i.complete && i.naturalWidth > 0).length,
+      errors: [...document.querySelectorAll('.toast-error')].map((t) => t.textContent),
+    })`;
+    type Dom = { root: string | null; scanning: boolean; tiles: number; thumbsLoaded: number; errors: string[] };
+    const dom = await waitFor<Dom>(probe, (d) => d.root === ctx.photos && !d.scanning && d.tiles > 0 && d.thumbsLoaded >= d.tiles, 120_000);
+    return { ok: dom.root === ctx.photos && !dom.scanning && dom.tiles > 0 && dom.thumbsLoaded >= dom.tiles && dom.errors.length === 0, ...dom, ...(await screenshot('gallery.png')) };
+  });
+
+  await step('starInViewer', async () => {
+    // The first photo not starred yet (the folder given may have a photoinfo.json of its own).
+    const path = await js<string | null>(`(() => {
+      const tile = [...document.querySelectorAll('.gallery-tile')].find((t) => !t.classList.contains('starred'));
+      if (!tile) return null;
+      tile.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+      return tile.dataset.path;
+    })()`);
+    if (!path) throw new Error('Every photo shown is starred already: nothing to star.');
+    const viewer = `({ open: !!document.querySelector('.gallery-viewer'), name: document.querySelector('.gallery-viewer-bar strong')?.textContent ?? null, count: document.querySelector('.gallery-viewer-count')?.textContent ?? null, starred: !!document.querySelector('.gallery-viewer-starred') })`;
+    type Viewer = { open: boolean; name: string | null; count: string | null; starred: boolean };
+    const opened = await waitFor<Viewer>(viewer, (v) => v.open && v.name === basename(path), 10_000);
+    if (!opened.open) throw new Error('The viewer did not open on a double-click.');
+    await key('s');
+    const shown = await waitFor<Viewer>(viewer, (v) => v.starred, 10_000);
+    // The page has saved it; the file must say so too.
+    const file = join(dirname(path), 'photoinfo.json');
+    const read = () => {
+      try {
+        return JSON.parse(readFileSync(file, 'utf8'));
+      } catch {
+        return null;
+      }
+    };
+    const end = Date.now() + 10_000;
+    let info = read();
+    while (info?.photos?.[basename(path)]?.star !== true && Date.now() < end) {
+      await sleep(250);
+      info = read();
     }
+    const shot = await screenshot('gallery-viewer.png');
+    await key('Escape');
+    const closed = await waitFor<{ open: boolean; tileStarred: boolean }>(
+      `({ open: !!document.querySelector('.gallery-viewer'), tileStarred: !![...document.querySelectorAll('.gallery-tile')].find((t) => t.dataset.path === ${JSON.stringify(path)})?.classList.contains('starred') })`,
+      (v) => !v.open && v.tileStarred,
+      10_000,
+    );
+    starred = path;
+    const entry = info?.photos?.[basename(path)];
+    return {
+      ok: opened.open && shown.starred && info?.format === 'photoinfo/1' && entry?.star === true && !closed.open && closed.tileStarred && dirname(file).startsWith(ctx.photos),
+      photo: path, viewerCount: opened.count, photoInfoFile: file, entry, viewerClosed: !closed.open, tileStarred: closed.tileStarred, ...shot,
+    };
   });
 
-  await step('navigationBlocked', async () => {
-    const before = win.webContents.getURL();
-    await js(`void (location.href = 'http://127.0.0.1:9/self-test-navigation')`);
-    await sleep(800);
-    const after = win.webContents.getURL();
-    return { ok: after === before, before, after };
+  await step('sourceUntouched', async () => {
+    const after = folderSnapshot(ctx.source);
+    const changed = [...new Set([...Object.keys(ctx.sourceBefore), ...Object.keys(after)])].filter((f) => ctx.sourceBefore[f] !== after[f]);
+    return { ok: changed.length === 0 && !!starred, source: ctx.source, files: Object.keys(after).length, changed };
   });
 
+  await offlineChecks(h, ctx);
   return steps;
 }
 

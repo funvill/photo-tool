@@ -3,9 +3,12 @@
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_WINDOW, GALLERY_PRODUCT_NAME, MIN_WINDOW, NOTICES_BUTTON, dataLayout, describeAbout, describeFailure, galleryEnv, parseMode, parseSelfTest, photoInfoFallbackDir, restoreWindow } from '../electron/config';
+import { createRequire } from 'node:module';
+import { DEFAULT_WINDOW, GALLERY_APP_ID, GALLERY_PRODUCT_NAME, MIN_WINDOW, NOTICES_BUTTON, dataLayout, describeAbout, describeFailure, galleryEnv, parseMode, parseSelfTest, photoInfoFallbackDir, restoreWindow } from '../electron/config';
 import product from '../electron/product.json';
 import { isAllowedRequest, isAppNavigation, requestHost } from '../electron/netGuard';
+
+const require = createRequire(import.meta.url);
 
 describe('offline filter', () => {
   const app = { ports: new Set([51234]) };
@@ -117,7 +120,13 @@ describe('self-test flags', () => {
     expect(parseSelfTest(['app.exe', '--self-test', 'photos'])).toBeNull();
     expect(parseSelfTest(['app.exe', '--self-test-out', 'out'])).toBeNull();
     expect(parseSelfTest(['app.exe', '--self-test', '--self-test-out', 'out'])).toBeNull();
-    expect(parseSelfTest(['app.exe', '--self-test', 'photos', '--self-test-out', 'out'])).toEqual({ photos: resolve('photos'), out: resolve('out') });
+    expect(parseSelfTest(['app.exe', '--self-test', 'photos', '--self-test-out', 'out'])).toEqual({ photos: resolve('photos'), out: resolve('out'), mode: 'editor' });
+  });
+
+  it('--gallery runs the gallery\'s self-test instead of the editor\'s', () => {
+    expect(parseSelfTest(['app.exe', '--self-test', 'photos', '--self-test-out', 'out', '--gallery'])).toEqual({ photos: resolve('photos'), out: resolve('out'), mode: 'gallery' });
+    expect(parseSelfTest(['app.exe', '--gallery', '--self-test', 'photos', '--self-test-out', 'out'])).toEqual({ photos: resolve('photos'), out: resolve('out'), mode: 'gallery' });
+    expect(parseSelfTest(['app.exe', '--gallery'])).toBeNull();
   });
 });
 
@@ -137,8 +146,14 @@ describe('gallery mode', () => {
   it('leaves the self-test flags as they were', () => {
     const argv = ['app.exe', '--self-test', 'photos', '--self-test-out', 'out'];
     expect(parseMode(argv)).toEqual({ mode: 'editor', folder: null });
-    expect(parseSelfTest(argv)).toEqual({ photos: resolve('photos'), out: resolve('out') });
-    expect(parseSelfTest(['app.exe', '--gallery', 'D:\\Pics', ...argv.slice(1)])).toEqual({ photos: resolve('photos'), out: resolve('out') });
+    expect(parseSelfTest(argv)).toEqual({ photos: resolve('photos'), out: resolve('out'), mode: 'editor' });
+    expect(parseSelfTest(['app.exe', '--gallery', 'D:\\Pics', ...argv.slice(1)])).toEqual({ photos: resolve('photos'), out: resolve('out'), mode: 'gallery' });
+  });
+
+  it('gives the gallery its own taskbar identity, apart from the editor\'s', () => {
+    expect(GALLERY_APP_ID).toMatch(/^[a-z0-9]+(\.[a-z0-9]+)+$/);
+    expect(GALLERY_APP_ID).not.toBe(product.appId);
+    expect(readFileSync('electron/main.ts', 'utf8')).toMatch(/setAppUserModelId\(GALLERY_APP_ID\)/);
   });
 
   it('keeps the gallery\'s data and profile under its own name, apart from the editor\'s', () => {
@@ -217,6 +232,18 @@ describe('failure wording', () => {
     }
     expect(describeFailure('EPERM', { ...ctx, phase: 'start' }).message).toContain(ctx.dataDir);
   });
+
+  it('talks about the gallery, not the editor or a book, in the gallery', () => {
+    const gallery = { productName: GALLERY_PRODUCT_NAME, dataDir: ctx.dataDir, mode: 'gallery' as const };
+    for (const phase of ['start', 'run', 'page'] as const) {
+      for (const detail of ['Error: something else', 'EACCES', 'database is locked', 'ERR_DLOPEN_FAILED sharp']) {
+        const f = describeFailure(detail, { ...gallery, phase });
+        expect(`${f.title} ${f.message} ${f.advice}`, `${phase}: ${detail}`).not.toMatch(/\beditor\b|\bbooks?\b/i);
+      }
+    }
+    expect(describeFailure('ERR_CONNECTION_REFUSED', { ...gallery, phase: 'page' }).title).toBe('Photobook Gallery could not show the gallery');
+    expect(describeFailure('x', { ...ctx, phase: 'page' }).title).toBe('Photobook Studio could not show the editor');
+  });
 });
 
 describe('desktop packaging', () => {
@@ -240,6 +267,47 @@ describe('desktop packaging', () => {
     expect(config).toMatch(/asarUnpack: \[[^\]]*sharp[^\]]*@img/);
     expect(code('electron/main.ts', 'electron/preload.ts', 'electron/server-host.ts', 'electron/selfTest.ts')).not.toMatch(/crashReporter|autoUpdater|electron-updater|update-electron-app/);
     expect(JSON.stringify(JSON.parse(read('package.json')).devDependencies)).not.toMatch(/updater/);
+  });
+
+  it('the Windows installer adds a Photobook Gallery shortcut beside the editor\'s, and removes it on uninstall', () => {
+    const nsh = read('electron/installer.nsh');
+    const macro = (name: string) => new RegExp(`!macro ${name}\\b([\\s\\S]*?)!macroend`).exec(nsh)?.[1] ?? '';
+    const install = macro('customInstall') + macro('addGalleryShortcuts');
+    const uninstall = macro('customUnInstall') + macro('removeGalleryShortcuts');
+    for (const place of ['$SMPROGRAMS', '$DESKTOP']) {
+      const link = `"${place}\\Photobook Gallery.lnk"`;
+      // Same program, started as the gallery, with the app's icon (index 0).
+      expect(install).toContain(`CreateShortCut ${link} "$INSTDIR\\\${APP_EXECUTABLE_FILENAME}" "--gallery" "$INSTDIR\\\${APP_EXECUTABLE_FILENAME}" 0`);
+      expect(install).toContain(`WinShell::SetLnkAUMI ${link} "${GALLERY_APP_ID}"`);
+      expect(uninstall).toContain(`Delete ${link}`);
+    }
+    expect(macro('customInstall')).toContain('!insertmacro addGalleryShortcuts');
+    expect(macro('customUnInstall')).toContain('!insertmacro removeGalleryShortcuts');
+    expect(uninstall).toContain(`WinShell::UninstAppUserModelId "${GALLERY_APP_ID}"`);
+    // Uninstalling never deletes either program's data.
+    expect(nsh).not.toMatch(/\$APPDATA|RMDir \/r/i);
+  });
+
+  it('the .deb adds a Photobook Gallery launcher to the applications menu', () => {
+    const desktop = read('electron/linux/photobook-gallery.desktop');
+    expect(desktop).toMatch(/^\[Desktop Entry\]$/m);
+    expect(desktop).toMatch(/^Name=Photobook Gallery$/m);
+    expect(desktop).toMatch(/^Exec=photobook-studio --gallery %F$/m);
+    expect(desktop).toMatch(/^Icon=photobook-studio$/m);
+    expect(desktop).toMatch(/^Type=Application$/m);
+    // Only the .deb carries it (an AppImage installs no launchers), mapped by fpm into the system's menu.
+    const original = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    try {
+      const path = require.resolve('../electron-builder.config.cjs');
+      delete require.cache[path];
+      const config = require(path);
+      expect(config.deb.fpm).toEqual([`${resolve('electron/linux/photobook-gallery.desktop')}=/usr/share/applications/photobook-gallery.desktop`]);
+      expect(config.productName).toBe('photobook-studio');
+      delete require.cache[path];
+    } finally {
+      Object.defineProperty(process, 'platform', { value: original });
+    }
   });
 
   it('exposes the path of a dropped file through the preload', () => {
@@ -269,6 +337,12 @@ describe('Help > About', () => {
     // The copyright line is the licence file's own.
     expect(a.detail).toContain(readFileSync('LICENSE', 'utf8').split(/\r?\n/).find((l) => l.startsWith('Copyright'))!);
     expect(a.buttons).toEqual(['OK', NOTICES_BUTTON]);
+  });
+
+  it('in the gallery, does not talk about books', () => {
+    const a = describeAbout({ ...base, productName: GALLERY_PRODUCT_NAME, mode: 'gallery' });
+    expect(a.detail).toContain(`Its thumbnails and recent folders are kept in:\n${base.dataDir}`);
+    expect(a.detail).not.toMatch(/\bbooks?\b/i);
   });
 
   it('has no addresses in it: the app opens no links', () => {

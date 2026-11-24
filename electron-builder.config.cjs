@@ -89,6 +89,11 @@ module.exports = {
     // The default recommends libappindicator3-1 (a tray icon; the app has none), a package
     // that current Ubuntu and Debian no longer have.
     recommends: [],
+    // A second launcher, "Photobook Gallery" (the same program with --gallery), in the
+    // applications menu. electron-builder hands these to fpm before its own source=destination
+    // pairs, so this is one more file mapped into the package. The path is absolute: fpm runs in
+    // whatever folder the build was started from.
+    fpm: [`${join(__dirname, 'electron', 'linux', 'photobook-gallery.desktop')}=/usr/share/applications/photobook-gallery.desktop`],
   },
   // The AppImage is built with electron-builder's newer static runtime (still marked beta).
   // Its default runtime needs libfuse2, which Ubuntu 22.04 and 24.04, Debian 12 and Fedora do
