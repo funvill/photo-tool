@@ -1,10 +1,11 @@
 // The desktop shell's decisions that need no Electron: which addresses the window may reach,
 // where data lives, the remembered window place, the self-test flags, and failure wording.
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createRequire } from 'node:module';
-import { DEFAULT_WINDOW, GALLERY_APP_ID, GALLERY_PRODUCT_NAME, MIN_WINDOW, NOTICES_BUTTON, dataLayout, describeAbout, describeFailure, galleryEnv, parseMode, parseSelfTest, photoInfoFallbackDir, restoreWindow } from '../electron/config';
+import { DEFAULT_WINDOW, GALLERY_APP_ID, GALLERY_PRODUCT_NAME, MIN_WINDOW, NOTICES_BUTTON, dataLayout, describeAbout, describeFailure, galleryEnv, parseMode, parseSelfTest, photoInfoFallbackDir, restoreWindow, selfTestOverlap } from '../electron/config';
 import product from '../electron/product.json';
 import { isAllowedRequest, isAppNavigation, requestHost } from '../electron/netGuard';
 
@@ -127,6 +128,58 @@ describe('self-test flags', () => {
     expect(parseSelfTest(['app.exe', '--self-test', 'photos', '--self-test-out', 'out', '--gallery'])).toEqual({ photos: resolve('photos'), out: resolve('out'), mode: 'gallery' });
     expect(parseSelfTest(['app.exe', '--gallery', '--self-test', 'photos', '--self-test-out', 'out'])).toEqual({ photos: resolve('photos'), out: resolve('out'), mode: 'gallery' });
     expect(parseSelfTest(['app.exe', '--gallery'])).toBeNull();
+  });
+
+  describe("the gallery's photos and output folder must not overlap", () => {
+    it('refuses the same folder', () => {
+      expect(selfTestOverlap('D:\\x\\photos', 'D:\\x\\photos', 'win32')).toMatch(/same folder/);
+      expect(selfTestOverlap('/home/a/photos', '/home/a/photos/', 'linux')).toMatch(/same folder/);
+    });
+
+    it('refuses an output folder inside the photos', () => {
+      expect(selfTestOverlap('D:\\x\\photos', 'D:\\x\\photos\\out', 'win32')).toMatch(/inside/);
+      expect(selfTestOverlap('/home/a/photos', '/home/a/photos/out', 'linux')).toMatch(/inside/);
+    });
+
+    it('refuses photos inside the output folder (its photos copy would replace them)', () => {
+      expect(selfTestOverlap('D:\\x\\photos', 'D:\\x', 'win32')).toMatch(/inside/);
+      expect(selfTestOverlap('D:\\', 'D:\\', 'win32')).toMatch(/same folder/);
+      expect(selfTestOverlap('D:\\pics', 'D:\\', 'win32')).toMatch(/inside/);
+      expect(selfTestOverlap('/home/a/photos', '/home/a', 'linux')).toMatch(/inside/);
+    });
+
+    it('allows sibling folders, even with a shared name prefix', () => {
+      expect(selfTestOverlap('D:\\x\\photos', 'D:\\x\\out', 'win32')).toBeNull();
+      expect(selfTestOverlap('D:\\x\\photos', 'D:\\x\\photos-out', 'win32')).toBeNull();
+      expect(selfTestOverlap('/home/a/photos', '/home/a/photos-out', 'linux')).toBeNull();
+    });
+
+    it('ignores case on Windows only', () => {
+      expect(selfTestOverlap('D:\\X\\Photos', 'd:\\x\\photos', 'win32')).toMatch(/same folder/);
+      expect(selfTestOverlap('D:\\X\\Photos', 'd:\\x\\photos\\out', 'win32')).toMatch(/inside/);
+      expect(selfTestOverlap('/home/a/Photos', '/home/a/photos', 'linux')).toBeNull();
+    });
+
+    it('prepareGalleryPhotos refuses before deleting or copying anything', async () => {
+      const { prepareGalleryPhotos } = await import('../electron/selfTest');
+      const root = mkdtempSync(join(tmpdir(), 'gallery-selftest-'));
+      try {
+        const photos = join(root, 'photos');
+        mkdirSync(photos);
+        writeFileSync(join(photos, 'a.jpg'), 'not really a photo');
+        expect(() => prepareGalleryPhotos(photos, root)).toThrow(/inside --self-test-out/);
+        expect(() => prepareGalleryPhotos(photos, photos)).toThrow(/same folder/);
+        expect(() => prepareGalleryPhotos(photos, join(photos, 'out'))).toThrow(/inside the photos folder/);
+        expect(readdirSync(photos)).toEqual(['a.jpg']);
+        expect(readFileSync(join(photos, 'a.jpg'), 'utf8')).toBe('not really a photo');
+        // Apart, it copies as before.
+        const out = join(root, 'out');
+        const { folder } = prepareGalleryPhotos(photos, out);
+        expect(readdirSync(folder)).toEqual(['a.jpg']);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    });
   });
 });
 

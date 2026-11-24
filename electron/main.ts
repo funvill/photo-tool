@@ -10,7 +10,7 @@ import { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, screen, session, 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
-import { GALLERY_APP_ID, GALLERY_PRODUCT_NAME, LICENCE_FILE, MIN_WINDOW, NOTICES_BUTTON, NOTICES_FILE, dataLayout, describeAbout, describeFailure, galleryEnv, parseMode, parseSelfTest, photoInfoFallbackDir, restoreWindow, type WindowState } from './config';
+import { GALLERY_APP_ID, GALLERY_PRODUCT_NAME, LICENCE_FILE, MIN_WINDOW, NOTICES_BUTTON, NOTICES_FILE, dataLayout, describeAbout, describeFailure, galleryEnv, parseMode, parseSelfTest, photoInfoFallbackDir, restoreWindow, selfTestOverlap, type WindowState } from './config';
 import { GALLERY_DESCRIPTION, galleryDrag, galleryFolders, galleryPage, launchGallery, type LaunchData } from './gallery';
 import { isAllowedRequest, isAppNavigation, requestHost } from './netGuard';
 import product from './product.json';
@@ -23,6 +23,13 @@ const NAME = isGallery ? GALLERY_PRODUCT_NAME : product.productName;
 const WHAT = isGallery ? 'gallery' : 'editor';
 // The self-test of whichever program this is (`--gallery` picks the gallery's).
 const selfTest = parseSelfTest(process.argv);
+// The gallery's self-test replaces <out>/photos with a copy of the photos given. When the two folders
+// overlap it stops here, before anything (the profile, the log, result.json, that copy) is written.
+const selfTestRefused = isGallery && selfTest ? selfTestOverlap(selfTest.photos, selfTest.out) : null;
+if (selfTestRefused) {
+  console.error(`Self-test refused: ${selfTestRefused} Nothing was deleted or written.`);
+  process.exit(1);
+}
 // The gallery's self-test opens a copy of the photos given, made in main() (see prepareGalleryPhotos).
 const galleryTestPhotos = isGallery && selfTest ? join(selfTest.out, 'photos') : null;
 // Development (`npm run dev:desktop`): the page comes from the Vite dev server.

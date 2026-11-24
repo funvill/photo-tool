@@ -13,6 +13,7 @@
 import type { BrowserWindow, Session } from 'electron';
 import { cpSync, existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
+import { selfTestOverlap } from './config';
 
 export interface Step {
   ok: boolean;
@@ -357,6 +358,9 @@ function folderSnapshot(dir: string): Record<string, string> {
  * Returns the copy and a snapshot of the original, for runGallerySelfTest to compare at the end.
  */
 export function prepareGalleryPhotos(source: string, out: string): { folder: string; sourceBefore: Record<string, string> } {
+  // Checked before anything is deleted or copied: <out>/photos could be the photos given.
+  const overlap = selfTestOverlap(source, out);
+  if (overlap) throw new Error(overlap);
   const folder = join(out, 'photos');
   rmSync(folder, { recursive: true, force: true });
   const sourceBefore = folderSnapshot(source);

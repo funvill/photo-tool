@@ -1,6 +1,6 @@
 // Start-up decisions that need no Electron: command-line flags, where data lives, the window's
 // remembered place, and how a failed start is put into words. Unit-tested in tests/electron-shell.test.ts.
-import { join, resolve } from 'node:path';
+import { join, posix, resolve, win32 } from 'node:path';
 
 // ---- command line
 
@@ -26,6 +26,28 @@ export function parseSelfTest(argv: readonly string[]): SelfTestArgs | null {
   const photos = value('--self-test');
   const out = value('--self-test-out');
   return photos && out ? { photos: resolve(photos), out: resolve(out), mode: parseMode(argv).mode } : null;
+}
+
+/**
+ * Why the gallery's self-test must not run with these folders, or null when it may. It deletes and
+ * re-copies `<out>/photos`, so the photos given and the output folder must be apart: neither the same
+ * folder nor one inside the other (letter case ignored on Windows), or the photos could be deleted, or
+ * the copy made into itself.
+ */
+export function selfTestOverlap(photos: string, out: string, platform: NodeJS.Platform = process.platform): string | null {
+  const p = platform === 'win32' ? win32 : posix;
+  const norm = (dir: string) => {
+    const full = p.resolve(dir);
+    const trimmed = full.length > p.parse(full).root.length ? full.replace(/[\\/]+$/, '') : full;
+    return platform === 'win32' ? trimmed.toLowerCase() : trimmed;
+  };
+  const a = norm(photos);
+  const b = norm(out);
+  const inside = (child: string, parent: string) => child.startsWith(parent.endsWith(p.sep) ? parent : parent + p.sep);
+  if (a === b) return `The photos folder and --self-test-out are the same folder (${photos}). Give an output folder outside the photos.`;
+  if (inside(b, a)) return `--self-test-out (${out}) is inside the photos folder (${photos}). Give an output folder outside the photos.`;
+  if (inside(a, b)) return `The photos folder (${photos}) is inside --self-test-out (${out}). Give an output folder that does not hold the photos.`;
+  return null;
 }
 
 /** The same build runs two programs: the editor, and with `--gallery` the photo gallery. */
