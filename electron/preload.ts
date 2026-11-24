@@ -30,6 +30,11 @@ const api: DesktopApi = {
   trashPhotos: (paths) => ipcRenderer.invoke('gallery:trash', Array.isArray(paths) ? paths.map(String) : []),
   getMapConsent: () => ipcRenderer.invoke('gallery:get-map-consent'),
   setMapConsent: (on) => ipcRenderer.invoke('gallery:set-map-consent', on === true),
+  getEditTarget: () => ipcRenderer.invoke('gallery:get-edit-target'),
+  setEditTarget: (target) => ipcRenderer.invoke('gallery:set-edit-target', target === 'file' ? 'file' : 'info'),
+  saveEditToFile: (path, edit) => ipcRenderer.invoke('gallery:save-edit-file', String(path), edit),
+  saveEditAs: (path, edit, info) => ipcRenderer.invoke('gallery:save-edit-as', String(path), edit, info),
+  setUnsavedEdits: (count) => ipcRenderer.send('gallery:unsaved-edits', Number(count) || 0),
   onOpenFolder: (cb) => {
     const listener = (_e: Electron.IpcRendererEvent, folder: unknown) => {
       if (typeof folder === 'string') cb(folder);

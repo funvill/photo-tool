@@ -71,11 +71,29 @@ export function readMapConsent(file: string): boolean | null {
   return typeof v === 'boolean' ? v : null;
 }
 
-/** Remember the answer, keeping any other setting in the file. Throws when it cannot be written. */
-export function writeMapConsent(file: string, on: boolean): void {
-  const settings = { ...(readSettings(file) ?? {}), mapsOnline: on };
+/** Set one setting, keeping every other one in the file. Throws when it cannot be written. */
+function writeSetting(file: string, key: string, value: unknown): void {
+  const settings = { ...(readSettings(file) ?? {}), [key]: value };
   mkdirSync(dirname(file), { recursive: true });
   const tmp = `${file}.tmp`;
   writeFileSync(tmp, JSON.stringify(settings, null, 2) + '\n');
   renameSync(tmp, file);
+}
+
+/** Remember the answer, keeping any other setting in the file. Throws when it cannot be written. */
+export function writeMapConsent(file: string, on: boolean): void {
+  writeSetting(file, 'mapsOnline', on);
+}
+
+/** Where the gallery's photo edits go: into photoinfo.json ('info', the default) or into the photo file ('file'). */
+export type EditTarget = 'info' | 'file';
+
+/** The remembered edit target; anything but 'file' (including a missing or unreadable file) is 'info'. */
+export function readEditTarget(file: string): EditTarget {
+  return readSettings(file)?.editTarget === 'file' ? 'file' : 'info';
+}
+
+/** Remember the edit target, keeping any other setting in the file. Throws when it cannot be written. */
+export function writeEditTarget(file: string, target: EditTarget): void {
+  writeSetting(file, 'editTarget', target);
 }

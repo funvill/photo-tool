@@ -4,11 +4,14 @@
 import { app, clipboard, ClipboardItem, dialog, ipcMain, nativeImage, shell, type BrowserWindow, type IpcMainEvent, type IpcMainInvokeEvent, type MenuItemConstructorOptions, type NativeImage, type WebContents } from 'electron';
 import { spawn } from 'node:child_process';
 import { statSync } from 'node:fs';
+import { copyFile, rename, rm, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import type { PhotoEdit } from '../src/core/photoEdit';
 import { galleryLaunchCommand, parseMode } from './config';
 import { dragFiles, dragRequest, preparedDragFor, sameDragList, type DragCheck, type PreparedDrag } from './drag';
 import { copyTextRequest, trashConfirm, trashPhotos, type TrashResult } from './fileActions';
-import { readMapConsent, writeMapConsent } from './mapTiles';
+import { saveAs, saveToFile, unsavedClosePrompt, type EditSaveAsResult, type EditSaveResult } from './editActions';
+import { readEditTarget, readMapConsent, writeEditTarget, writeMapConsent, type EditTarget } from './mapTiles';
 
 export const GALLERY_DESCRIPTION = 'Look through a folder of photos, star the best ones and drag them into other programs. Uses the network only for map tiles, and only if you choose Load maps.';
 
@@ -360,6 +363,149 @@ export function galleryMapConsent(o: { window: () => BrowserWindow | null; fromA
       o.log('could not save the map setting', String(err));
     }
   });
+}
+
+const EDIT_TIMEOUT_MS = 120_000;
+const REFRESH_TIMEOUT_MS = 60_000;
+
+/** POST (or PATCH) a JSON body to the gallery's own server and read the JSON reply. */
+async function galleryJson(port: number, method: 'POST' | 'PATCH', path: string, body: unknown, timeoutMs: number): Promise<unknown> {
+  const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+    method,
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) {
+    let message = `${path} answered ${res.status}`;
+    try {
+      const b = (await res.json()) as { error?: unknown };
+      if (typeof b.error === 'string') message = b.error;
+    } catch {
+      // keep the status line
+    }
+    throw new Error(message);
+  }
+  return res.json();
+}
+
+/** Rename; across drives (the data folder may be on another one than the photo) copy, then remove the source. */
+async function moveFile(from: string, to: string): Promise<void> {
+  try {
+    await rename(from, to);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code !== 'EXDEV') throw err;
+    await copyFile(from, to);
+    await unlink(from);
+  }
+}
+
+/**
+ * Saving a photo's edit: the "edit target" setting ('info' or 'file', kept in the gallery's settings
+ * file), Save to file and Save as (see editActions.ts for the steps), and how many photos have edits
+ * the page has not saved, which decides whether closing the window asks first. Only for the gallery's
+ * own page in its own window; the files touched are only photos the server's file-check names.
+ */
+export function galleryEditActions(o: { window: () => BrowserWindow | null; fromApp: (e: IpcMainInvokeEvent | IpcMainEvent) => boolean; serverPort: () => number; file: string; log: (...a: unknown[]) => void }) {
+  const allowed = (e: IpcMainInvokeEvent | IpcMainEvent) => {
+    const w = o.window();
+    return o.fromApp(e) && !!w && !w.isDestroyed() && e.sender === w.webContents;
+  };
+  const port = () => o.serverPort();
+  const common = {
+    check: async (paths: string[]) => (await fileCheck(port(), paths)).filter(isFile),
+    render: async (path: string, edit: PhotoEdit) => (await galleryJson(port(), 'POST', '/api/gallery/edit/render', { path, edit }, EDIT_TIMEOUT_MS)) as { file: string },
+    move: moveFile,
+    removeTemp: (file: string) => rm(file, { force: true }),
+    refresh: async (paths: string[]) => {
+      const items = await galleryJson(port(), 'POST', '/api/gallery/refresh', { paths }, REFRESH_TIMEOUT_MS);
+      return Array.isArray(items) ? items : [];
+    },
+  };
+  const pathOf = (raw: unknown) => (typeof raw === 'string' ? raw : '');
+
+  let target = readEditTarget(o.file);
+  ipcMain.handle('gallery:get-edit-target', (e): EditTarget => (allowed(e) ? target : 'info'));
+  ipcMain.handle('gallery:set-edit-target', (e, raw: unknown): void => {
+    if (!allowed(e) || (raw !== 'info' && raw !== 'file')) return;
+    target = raw;
+    o.log('edit target', raw);
+    try {
+      writeEditTarget(o.file, raw);
+    } catch (err) {
+      o.log('could not save the edit setting', String(err));
+    }
+  });
+
+  // The server checks the edit itself (400 for one that is not valid), so it is passed on as it came.
+  ipcMain.handle('gallery:save-edit-file', async (e, rawPath: unknown, rawEdit: unknown): Promise<EditSaveResult> => {
+    if (!allowed(e)) return { ok: false, error: 'Not allowed' };
+    try {
+      const r = await saveToFile(pathOf(rawPath), rawEdit as PhotoEdit, {
+        ...common,
+        trash: (path) => shell.trashItem(path),
+        clearEdit: async (path) => void (await galleryJson(port(), 'PATCH', '/api/gallery/info', { path, patch: { edit: null } }, EDIT_TIMEOUT_MS)),
+      });
+      o.log('save edit to file', { ok: r.ok });
+      return r;
+    } catch (err) {
+      o.log('save edit to file failed', String(err));
+      return { ok: false, error: `Couldn't save the photo: ${failure(err)}` };
+    }
+  });
+
+  ipcMain.handle('gallery:save-edit-as', async (e, rawPath: unknown, rawEdit: unknown, rawInfo: unknown): Promise<EditSaveAsResult> => {
+    if (!allowed(e)) return { ok: false, error: 'Not allowed' };
+    const info = rawInfo && typeof rawInfo === 'object' && !Array.isArray(rawInfo) ? (rawInfo as Record<string, unknown>) : undefined;
+    try {
+      const r = await saveAs(
+        pathOf(rawPath),
+        rawEdit as PhotoEdit,
+        {
+          ...common,
+          platform: process.platform,
+          ask: async (defaultPath) => {
+            const w = o.window();
+            const options = { title: 'Save the edited photo as', defaultPath };
+            const chosen = w && !w.isDestroyed() ? await dialog.showSaveDialog(w, options) : await dialog.showSaveDialog(options);
+            return chosen.canceled || !chosen.filePath ? null : chosen.filePath;
+          },
+          copyInfo: async (to, patch) => void (await galleryJson(port(), 'PATCH', '/api/gallery/info', { path: to, patch }, EDIT_TIMEOUT_MS)),
+        },
+        info,
+      );
+      o.log('save edit as', { ok: r.ok, cancelled: !!r.cancelled });
+      return r;
+    } catch (err) {
+      o.log('save edit as failed', String(err));
+      return { ok: false, error: `Couldn't save the copy: ${failure(err)}` };
+    }
+  });
+
+  // How many photos have edits not saved yet, per gallery page (set by the page).
+  const unsaved = new Map<number, number>();
+  ipcMain.on('gallery:unsaved-edits', (e, raw: unknown) => {
+    if (!allowed(e)) return;
+    const n = typeof raw === 'number' && Number.isFinite(raw) ? Math.max(0, Math.floor(raw)) : 0;
+    if (n) unsaved.set(e.sender.id, n);
+    else unsaved.delete(e.sender.id);
+  });
+
+  return {
+    /** Call for the gallery's window: closing (or reloading) a page that says it has unsaved edits asks first. */
+    watch(w: BrowserWindow) {
+      const id = w.webContents.id;
+      w.webContents.on('will-prevent-unload', (event) => {
+        const n = unsaved.get(id) ?? 0;
+        // preventDefault here lets the page go: the page's own beforeunload is what stopped it.
+        if (!n || dialog.showMessageBoxSync(w, unsavedClosePrompt(n)) === 0) event.preventDefault();
+      });
+      // A new page starts with nothing unsaved.
+      w.webContents.on('did-start-navigation', (e) => {
+        if (e.isMainFrame && !e.isSameDocument) unsaved.delete(id);
+      });
+    },
+  };
 }
 
 /**

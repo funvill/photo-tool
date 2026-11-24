@@ -1,6 +1,8 @@
 // What the desktop app (Electron) adds to the page as `window.desktop`. It is missing in a plain
 // browser, so every use is feature-detected: `desktop?.pickFolder`. Types only; no code here.
 
+import type { PhotoEdit } from '../core/photoEdit';
+
 export interface DesktopApi {
   /** The installed app's version, e.g. "0.1.0". */
   version: string;
@@ -49,4 +51,20 @@ export interface DesktopApi {
   getMapConsent?(): Promise<boolean | null>;
   /** Gallery window: remember the Map tab's answer; tiles may load from now on (true) or no longer (false). */
   setMapConsent?(on: boolean): Promise<void>;
+  /** Gallery window: where photo edits are saved: in photoinfo.json ('info', the default) or in the photo file ('file'). */
+  getEditTarget?(): Promise<'info' | 'file'>;
+  setEditTarget?(target: 'info' | 'file'): Promise<void>;
+  /**
+   * Gallery window: write the photo with this edit into its own file (the original goes to the Recycle
+   * Bin first). `item` is the server's refreshed GalleryItem. Not for HEIC photos.
+   */
+  saveEditToFile?(path: string, edit: PhotoEdit): Promise<{ ok: boolean; error?: string; item?: unknown }>;
+  /**
+   * Gallery window: ask for a file name and write the photo with this edit there; the original stays.
+   * `info` is the original's info: a copy inside the open folder gets its star, people, date, location,
+   * description and notes. `item` is the server's GalleryItem for the copy (only when it is in the open folder).
+   */
+  saveEditAs?(path: string, edit: PhotoEdit, info?: Record<string, unknown>): Promise<{ ok: boolean; cancelled?: boolean; error?: string; savedPath?: string; item?: unknown }>;
+  /** Gallery window: how many photos have edits not saved yet; closing the window asks first while it is above 0. */
+  setUnsavedEdits?(count: number): void;
 }

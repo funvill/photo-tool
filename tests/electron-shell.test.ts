@@ -431,6 +431,11 @@ describe('desktop packaging', () => {
     expect(preload).toContain('webUtils.getPathForFile');
   });
 
+  it('exposes the gallery edit functions through the preload, each on its own channel', () => {
+    const preload = read('electron/preload.ts');
+    for (const channel of ['get-edit-target', 'set-edit-target', 'save-edit-file', 'save-edit-as', 'unsaved-edits']) expect(preload).toContain(`'gallery:${channel}'`);
+  });
+
   it('keeps the page sandboxed', () => {
     const main = read('electron/main.ts');
     for (const setting of ['contextIsolation: true', 'nodeIntegration: false', 'sandbox: true', 'spellcheck: false', 'webviewTag: false']) expect(main).toContain(setting);

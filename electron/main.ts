@@ -12,7 +12,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSy
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { GALLERY_APP_ID, GALLERY_PRODUCT_NAME, LICENCE_FILE, MIN_WINDOW, NOTICES_BUTTON, NOTICES_FILE, dataLayout, describeAbout, describeFailure, galleryEnv, parseMode, parseSelfTest, photoInfoFallbackDir, restoreWindow, selfTestOverlap, type WindowState } from './config';
-import { GALLERY_DESCRIPTION, galleryDrag, galleryFileActions, galleryFolders, galleryMapConsent, galleryPage, launchGallery, type LaunchData } from './gallery';
+import { GALLERY_DESCRIPTION, galleryDrag, galleryEditActions, galleryFileActions, galleryFolders, galleryMapConsent, galleryPage, launchGallery, type LaunchData } from './gallery';
 import { OSM_TILE_ORIGIN, galleryRequestAllowed, hostResolverRules, isMapTileRequest, mapTileRequestHeaders } from './mapTiles';
 import { isAllowedRequest, isAppNavigation, requestHost } from './netGuard';
 import product from './product.json';
@@ -395,6 +395,9 @@ const fromApp = (e: { senderFrame: Electron.WebFrameMain | null }) => !!e.sender
 /** The gallery's folders to open (null in the editor). */
 const folders = isGallery ? galleryFolders({ window: () => win, fromApp, log }, galleryTestPhotos ?? launch.folder) : null;
 
+/** The gallery's edit saving (null in the editor). */
+let galleryEdits: ReturnType<typeof galleryEditActions> | null = null;
+
 function registerDesktopApi() {
   /** An export's file name → its full path, or null when it is not a file in the exports folder. */
   const exportPath = (name: unknown): string | null => {
@@ -435,6 +438,8 @@ function registerDesktopApi() {
     galleryDrag({ fromApp, serverPort: () => serverPort, log });
     // The right-click menu's copy, show in folder and delete (to the Recycle Bin), same checks.
     galleryFileActions({ window: () => win, fromApp, serverPort: () => serverPort, log });
+    // The edit setting, Save to file, Save as, and the question before closing with unsaved edits.
+    galleryEdits = galleryEditActions({ window: () => win, fromApp, serverPort: () => serverPort, file: gallerySettingsFile(), log });
     // The Map tab's "Load maps from the internet?" answer, kept here so the request guard can read it.
     galleryMapConsent({ window: () => win, fromApp, file: gallerySettingsFile(), onChange: (on) => (mapsOnline = on), log });
   }
@@ -555,6 +560,7 @@ async function main() {
   log('server ready', { port: serverPort });
   win = createWindow();
   folders?.watch(win);
+  galleryEdits?.watch(win);
   const base = devUrl ?? `http://127.0.0.1:${serverPort}/`;
   try {
     await win.loadURL(isGallery ? galleryPage(base) : base);
