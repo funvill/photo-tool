@@ -4,7 +4,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GalleryItem } from '../src/gallery/server/app';
 
-const { useGallery, connectDesktop, selectVisible, selectStackInfo, selectFiltered, selectFacts, selectStackPlace, menuTargets } = await import('../src/gallery/web/store');
+const { useGallery, connectDesktop, selectVisible, selectStackInfo, selectFiltered, selectFacts, selectStackPlace, menuTargets, shownEdit } = await import('../src/gallery/web/store');
+const { IDENTITY_EDIT } = await import('../src/core/photoEdit');
 
 function item(over: Partial<GalleryItem> = {}): GalleryItem {
   return {
@@ -681,5 +682,112 @@ describe('gallery store', () => {
       expect(g().selected).toBe('a');
       expect(g().selection).toEqual(['a']);
     });
+  });
+});
+
+describe('gallery store: edits', () => {
+  const g = () => useGallery.getState();
+  const A = 'D:\\Trip\\a.jpg';
+  const cropped = { rotate: 0 as const, straighten: 0, crop: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 } };
+  const turned = { rotate: 270 as const, straighten: 0, crop: { x: 0, y: 0, w: 1, h: 1 } };
+
+  it('starts with nothing being edited, nothing unsaved, edits kept in the info file', () => {
+    expect(g().editing).toBeNull();
+    expect(g().pendingEdits).toEqual({});
+    expect(g().editTarget).toBe('info');
+  });
+
+  it('Done with a change keeps it as an unsaved edit; the shown edit is that one', () => {
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: [item()] });
+    g().startEdit(A);
+    expect(g().editing).toBe(A);
+    g().finishEdit(cropped);
+    expect(g().editing).toBeNull();
+    expect(g().pendingEdits).toEqual({ [A]: cropped });
+    expect(shownEdit(g(), g().items[0])).toEqual(cropped);
+  });
+
+  it('Done with no change from the saved edit clears the unsaved edit', () => {
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: [item({ info: { edit: cropped } })], pendingEdits: { [A]: turned } });
+    // The saved edit is what is shown without an unsaved one.
+    expect(shownEdit(g(), g().items[0])).toEqual(turned);
+    g().startEdit(A);
+    g().finishEdit({ ...cropped, crop: { ...cropped.crop } });
+    expect(g().pendingEdits).toEqual({});
+    expect(shownEdit(g(), g().items[0])).toEqual(cropped);
+  });
+
+  it('Done with no edit, where none is saved, clears the unsaved edit; where one is saved, keeps "no edit" unsaved', () => {
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: [item(), item({ path: 'D:\\Trip\\b.jpg', key: 'k2', info: { edit: cropped } })], pendingEdits: { [A]: cropped } });
+    g().startEdit(A);
+    g().finishEdit(null);
+    expect(g().pendingEdits).toEqual({});
+    g().startEdit('D:\\Trip\\b.jpg');
+    g().finishEdit(null);
+    expect(g().pendingEdits).toEqual({ 'D:\\Trip\\b.jpg': IDENTITY_EDIT });
+  });
+
+  it('Cancel leaves the unsaved edits as they were', () => {
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: [item()], pendingEdits: { [A]: cropped } });
+    g().startEdit(A);
+    g().cancelEdit();
+    expect(g().editing).toBeNull();
+    expect(g().pendingEdits).toEqual({ [A]: cropped });
+  });
+
+  it("discardEdit drops one photo's unsaved edit", () => {
+    useGallery.setState({ pendingEdits: { [A]: cropped, b: turned } });
+    g().discardEdit(A);
+    expect(g().pendingEdits).toEqual({ b: turned });
+  });
+
+  it("in photo-file mode the info file's edit is not shown", () => {
+    useGallery.setState({ editTarget: 'file' });
+    try {
+      expect(shownEdit(g(), item({ info: { edit: cropped } }))).toBeNull();
+      expect(shownEdit({ ...g(), pendingEdits: { [A]: turned } }, item({ info: { edit: cropped } }))).toEqual(turned);
+    } finally {
+      useGallery.setState({ editTarget: 'info' });
+    }
+  });
+
+  it('opening another folder or closing drops the unsaved edits and leaves edit mode', async () => {
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: [item()], pendingEdits: { [A]: cropped }, editing: A });
+    g().close();
+    expect(g().pendingEdits).toEqual({});
+    expect(g().editing).toBeNull();
+
+    routes['POST /api/gallery/open'] = () => ({ status: 202, json: { jobId: 'j2' } });
+    routes['GET /api/gallery/recent'] = () => ({ json: [] });
+    routes['GET /api/gallery/jobs/j2'] = () => ({ json: { total: 1, processed: 1, startedAt: 0, done: true, errors: [], items: [item()] } });
+    routes['GET /api/gallery/stamp'] = () => ({ json: { stamp: 's' } });
+    routes['GET /api/gallery/items'] = () => ({ json: [item()] });
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items: [item()], pendingEdits: { [A]: cropped }, editing: A });
+    await g().open('D:\\Other', true);
+    expect(g().pendingEdits).toEqual({});
+    expect(g().editing).toBeNull();
+  });
+});
+
+describe('gallery store: edit mode follows the selection', () => {
+  const g = () => useGallery.getState();
+  it('selecting another photo leaves edit mode; the same photo keeps it', () => {
+    useGallery.setState({ items: [item(), item({ path: 'b', fileName: 'b.jpg', key: 'k2' })], sort: 'name', filter: {}, stacked: false, selected: 'b', selection: ['b'], anchor: 'b', editing: 'b' });
+    g().clickSelect('b', {});
+    expect(g().editing).toBe('b');
+    g().clickSelect('D:\\Trip\\a.jpg', {});
+    expect(g().editing).toBeNull();
+    useGallery.setState({ editing: 'D:\\Trip\\a.jpg' });
+    g().select('b');
+    expect(g().editing).toBeNull();
+  });
+});
+
+describe('gallery store: deleted photos', () => {
+  it("removeItems drops a deleted photo's unsaved edit", () => {
+    const e = { rotate: 90 as const, straighten: 0, crop: { x: 0, y: 0, w: 1, h: 1 } };
+    useGallery.setState({ items: [item(), item({ path: 'b', key: 'k2' })], pendingEdits: { b: e, c: e } });
+    useGallery.getState().removeItems(['b']);
+    expect(useGallery.getState().pendingEdits).toEqual({ c: e });
   });
 });

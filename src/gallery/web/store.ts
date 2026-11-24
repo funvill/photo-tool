@@ -3,6 +3,7 @@ import type { DesktopApi } from '../../shared/desktopApi';
 import { filterItems, galleryFacts, sortItems, type GalleryFacts, type GalleryFilter, type GallerySortKey } from '../../core/gallerySort';
 import { clickSelect, dragPaths, flagTargets, nextAfterRemoval } from '../../core/galleryViewer';
 import { stackItems, type StackInfo } from '../../core/galleryStacks';
+import { IDENTITY_EDIT, parseEdit, type PhotoEdit } from '../../core/photoEdit';
 import { galleryApi, type GalleryItem, type JobUpdate, type RecentFolder } from './api';
 
 // The gallery's state: the open folder, its photos (filled in while the folder is read), the
@@ -48,6 +49,12 @@ export interface GalleryState {
   gridCols: number;
   /** What the thumbnail column shows: the grid, or the photos on a map. Kept across folders, for the session. */
   view: 'grid' | 'map';
+  /** The photo being cropped and turned in the preview pane (edit mode), or null. */
+  editing: string | null;
+  /** Edits made in the page and not saved yet, by photo path. IDENTITY_EDIT here means "remove the saved edit". */
+  pendingEdits: Record<string, PhotoEdit>;
+  /** Where a saved edit goes: the photo's info file (photoinfo.json's `edit`) or the photo file itself. */
+  editTarget: 'info' | 'file';
 
   loadRecent(): Promise<void>;
   open(folder: string, recursive: boolean): Promise<void>;
@@ -88,6 +95,17 @@ export interface GalleryState {
   setTidyOpen(open: boolean): void;
   setGridCols(cols: number): void;
   setView(view: 'grid' | 'map'): void;
+  /** Open edit mode on this photo. */
+  startEdit(path: string): void;
+  /**
+   * Done: the edit (null: none) becomes the photo's unsaved edit, unless it is what is saved already
+   * (no edit when nothing is saved), which clears any unsaved edit instead. Leaves edit mode.
+   */
+  finishEdit(edit: PhotoEdit | null): void;
+  /** Cancel: leave edit mode; the unsaved edits stay as they were before it opened. */
+  cancelEdit(): void;
+  /** Drop a photo's unsaved edit. */
+  discardEdit(path: string): void;
   toast(kind: Toast['kind'], text: string): void;
   dismissToast(id: number): void;
 }
@@ -153,6 +171,36 @@ interface Before {
 }
 
 const noSelection: Pick<GalleryState, 'selected' | 'selection' | 'anchor' | 'viewing'> = { selected: null, selection: [], anchor: null, viewing: null };
+/** A folder opened or closed: its unsaved edits, and edit mode, go with it. */
+const noEdits: Pick<GalleryState, 'editing' | 'pendingEdits'> = { editing: null, pendingEdits: {} };
+
+/** The same edit, to 1e-4 (null is no edit). */
+function sameEdit(a: PhotoEdit | null, b: PhotoEdit | null): boolean {
+  const x = a ?? IDENTITY_EDIT;
+  const y = b ?? IDENTITY_EDIT;
+  const near = (p: number, q: number) => Math.abs(p - q) <= 1e-4;
+  return (
+    x.rotate === y.rotate && near(x.straighten, y.straighten) &&
+    near(x.crop.x, y.crop.x) && near(x.crop.y, y.crop.y) && near(x.crop.w, y.crop.w) && near(x.crop.h, y.crop.h)
+  );
+}
+
+// Read once per stored value, so a selector hands back the same object each time (and nothing re-renders for it).
+const parsedEdits = new WeakMap<object, PhotoEdit | null>();
+function parseSaved(raw: unknown): PhotoEdit | null {
+  if (!raw || typeof raw !== 'object') return null;
+  let e = parsedEdits.get(raw);
+  if (e === undefined) parsedEdits.set(raw, (e = parseEdit(raw)));
+  return e;
+}
+
+/** The edit saved for a photo, as the page sees it: the info file's, in info-file mode; none in photo-file mode (the file carries it). */
+const savedEdit = (s: Pick<GalleryState, 'editTarget'>, item: GalleryItem): PhotoEdit | null => (s.editTarget === 'info' ? parseSaved(item.info.edit) : null);
+
+/** The edit the page shows for a photo: its unsaved edit, else the saved one. Null: none. */
+export function shownEdit(s: Pick<GalleryState, 'pendingEdits' | 'editTarget'>, item: GalleryItem): PhotoEdit | null {
+  return s.pendingEdits[item.path] ?? savedEdit(s, item);
+}
 
 function stopTimers() {
   generation++;
@@ -293,6 +341,8 @@ export const useGallery = create<GalleryState>()((set, get) => {
     tidyOpen: false,
     gridCols: 1,
     view: 'grid',
+    ...noEdits,
+    editTarget: 'info',
 
     async loadRecent() {
       try {
@@ -307,7 +357,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
       stopTimers();
       const gen = generation;
       // The subfolders of the old folder mean nothing in this one.
-      set((s) => ({ filter: withoutRelDir(s.filter), job: null, root: folder, items: [], openStacks: [], ...noSelection, progress: { total: 0, processed: 0, startedAt: Date.now() } }));
+      set((s) => ({ filter: withoutRelDir(s.filter), job: null, root: folder, items: [], openStacks: [], ...noSelection, ...noEdits, progress: { total: 0, processed: 0, startedAt: Date.now() } }));
       let job: string;
       try {
         job = (await galleryApi.open(folder, recursive)).jobId;
@@ -385,16 +435,21 @@ export const useGallery = create<GalleryState>()((set, get) => {
       }
     },
 
+    // Another photo selected while one is being edited (a click on a tile, the photo deleted or filtered
+    // out) ends edit mode as Cancel does: the preview moves on to the new photo.
     select(path) {
-      set({ selected: path, selection: path === null ? [] : [path], anchor: path });
+      set((s) => ({ selected: path, selection: path === null ? [] : [path], anchor: path, editing: s.editing === path ? s.editing : null }));
     },
 
     clickSelect(path, mods) {
       const s = get();
-      set(clickSelect(selectVisible(s).map((i) => i.path), s, path, mods));
+      const next = clickSelect(selectVisible(s).map((i) => i.path), s, path, mods);
+      set({ ...next, editing: s.editing !== null && next.selected === s.editing ? s.editing : null });
     },
 
     openViewer(path) {
+      // Not over edit mode (a double-click on the tile being edited): Done or Cancel comes first.
+      if (get().editing !== null) return;
       // A photo folded into a stack (picked on the map) is shown unfolded: the viewer steps through the grid's list.
       unfoldFor([path]);
       set({ viewing: path });
@@ -473,14 +528,18 @@ export const useGallery = create<GalleryState>()((set, get) => {
     removeItems(paths) {
       const before = snapshot();
       const gone = new Set(paths);
-      set((s) => ({ items: s.items.filter((i) => !gone.has(i.path)) }));
+      // A deleted photo's unsaved edit goes with it.
+      set((s) => ({
+        items: s.items.filter((i) => !gone.has(i.path)),
+        pendingEdits: paths.some((p) => p in s.pendingEdits) ? Object.fromEntries(Object.entries(s.pendingEdits).filter(([p]) => !gone.has(p))) : s.pendingEdits,
+      }));
       settleSelection(before);
     },
 
     close() {
       cancelScan();
       stopTimers();
-      set({ job: null, root: null, items: [], openStacks: [], progress: null, ...noSelection, tidyOpen: false });
+      set({ job: null, root: null, items: [], openStacks: [], progress: null, ...noSelection, ...noEdits, tidyOpen: false });
     },
 
     setTidyOpen(tidyOpen) {
@@ -501,6 +560,29 @@ export const useGallery = create<GalleryState>()((set, get) => {
       const before = snapshot();
       set({ view });
       settleSelection(before);
+    },
+
+    startEdit(path) {
+      set({ editing: path });
+    },
+
+    finishEdit(edit) {
+      const s = get();
+      const path = s.editing;
+      if (path === null) return;
+      const item = s.items.find((i) => i.path === path);
+      const { [path]: _old, ...others } = s.pendingEdits;
+      const unchanged = sameEdit(edit, item ? savedEdit(s, item) : null);
+      set({ editing: null, pendingEdits: unchanged ? others : { ...others, [path]: edit ?? IDENTITY_EDIT } });
+    },
+
+    cancelEdit() {
+      set({ editing: null });
+    },
+
+    discardEdit(path) {
+      const { [path]: dropped, ...others } = get().pendingEdits;
+      if (dropped) set({ pendingEdits: others });
     },
 
     toast(kind, text) {
