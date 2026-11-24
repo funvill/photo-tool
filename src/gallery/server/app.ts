@@ -32,6 +32,11 @@ export interface GalleryItem extends GalleryPhoto {
   effectiveLon: number | null;
 }
 
+/** PATCH /api/gallery/info's reply: the updated photo, and with `job` the open folder's stamp around the write. */
+export interface GalleryInfoReply extends GalleryItem {
+  stamp?: { before: string; after: string };
+}
+
 /** Scan results kept in memory per server; asking for an older one is a 404. */
 const MAX_JOBS = 4;
 
@@ -105,6 +110,12 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     });
   };
 
+  /** Changes whenever any photoinfo.json (or fallback file) of these photos' folders does. */
+  const jobStamp = (photos: GalleryPhoto[]): string => {
+    const folders = [...new Set(photos.map((p) => dirname(p.path)))].sort();
+    return folders.map((f) => `${f}=${folderStamp(f, infoOpts)}`).join('|');
+  };
+
   app.get('/api/health', (_req, res) => res.json({ ok: true, app: 'gallery' }));
 
   app.get('/api/gallery/recent', (_req, res) => res.json(catalog.recentFolders().map((r) => ({ ...r, exists: isFolder(r.folder) }))));
@@ -151,24 +162,28 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     res.type('image/jpeg').sendFile(file);
   }));
 
+  // With `job`, the reply also has that folder's stamp just before and after this write (`stamp`),
+  // so the page can tell its own write from another program's change it has not seen yet.
   app.patch('/api/gallery/info', wrap((req, res) => {
-    const { path, patch } = req.body ?? {};
+    const { path, patch, job: jobId } = req.body ?? {};
     if (typeof path !== 'string' || !patch || typeof patch !== 'object' || Array.isArray(patch)) throw new HttpError(400, 'Expected { path, patch }');
     const photo = catalog.get(path);
     if (!photo) throw new HttpError(404, 'Unknown photo');
+    const job = typeof jobId === 'string' && jobIds.includes(jobId) ? scanner.get(jobId) : undefined;
+    const before = job ? jobStamp(job.photos) : undefined;
     try {
       updatePhotoInfo(dirname(photo.path), basename(photo.path), patch, infoOpts);
     } catch (e) {
       if (e instanceof PhotoInfoWriteError) throw new HttpError(409, e.message);
       throw e;
     }
-    res.json(itemsFor([photo])[0]);
+    const item: GalleryInfoReply = itemsFor([photo])[0];
+    if (job) item.stamp = { before: before!, after: jobStamp(job.photos) };
+    res.json(item);
   }));
 
   app.get('/api/gallery/stamp', wrap((req, res) => {
-    const job = requireJob(q(req, 'job'));
-    const folders = [...new Set(job.photos.map((p) => dirname(p.path)))].sort();
-    res.json({ stamp: folders.map((f) => `${f}=${folderStamp(f, infoOpts)}`).join('|') });
+    res.json({ stamp: jobStamp(requireJob(q(req, 'job')).photos) });
   }));
 
   app.get('/api/gallery/people', wrap((req, res) => {

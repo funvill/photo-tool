@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { DesktopApi } from '../../shared/desktopApi';
-import { galleryApi, type GalleryItem, type RecentFolder } from './api';
+import { galleryApi, type GalleryItem, type JobUpdate, type RecentFolder } from './api';
 
 // The gallery's state: the open folder, its photos (filled in while the folder is read), the
 // selection, thumbnail size and toasts. Photo info lives in photoinfo.json files that other
@@ -46,6 +46,8 @@ export const THUMB_MAX = 320;
 const THUMB_DEFAULT = 160;
 const THUMB_KEY = 'gallery.thumbSize';
 const JOB_POLL_MS = 500;
+/** A failed scan poll is retried this many times (1 s, 2 s, 4 s apart) before giving up. */
+const JOB_RETRIES = 3;
 const STAMP_POLL_MS = 3000;
 
 const clampThumb = (px: number) => Math.min(THUMB_MAX, Math.max(THUMB_MIN, Math.round(Number.isFinite(px) ? px : THUMB_DEFAULT)));
@@ -76,6 +78,10 @@ let generation = 0;
 let jobTimer: ReturnType<typeof setTimeout> | null = null;
 let stampTimer: ReturnType<typeof setInterval> | null = null;
 let lastStamp: string | null = null;
+// Info saved by this page while a reload is on its way, numbered, so that older reload cannot undo it.
+let saveSeq = 0;
+let saved: { seq: number; item: GalleryItem }[] = [];
+let reloading = 0;
 
 function stopTimers() {
   generation++;
@@ -83,32 +89,40 @@ function stopTimers() {
   if (stampTimer) clearInterval(stampTimer);
   jobTimer = stampTimer = null;
   lastStamp = null;
+  saved = [];
 }
 
 export const useGallery = create<GalleryState>()((set, get) => {
   const current = (gen: number, job: string) => gen === generation && get().job === job;
 
   /** Poll the scan every 500 ms, asking only for the photos not seen yet, until it is done. */
-  const pollJob = async (gen: number, job: string) => {
+  const pollJob = async (gen: number, job: string, failures = 0) => {
     jobTimer = null;
+    let u: JobUpdate;
     try {
-      const u = await galleryApi.job(job, get().items.length);
-      if (!current(gen, job)) return;
-      set((s) => ({
-        items: u.items.length ? [...s.items, ...u.items] : s.items,
-        progress: u.done ? null : { total: u.total, processed: u.processed, startedAt: u.startedAt },
-      }));
-      if (!u.done) {
-        jobTimer = setTimeout(() => void pollJob(gen, job), JOB_POLL_MS);
-        return;
-      }
-      if (u.errors.length) get().toast('error', `${plural(u.errors.length, 'photo')} could not be read: ${u.errors.slice(0, 3).map((e) => e.path.split(/[\\/]/).pop()).join(', ')}${u.errors.length > 3 ? '…' : ''}`);
-      await watchInfo(gen, job);
+      u = await galleryApi.job(job, get().items.length);
     } catch (e) {
       if (!current(gen, job)) return;
+      // The server may be busy for a moment: try again a few times before giving up.
+      if (failures < JOB_RETRIES) {
+        jobTimer = setTimeout(() => void pollJob(gen, job, failures + 1), 1000 * 2 ** failures);
+        return;
+      }
       set({ progress: null });
       get().toast('error', message(e));
+      return;
     }
+    if (!current(gen, job)) return;
+    set((s) => ({
+      items: u.items.length ? [...s.items, ...u.items] : s.items,
+      progress: u.done ? null : { total: u.total, processed: u.processed, startedAt: u.startedAt },
+    }));
+    if (!u.done) {
+      jobTimer = setTimeout(() => void pollJob(gen, job), JOB_POLL_MS);
+      return;
+    }
+    if (u.errors.length) get().toast('error', `${plural(u.errors.length, 'photo')} could not be read: ${u.errors.slice(0, 3).map((e) => e.path.split(/[\\/]/).pop()).join(', ')}${u.errors.length > 3 ? '…' : ''}`);
+    await watchInfo(gen, job);
   };
 
   /** Every 3 s: has any photoinfo.json of this folder changed? Then reload the photos' info, once. */
@@ -175,13 +189,17 @@ export const useGallery = create<GalleryState>()((set, get) => {
 
     async setStar(path, star) {
       const job = get().job;
+      const gen = generation;
       try {
-        const updated = await galleryApi.patchInfo(path, { star });
+        const { stamp, ...updated } = await galleryApi.patchInfo(path, { star }, job ?? undefined);
         set((s) => ({ items: s.items.map((i) => (i.path === path ? updated : i)) }));
-        // Our own write changed the stamp: take it as the new baseline instead of reloading every photo.
-        if (job && stampTimer) {
-          const gen = generation;
-          void galleryApi.stamp(job).then((s) => current(gen, job) && (lastStamp = s), () => undefined);
+        if (job && current(gen, job)) {
+          saveSeq++;
+          if (reloading > 0) saved.push({ seq: saveSeq, item: updated });
+          // Our own write changed the stamp. Take the new one as the baseline (no reload of every
+          // photo) only when nothing else had changed since the last poll; otherwise the next poll
+          // sees the difference and reloads, picking up the other program's change too.
+          if (stamp && lastStamp !== null && stamp.before === lastStamp) lastStamp = stamp.after;
         }
         return true;
       } catch (e) {
@@ -194,11 +212,19 @@ export const useGallery = create<GalleryState>()((set, get) => {
       const job = get().job;
       if (!job) return;
       const gen = generation;
+      const since = saveSeq;
+      reloading++;
       try {
         const items = await galleryApi.items(job);
-        if (current(gen, job)) set({ items });
+        if (!current(gen, job)) return;
+        // Saves that finished while this reload was on its way may be missing from it: keep them.
+        saved = saved.filter((s) => s.seq > since);
+        const newer = new Map(saved.map((s) => [s.item.path, s.item]));
+        set({ items: newer.size ? items.map((i) => newer.get(i.path) ?? i) : items });
       } catch (e) {
         if (current(gen, job)) get().toast('error', message(e));
+      } finally {
+        if (--reloading === 0) saved = [];
       }
     },
 

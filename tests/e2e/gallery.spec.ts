@@ -4,6 +4,7 @@ import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } fr
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test } from '@playwright/test';
+import { isSupported } from '../../src/server/media';
 
 const FIXTURES = join(process.cwd(), 'fixtures', 'generated', 'trip');
 
@@ -11,7 +12,9 @@ test('open a folder, see every photo, star one from the grid', async ({ page, re
   // A private copy, so the star is written there and not into the fixtures.
   const dir = join(mkdtempSync(join(tmpdir(), 'photobook-gallery-')), 'trip');
   cpSync(FIXTURES, dir, { recursive: true });
-  const count = readdirSync(dir).length;
+  // One tile per photo the gallery reads (SUPPORTED_EXTENSIONS), not per file.
+  const count = readdirSync(dir).filter(isSupported).length;
+  expect(count).toBeGreaterThan(0);
   try {
     // Open it through the API (a plain browser has no folder dialog): it becomes a recent folder.
     expect((await request.post('/api/gallery/open', { data: { folder: dir, recursive: false } })).status()).toBe(202);

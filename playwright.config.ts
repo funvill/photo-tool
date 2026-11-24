@@ -12,6 +12,8 @@ const GALLERY_DIR = process.env.PHOTOBOOK_E2E_GALLERY_DIR ?? 'test-results/e2e-g
 // One command line that both cmd.exe and sh run: no `rm`, and no `NAME=value` in front (the
 // variables go in `env` below). The folder is emptied by Node, which reads it from the environment.
 const emptyDir = (name: string) => `node -e "require('node:fs').rmSync(process.env.${name}, { recursive: true, force: true })"`;
+// The gallery's server does not build: stop at once, saying why, when the editor's build has not made its page.
+const needGalleryPage = `node -e "if (!require('node:fs').existsSync('dist/web/gallery.html')) { console.error('dist/web/gallery.html is missing: the editor web server (vite build) must start first'); process.exit(1) }"`;
 
 export default defineConfig({
   testDir: 'tests/e2e',
@@ -35,7 +37,7 @@ export default defineConfig({
       timeout: 120_000,
     },
     {
-      command: `${emptyDir('PHOTOBOOK_GALLERY_DATA_DIR')} && tsx src/gallery/server/main.ts`,
+      command: `${needGalleryPage} && ${emptyDir('PHOTOBOOK_GALLERY_DATA_DIR')} && tsx src/gallery/server/main.ts`,
       // The editor data folder (where photo info for read-only folders goes) is inside the throwaway one too.
       env: { NODE_ENV: 'production', PHOTOBOOK_GALLERY_PORT: String(GALLERY_PORT), PHOTOBOOK_GALLERY_DATA_DIR: GALLERY_DIR, PHOTOBOOK_DATA_DIR: `${GALLERY_DIR}/editor` },
       url: `http://127.0.0.1:${GALLERY_PORT}/api/health`,

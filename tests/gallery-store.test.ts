@@ -14,7 +14,8 @@ function item(over: Partial<GalleryItem> = {}): GalleryItem {
   };
 }
 
-type Route = (body: unknown) => { status?: number; json: unknown };
+type Reply = { status?: number; json: unknown };
+type Route = (body: unknown) => Reply | Promise<Reply>;
 let routes: Record<string, Route>;
 let calls: { method: string; url: string; body: unknown }[];
 
@@ -25,7 +26,7 @@ const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
   const path = url.split('?')[0];
   const route = routes[`${method} ${path}`];
   if (!route) return new Response(JSON.stringify({ error: `no route ${method} ${path}` }), { status: 500 });
-  const r = route(body);
+  const r = await route(body);
   return new Response(JSON.stringify(r.json), { status: r.status ?? 200, headers: { 'content-type': 'application/json' } });
 });
 
@@ -100,6 +101,89 @@ describe('gallery store', () => {
 
     await vi.advanceTimersByTimeAsync(9100);
     expect(count('GET', '/api/gallery/items')).toBe(1);
+  });
+
+  /** Open D:\Trip (two photos, read at once) and let the info watch take its baseline. */
+  async function openTrip(stamp: () => string) {
+    routes['POST /api/gallery/open'] = () => ({ status: 202, json: { jobId: 'j1' } });
+    routes['GET /api/gallery/recent'] = () => ({ json: [] });
+    routes['GET /api/gallery/jobs/j1'] = () => ({ json: { total: 1, processed: 1, startedAt: 0, done: true, errors: [], items: [item()] } });
+    routes['GET /api/gallery/stamp'] = () => ({ json: { stamp: stamp() } });
+    await useGallery.getState().open('D:\Trip', true);
+  }
+
+  it("does not reload after its own star, but still reloads for another program's change made just before it", async () => {
+    vi.useFakeTimers();
+    let stamp = 'one';
+    await openTrip(() => stamp);
+    routes['GET /api/gallery/items'] = () => ({ json: [item({ info: { star: true, notes: 'from the editor' } })] });
+    const starAs = (before: string, after: string) => {
+      routes['PATCH /api/gallery/info'] = (body) => {
+        expect(body).toEqual({ path: 'D:\Trip\a.jpg', patch: { star: true }, job: 'j1' });
+        stamp = after;
+        return { json: { ...item({ info: { star: true } }), stamp: { before, after } } };
+      };
+      return useGallery.getState().setStar('D:\Trip\a.jpg', true);
+    };
+
+    // Our own star only: the poll sees nothing new.
+    expect(await starAs('one', 'two')).toBe(true);
+    expect(useGallery.getState().items[0]).not.toHaveProperty('stamp');
+    await vi.advanceTimersByTimeAsync(3100);
+    expect(count('GET', '/api/gallery/items')).toBe(0);
+
+    // Another program writes, and we star before the next poll: that change is still picked up, once.
+    stamp = 'three';
+    expect(await starAs('three', 'four')).toBe(true);
+    await vi.advanceTimersByTimeAsync(3100);
+    expect(count('GET', '/api/gallery/items')).toBe(1);
+    expect(useGallery.getState().items[0].info.notes).toBe('from the editor');
+    await vi.advanceTimersByTimeAsync(9100);
+    expect(count('GET', '/api/gallery/items')).toBe(1);
+  });
+
+  it('keeps a star saved while an older reload was on its way', async () => {
+    useGallery.setState({ job: 'j1', root: 'D:\Trip', items: [item()] });
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    routes['GET /api/gallery/items'] = async () => {
+      await held;
+      return { json: [item({ info: { notes: 'n' } })] };
+    };
+    routes['PATCH /api/gallery/info'] = () => ({ json: item({ info: { star: true } }) });
+
+    const refresh = useGallery.getState().refreshInfo();
+    await vi.waitFor(() => expect(count('GET', '/api/gallery/items')).toBe(1));
+    expect(await useGallery.getState().setStar('D:\Trip\a.jpg', true)).toBe(true);
+    release();
+    await refresh;
+
+    expect(useGallery.getState().items[0].info.star).toBe(true);
+  });
+
+  it('keeps reading the folder after a failed poll, and gives up with a message after a few', async () => {
+    vi.useFakeTimers();
+    let failures = 2;
+    routes['POST /api/gallery/open'] = () => ({ status: 202, json: { jobId: 'j1' } });
+    routes['GET /api/gallery/recent'] = () => ({ json: [] });
+    routes['GET /api/gallery/stamp'] = () => ({ json: { stamp: 's' } });
+    routes['GET /api/gallery/jobs/j1'] = () =>
+      failures-- > 0 ? { status: 500, json: { error: 'busy' } } : { json: { total: 1, processed: 1, startedAt: 0, done: true, errors: [], items: [item()] } };
+    await useGallery.getState().open('D:\Trip', true);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(useGallery.getState().items).toHaveLength(1);
+    expect(useGallery.getState().progress).toBeNull();
+    expect(useGallery.getState().toasts).toEqual([]);
+    expect(count('GET', '/api/gallery/stamp')).toBeGreaterThan(0);
+
+    routes['POST /api/gallery/open'] = () => ({ status: 202, json: { jobId: 'j2' } });
+    routes['GET /api/gallery/jobs/j2'] = () => ({ status: 500, json: { error: 'The server stopped' } });
+    await useGallery.getState().open('D:\Other', true);
+    // Retries 1 s, 2 s and 4 s apart; the error toast then stays 7 s.
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(count('GET', '/api/gallery/jobs/j2')).toBe(4);
+    expect(useGallery.getState().progress).toBeNull();
+    expect(useGallery.getState().toasts).toEqual([expect.objectContaining({ kind: 'error', text: 'The server stopped' })]);
   });
 
   it('opens a folder the desktop app hands over', async () => {

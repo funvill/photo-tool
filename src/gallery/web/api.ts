@@ -1,9 +1,9 @@
 import type { PhotoInfo } from '../../photoinfo';
-import type { GalleryItem } from '../server/app';
+import type { GalleryInfoReply, GalleryItem } from '../server/app';
 
 // Thin client for the gallery's local server (same origin, 127.0.0.1). Errors carry the server's message.
 
-export type { GalleryItem };
+export type { GalleryInfoReply, GalleryItem };
 
 export class GalleryApiError extends Error {
   constructor(readonly status: number, message: string) {
@@ -48,7 +48,8 @@ export const galleryApi = {
   job: (id: string, since: number) => call<JobUpdate>('GET', `/api/gallery/jobs/${encodeURIComponent(id)}?${qs({ since })}`),
   items: (job: string) => call<GalleryItem[]>('GET', `/api/gallery/items?${qs({ job })}`),
   stamp: async (job: string) => (await call<{ stamp: string }>('GET', `/api/gallery/stamp?${qs({ job })}`)).stamp,
-  patchInfo: (path: string, patch: Partial<PhotoInfo>) => call<GalleryItem>('PATCH', '/api/gallery/info', { path, patch }),
+  /** With `job`, the reply carries that folder's stamp just before and after the write. */
+  patchInfo: (path: string, patch: Partial<PhotoInfo>, job?: string) => call<GalleryInfoReply>('PATCH', '/api/gallery/info', job ? { path, patch, job } : { path, patch }),
 };
 
 /** 's' is 400 px (the grid), 'm' is 1600 px (the hover preview). */

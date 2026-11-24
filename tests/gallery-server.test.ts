@@ -132,6 +132,22 @@ describe('gallery server', () => {
     expect((await api('GET', `/api/gallery/stamp?job=${jobId}`)).body.stamp).not.toBe(before);
   });
 
+  it("PATCH with the job reports the folder's stamp just before and after its write", async () => {
+    await start();
+    const { jobId, byName } = await loaded();
+    const seen = (await api('GET', `/api/gallery/stamp?job=${jobId}`)).body.stamp;
+    // Another program writes first: `before` is no longer what the page last saw.
+    updatePhotoInfo(photos, byName('day1-02-street.jpg').fileName, { star: true }, { fallbackDir });
+    const external = (await api('GET', `/api/gallery/stamp?job=${jobId}`)).body.stamp;
+    const res = await api('PATCH', '/api/gallery/info', { path: byName('day1-01-arrival.jpg').path, patch: { star: true }, job: jobId });
+    expect(res.status).toBe(200);
+    expect(res.body.stamp.before).toBe(external);
+    expect(res.body.stamp.before).not.toBe(seen);
+    expect(res.body.stamp.after).toBe((await api('GET', `/api/gallery/stamp?job=${jobId}`)).body.stamp);
+    // Without the job there is no stamp.
+    expect((await api('PATCH', '/api/gallery/info', { path: byName('day1-01-arrival.jpg').path, patch: { star: false } })).body.stamp).toBeUndefined();
+  });
+
   it('a read-only folder falls back to the editor fallback dir and the editor sees it', async () => {
     await start({
       photoInfoSeams: {
