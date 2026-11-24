@@ -81,12 +81,17 @@ In the desktop and local app, a photo's star, date, place, people and notes live
 
 - Pages you edited by hand are never re-laid, and photos you placed yourself are never removed. An unstarred photo on a page you edited leaves an empty frame marked "Unstarred: fill or remove".
 - Pages nothing happened to stay exactly as they were. Newly starred photos are added to pages with room (up to 7 a page, or the printer's limit if lower), and new pages are added where needed.
+- With nothing starred, Update leaves the book as it is. A photo whose file is missing is never removed, and a photo whose folder or `photoinfo.json` can't be read (a drive that isn't plugged in, a broken file) is neither added nor removed; the summary says how many were left alone.
 - A summary lists what was added, removed, replaced and re-laid, with a link to each page it touched. It is one undo step.
 - **Rebuild all pages** starts the draft again and **Another variation** gives a different layout. **Re-lay this page** (in the page's side panel) redoes one page.
 
 ## Dragging photos in
 
-Drop JPEGs or folders from Explorer or Finder onto a frame (replaces it), onto empty space on a page (adds it) or onto the library (imports it). Imports show the time left, the library can be widened by dragging its edge, and hovering a photo shows a larger preview. Only the desktop and local app do this.
+Drop photos from Explorer or Finder onto a frame (replaces it), onto empty space on a page (adds it) or onto the library (imports it). A folder dropped anywhere is imported into the library only; its photos are not placed on the page. Imports show the time left, the library can be widened by dragging its edge, and hovering a photo shows a larger preview.
+
+- **Desktop app:** files and folders can be dropped.
+- **Web version:** dropped files are imported by their contents (copied into the browser's storage); folders can't be dropped there.
+- **Local app in a plain browser:** drops are refused, because the browser does not say where a dropped file lives. Use **Import** to choose a folder instead.
 
 ## Using it
 
