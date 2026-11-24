@@ -37,3 +37,4 @@ export * from './galleryEdit';
 export * from './galleryViewer';
 export * from './photoFacts';
 export * from './histogram';
+export * from './photoEdit';
