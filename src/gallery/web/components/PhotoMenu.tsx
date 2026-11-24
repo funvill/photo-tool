@@ -23,8 +23,8 @@ const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-/** The review keys (move, favourite, hide): they act on the photos, so the menu goes away. */
-const REVIEW_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'f', 'F', 'h', 'H']);
+/** The review keys (move, favourite, hide, edit): they act on the photos, so the menu goes away. */
+const REVIEW_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'f', 'F', 'h', 'H', 'e', 'E']);
 
 /** Where a deleted photo goes, named as the desktop app's confirm names it. */
 const BIN = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent) ? 'Recycle Bin' : 'Trash';
@@ -102,6 +102,13 @@ async function trash(path: string) {
   }
 }
 
+/** Edit mode on the photo right-clicked (it is the selected one: a right-click selects it). */
+function edit(path: string) {
+  const s = useGallery.getState();
+  if (s.selected !== path) s.select(path);
+  s.startEdit(path);
+}
+
 export function PhotoMenu({ x, y, path, onClose }: PhotoMenuProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState({ left: x, top: y });
@@ -109,6 +116,7 @@ export function PhotoMenu({ x, y, path, onClose }: PhotoMenuProps) {
   const selectedItem = useGallery((s) => s.items.find((i) => i.path === (s.selected ?? path)));
   const starred = selectedItem?.info.star === true;
   const hidden = selectedItem?.info.hidden === true;
+  const editing = useGallery((s) => s.editing === path);
 
   // Keep the menu on screen.
   useLayoutEffect(() => {
@@ -155,6 +163,8 @@ export function PhotoMenu({ x, y, path, onClose }: PhotoMenuProps) {
 
   return (
     <div className="ctx-menu" ref={ref} style={pos} role="menu" aria-label="Photo" onContextMenu={(e) => e.preventDefault()}>
+      <MenuItem icon="crop" label="Edit" hint="E" disabled={editing} onClick={go(() => edit(path))} />
+      <div className="ctx-sep" />
       <MenuItem icon="image" label="Copy to clipboard" disabled={!desktop?.copyImage} onClick={go(() => copyImage(path))} />
       <MenuItem icon="copy" label="Copy path to clipboard" onClick={go(() => copyPaths(path))} />
       <MenuItem icon="folder" label="Show in file explorer" disabled={!desktop?.showPhotoInFolder} onClick={go(() => showInFolder(path))} />

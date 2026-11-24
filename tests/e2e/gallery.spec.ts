@@ -293,9 +293,9 @@ test('right-click opens the menu with icons; Copy path puts the path on the clip
     const menu = page.getByRole('menu');
     await expect(menu).toBeVisible();
     const items = menu.getByRole('menuitem');
-    await expect(items).toHaveText([/Copy to clipboard/, /Copy path to clipboard/, /Show in file explorer/, /Favourite/, /Hide/, /Delete/]);
-    for (let i = 0; i < 6; i++) await expect(items.nth(i).locator('svg.icon')).toHaveCount(1);
-    await expect(menu.locator('.ctx-sep')).toHaveCount(2);
+    await expect(items).toHaveText([/Edit/, /Copy to clipboard/, /Copy path to clipboard/, /Show in file explorer/, /Favourite/, /Hide/, /Delete/]);
+    for (let i = 0; i < 7; i++) await expect(items.nth(i).locator('svg.icon')).toHaveCount(1);
+    await expect(menu.locator('.ctx-sep')).toHaveCount(3);
 
     await menu.getByRole('menuitem', { name: /Copy path to clipboard/ }).click();
     await expect(menu).toHaveCount(0);
@@ -562,6 +562,160 @@ test('on a wide window the preview fits inside its pane; the wheel zooms with a 
     await stage.dblclick({ position: { x: 20, y: 20 } });
     await expect(page.getByRole('dialog', { name: 'Photo viewer' })).toBeVisible();
     await page.keyboard.press('Escape');
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+// ---- Edit mode: crop and rotate in the preview pane. Nothing is written until a save (a later step).
+const box = async (page: Page, selector: string) => (await page.locator(selector).boundingBox())!;
+
+test('E opens edit mode; R turns the crop box; a dragged corner and Done leave an unsaved edit on the tile and preview', async ({ page, request }) => {
+  const dir = await openTrip(page, request);
+  try {
+    const first = await altOf(page, 0);
+    const preview = page.getByRole('region', { name: 'Preview' });
+    await expect(selectedImg(page)).toHaveAttribute('alt', first!);
+    await page.keyboard.press('e');
+    const done = preview.getByRole('button', { name: 'Done' });
+    await expect(done).toBeVisible();
+    await expect(preview.getByRole('button', { name: 'Cancel' })).toBeVisible();
+    await expect(preview.getByRole('group', { name: 'Aspect ratio' }).getByRole('button', { name: 'Free' })).toHaveAttribute('aria-pressed', 'true');
+    // The review keys are off: the arrows do not move the selection.
+    await page.keyboard.press('ArrowRight');
+    await expect(selectedImg(page)).toHaveAttribute('alt', first!);
+
+    // R turns the photo 90 degrees: the crop box (the whole photo) turns from landscape to portrait or back.
+    const crop = page.locator('.gallery-crop-box');
+    // The frame shows once the picture has loaded (its shape is not known before).
+    await expect(page.locator('.gallery-edit-frame')).toBeVisible();
+    await expect.poll(async () => (await crop.boundingBox())?.width ?? 0).toBeGreaterThan(50);
+    const before = await box(page, '.gallery-crop-box');
+    await page.keyboard.press('r');
+    await expect.poll(async () => {
+      const b = (await crop.boundingBox())!;
+      return Math.round((b.width / b.height) * 100);
+    }).toBe(Math.round((before.height / before.width) * 100));
+
+    // Drag the bottom-right corner in: the box gets smaller.
+    const turned = await box(page, '.gallery-crop-box');
+    const h = await box(page, '.gallery-crop-handle.se');
+    await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(h.x + h.width / 2 - 60, h.y + h.height / 2 - 40, { steps: 5 });
+    await page.mouse.up();
+    const cropped = await box(page, '.gallery-crop-box');
+    expect(cropped.width).toBeLessThan(turned.width - 40);
+    expect(cropped.height).toBeLessThan(turned.height - 20);
+
+    await done.click();
+    await expect(done).toHaveCount(0);
+    await expect(page.locator('.gallery-tile.selected .gallery-tile-unsaved')).toHaveCount(1);
+    await expect(page.locator('.gallery-tile-unsaved')).toHaveCount(1);
+    await expect(preview).toContainText('Edited · not saved');
+    // The preview and the tile show the edit; the arrows work again.
+    await expect(preview.locator('.gallery-preview-img.gallery-edited img')).toBeVisible();
+    await expect(page.locator('.gallery-tile.selected .gallery-edited img')).toHaveCount(1);
+    // The edited photo zooms like any other, with the mini map; double-click goes back to fit.
+    const stage = preview.locator('.gallery-preview-stage');
+    const s = (await stage.boundingBox())!;
+    await page.mouse.move(s.x + s.width / 2, s.y + s.height / 2);
+    await page.mouse.wheel(0, -100);
+    await expect(page.locator('.gallery-minimap .gallery-edited img')).toHaveCount(1);
+    await stage.dblclick({ position: { x: 20, y: 20 } });
+    await expect(page.locator('.gallery-minimap')).toHaveCount(0);
+    await page.keyboard.press('ArrowRight');
+    await expect(selectedImg(page)).not.toHaveAttribute('alt', first!);
+    await expect(preview).not.toContainText('Edited · not saved');
+    // Nothing was written.
+    expect(photoInfo(dir)).toEqual({});
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+test('Esc and Cancel leave edits as they were; e typed in the description does not open edit mode; the slider keeps its arrows', async ({ page, request }) => {
+  const dir = await openTrip(page, request);
+  try {
+    const first = await altOf(page, 0);
+    const preview = page.getByRole('region', { name: 'Preview' });
+    const done = preview.getByRole('button', { name: 'Done' });
+
+    const description = page.getByRole('textbox', { name: 'Description' });
+    await description.click();
+    await page.keyboard.type('e');
+    await expect(description).toHaveValue('e');
+    await expect(done).toHaveCount(0);
+
+    // The caption's Edit button opens it too; the slider's arrows move the slider only.
+    await preview.getByRole('button', { name: 'Edit' }).click();
+    await expect(done).toBeVisible();
+    const slider = preview.getByRole('slider', { name: 'Straighten' });
+    await slider.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect(slider).toHaveValue('0.5');
+    await expect(preview).toContainText('+0.5°');
+    await expect(selectedImg(page)).toHaveAttribute('alt', first!);
+    // Double-click puts it back to 0.
+    await slider.dblclick();
+    await expect(slider).toHaveValue('0');
+    await page.keyboard.press('Escape');
+    await expect(done).toHaveCount(0);
+    await expect(page.locator('.gallery-tile-unsaved')).toHaveCount(0);
+    await expect(preview).not.toContainText('Edited · not saved');
+
+    // An unsaved edit (Square), then edit again and Cancel: it is still there.
+    await page.keyboard.press('e');
+    await expect(page.locator('.gallery-edit-frame')).toBeVisible();
+    await preview.getByRole('button', { name: 'Square' }).click();
+    const sq = await box(page, '.gallery-crop-box');
+    expect(Math.abs(sq.width - sq.height)).toBeLessThan(2);
+    await done.click();
+    await expect(page.locator('.gallery-tile.selected .gallery-tile-unsaved')).toHaveCount(1);
+    await page.keyboard.press('e');
+    await page.keyboard.press('r');
+    await preview.getByRole('button', { name: 'Cancel' }).click();
+    await expect(done).toHaveCount(0);
+    await expect(page.locator('.gallery-tile.selected .gallery-tile-unsaved')).toHaveCount(1);
+    await expect(preview).toContainText('Edited · not saved');
+
+    // Reset and Done: back to no edit, which is what is saved, so the unsaved edit goes.
+    await page.keyboard.press('e');
+    await preview.getByRole('button', { name: 'Reset' }).click();
+    await done.click();
+    await expect(done).toHaveCount(0);
+    await expect(page.locator('.gallery-tile-unsaved')).toHaveCount(0);
+    await expect(preview).not.toContainText('Edited · not saved');
+    await expect.poll(() => photoInfo(dir)).toEqual({ [first!]: { description: 'e' } });
+  } finally {
+    removeTrip(dir);
+  }
+});
+
+test('Edit in the right-click menu opens edit mode on that photo; a saved edit shows on the tile and is where editing starts', async ({ page, request }) => {
+  const dir = await openTrip(page, request, { 'day1-02-street.jpg': { edit: { rotate: 90, straighten: 0, crop: { x: 0, y: 0, w: 0.5, h: 0.5 } } } });
+  try {
+    await page.getByLabel('Stack similar').uncheck();
+    const tile = page.locator('.gallery-tile[title="day1-02-street.jpg"]');
+    // A saved edit (info-file mode) shows, with no unsaved dot.
+    await expect(tile.locator('.gallery-edited img')).toHaveCount(1);
+    await expect(tile.locator('.gallery-tile-unsaved')).toHaveCount(0);
+    await tile.click({ button: 'right' });
+    await page.getByRole('menuitem', { name: /Edit/ }).click();
+    const preview = page.getByRole('region', { name: 'Preview' });
+    await expect(preview.getByRole('button', { name: 'Done' })).toBeVisible();
+    // It starts from the saved edit: the crop box is half the frame each way.
+    await expect(page.locator('.gallery-edit-frame')).toBeVisible();
+    await expect.poll(async () => (await page.locator('.gallery-edit-frame').boundingBox())?.width ?? 0).toBeGreaterThan(50);
+    const frame = await box(page, '.gallery-edit-frame');
+    const crop = await box(page, '.gallery-crop-box');
+    expect(crop.width / frame.width).toBeCloseTo(0.5, 1);
+    expect(crop.height / frame.height).toBeCloseTo(0.5, 1);
+    // Done without a change: nothing unsaved.
+    await preview.getByRole('button', { name: 'Done' }).click();
+    await expect(preview.getByRole('button', { name: 'Done' })).toHaveCount(0);
+    await expect(tile.locator('.gallery-tile-unsaved')).toHaveCount(0);
+    await expect(preview).not.toContainText('Edited · not saved');
   } finally {
     removeTrip(dir);
   }

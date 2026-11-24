@@ -32,15 +32,16 @@ function stepFrom(list: { path: string }[], unfolded: { path: string }[], select
  * The review keys, one window listener for the whole screen (it works whichever view shows the photos):
  * arrows, Home and End move the selection through the shown list (Up/Down by a row of the grid);
  * F favourites (stars) and H hides the selected photo, every selected one when several are; Enter or
- * Space opens the selected photo in the viewer. Not while typing, while the viewer or the tidy dialog
- * is open, or with Ctrl, Alt or Meta held.
+ * Space opens the selected photo in the viewer; E opens edit mode on it. Not while typing, while the
+ * viewer or the tidy dialog is open, while a photo is being edited (edit mode has its own keys), or
+ * with Ctrl, Alt or Meta held.
  */
 export function useReviewKeys(onOpen: (path: string) => void) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return;
       const s = useGallery.getState();
-      if (s.viewing !== null || s.tidyOpen) return;
+      if (s.viewing !== null || s.tidyOpen || s.editing !== null) return;
 
       if (e.key === 'Enter' || e.key === ' ') {
         if (e.repeat || !s.selected || inside(e, PRESSABLE)) return;
@@ -51,6 +52,15 @@ export function useReviewKeys(onOpen: (path: string) => void) {
         return;
       }
       if (inside(e, TYPING)) return;
+
+      if (e.key === 'e' || e.key === 'E') {
+        // Only a photo the preview shows (one the scan has read, not filtered out).
+        const path = s.selected;
+        if (path === null || !selectFiltered(s).some((i) => i.path === path)) return;
+        e.preventDefault();
+        if (!e.repeat) s.startEdit(path);
+        return;
+      }
 
       const flag = e.key === 'f' || e.key === 'F' ? 'star' : e.key === 'h' || e.key === 'H' ? 'hidden' : null;
       if (flag) {

@@ -78,6 +78,46 @@
 .gallery-preview-caption strong { min-width: 0; margin-right: 4px; }
 .gallery-preview-caption .badge { font-size: 11px; padding: 2px 7px; white-space: nowrap; background: rgba(255, 255, 255, 0.12); }
 .gallery-preview-caption .gallery-badge-fav { background: var(--accent); color: var(--accent-ink); }
+.gallery-preview-caption .gallery-badge-unsaved { background: #d98b2b; color: #111; }
+.gallery-preview-caption .gallery-preview-edit { margin-left: auto; flex: none; gap: 5px; }
+
+/* A photo with an edit (EditedImage): the box hides what is cut away; the picture inside is placed and turned
+   by editCss (transform-origin 0 0). */
+.gallery-edited { position: relative; overflow: hidden; flex: none; }
+.gallery-edited > img { position: absolute; left: 0; top: 0; transform-origin: 0 0; max-width: none; max-height: none; display: block; object-fit: fill; }
+.gallery-preview-img.gallery-edited { position: absolute; }
+.gallery-tile .gallery-edited > img, .gallery-minimap .gallery-edited > img { object-fit: fill; }
+/* The edited picture is positioned, so it would cover the tile's own outline: the outline is drawn again over it. */
+.gallery-tile.edited::after { content: ''; position: absolute; inset: 0; pointer-events: none; outline: inherit; outline-offset: inherit; }
+.gallery-tile-unsaved { position: absolute; left: 7px; bottom: 7px; width: 9px; height: 9px; border-radius: 50%; background: #d98b2b; box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.6); pointer-events: none; }
+
+/* Edit mode: the whole photo (turned, straightened) fitted in the stage with the crop box over it; outside the
+   box is dimmed. The toolbar sits under the stage, never over the picture. */
+.gallery-editpane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.gallery-edit-stage { flex: 1; min-height: 0; position: relative; overflow: hidden; user-select: none; touch-action: none; }
+.gallery-edit-frame { position: absolute; }
+.gallery-crop-box { position: absolute; box-sizing: border-box; border: 1px solid rgba(255, 255, 255, 0.9); box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6); cursor: move; touch-action: none;
+  background-image: linear-gradient(rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0.35)), linear-gradient(rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0.35)), linear-gradient(rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0.35)), linear-gradient(rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0.35));
+  background-size: 1px 100%, 1px 100%, 100% 1px, 100% 1px; background-position: 33.333% 0, 66.667% 0, 0 33.333%, 0 66.667%; background-repeat: no-repeat; }
+.gallery-crop-handle { position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px; touch-action: none; }
+.gallery-crop-handle::after { content: ''; position: absolute; inset: 5px; background: #fff; border-radius: 2px; box-shadow: 0 0 2px rgba(0, 0, 0, 0.8); }
+.gallery-crop-handle.nw { left: 0; top: 0; cursor: nwse-resize; }
+.gallery-crop-handle.n { left: 50%; top: 0; cursor: ns-resize; }
+.gallery-crop-handle.ne { left: 100%; top: 0; cursor: nesw-resize; }
+.gallery-crop-handle.e { left: 100%; top: 50%; cursor: ew-resize; }
+.gallery-crop-handle.se { left: 100%; top: 100%; cursor: nwse-resize; }
+.gallery-crop-handle.s { left: 50%; top: 100%; cursor: ns-resize; }
+.gallery-crop-handle.sw { left: 0; top: 100%; cursor: nesw-resize; }
+.gallery-crop-handle.w { left: 0; top: 50%; cursor: ew-resize; }
+.gallery-edit-tools { flex: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 8px 12px; border-top: 1px solid rgba(255, 255, 255, 0.08); background: #18181a; }
+.gallery-edit-tools .seg { background: #222; border-color: #3a3a3e; }
+.gallery-edit-tools .icon-btn { color: #ddd; }
+.gallery-edit-tools .btn-small { gap: 5px; }
+.gallery-rotate-left { display: inline-grid; transform: scaleX(-1); }
+.gallery-straighten { gap: 6px; color: rgba(255, 255, 255, 0.75); white-space: nowrap; }
+.gallery-straighten input { width: 140px; accent-color: var(--accent); }
+.gallery-straighten-value { min-width: 44px; font-variant-numeric: tabular-nums; }
+.gallery-edit-spacer { flex: 1; }
 .gallery-details-col { flex: none; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--panel); }
 .gallery-details { flex: 1; width: 100%; display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-left: 1px solid var(--line-soft); }
 .gallery-details-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line-soft); }

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { dragPaths } from '../../../core/galleryViewer';
 import { desktop } from '../../../web/desktop';
 import { gridWindow } from '../../../web/virtualGrid';
-import { selectVisible, useGallery, useStackInfo, useVisibleItems } from '../store';
+import { isIdentityEdit } from '../../../core/photoEdit';
+import { selectVisible, shownEdit, useGallery, useStackInfo, useVisibleItems } from '../store';
 import { Tile } from './Tile';
 
 const GAP = 6;
@@ -26,6 +27,9 @@ export function Grid({ onOpen, onContextMenu }: { onOpen: (path: string) => void
   const thumbSize = useGallery((s) => s.thumbSize);
   const selected = useGallery((s) => s.selected);
   const selection = useGallery((s) => s.selection);
+  // Edits shown on the tiles (unsaved, else saved): a photo without one keeps the plain thumbnail.
+  const pendingEdits = useGallery((s) => s.pendingEdits);
+  const editTarget = useGallery((s) => s.editTarget);
   const ref = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ width: 0, height: 0 });
   const [scrollTop, setScrollTop] = useState(0);
@@ -99,6 +103,7 @@ export function Grid({ onOpen, onContextMenu }: { onOpen: (path: string) => void
   const tiles = [];
   for (let i = w.firstIndex; i <= w.lastIndex; i++) {
     const item = items[i];
+    const edit = shownEdit({ pendingEdits, editTarget }, item);
     tiles.push(
       <Tile
         key={item.path}
@@ -110,6 +115,8 @@ export function Grid({ onOpen, onContextMenu }: { onOpen: (path: string) => void
         picked={picked.has(item.path)}
         hidden={item.info.hidden === true}
         stack={stacks.get(item.path)}
+        edit={edit && !isIdentityEdit(edit) ? edit : null}
+        unsaved={item.path in pendingEdits}
         onSelect={onSelect}
         onStar={onStar}
         onToggleStack={onToggleStack}

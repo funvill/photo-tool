@@ -1,7 +1,9 @@
 import { memo, type MouseEvent, type SyntheticEvent } from 'react';
 import type { StackInfo } from '../../../core/galleryStacks';
+import type { PhotoEdit } from '../../../core/photoEdit';
 import { Icon } from '../../../web/components/Icon';
 import { thumbUrl, type GalleryItem } from '../api';
+import { EditedImage } from './EditedImage';
 
 export interface TileProps {
   item: GalleryItem;
@@ -17,6 +19,10 @@ export interface TileProps {
   hidden: boolean;
   /** Its stack, when it is one of a stack's shown photos. */
   stack?: StackInfo;
+  /** The edit shown on the thumbnail (unsaved, else saved), or null for the plain thumbnail. */
+  edit: PhotoEdit | null;
+  /** It has an edit not saved yet: a small dot says so. */
+  unsaved: boolean;
   onSelect(path: string, mods: { ctrl: boolean; shift: boolean }): void;
   onStar(path: string, star: boolean): void;
   /** The "×N" badge of a stack's top: unfold or fold the stack. */
@@ -34,10 +40,10 @@ export interface TileProps {
 /** A click on one of the tile's own buttons is not a click on the photo. */
 const onControls = (e: SyntheticEvent) => !!(e.target as HTMLElement).closest('.gallery-tile-actions, .gallery-stack-badge');
 
-/** One photo in the grid: its thumbnail, star and hidden marks, a stack's "×N" badge, and a star button on hover. */
-export const Tile = memo(function Tile({ item, x, y, size, selected, picked, hidden, stack, onSelect, onStar, onToggleStack, onOpen, onDragReady, onDragOut, onContextMenu }: TileProps) {
+/** One photo in the grid: its thumbnail (edited, when it has an edit), star and hidden marks, a dot for an unsaved edit, a stack's "×N" badge, and a star button on hover. */
+export const Tile = memo(function Tile({ item, x, y, size, selected, picked, hidden, stack, edit, unsaved, onSelect, onStar, onToggleStack, onOpen, onDragReady, onDragOut, onContextMenu }: TileProps) {
   const starred = item.info.star === true;
-  const classes = ['gallery-tile', selected && 'selected', picked && 'picked', starred && 'starred', hidden && 'hidden', stack && !stack.top && 'stack-member', stack?.top && stack.open && 'stack-open'];
+  const classes = ['gallery-tile', selected && 'selected', picked && 'picked', starred && 'starred', hidden && 'hidden', stack && !stack.top && 'stack-member', stack?.top && stack.open && 'stack-open', edit && 'edited'];
   return (
     <div
       className={classes.filter(Boolean).join(' ')}
@@ -55,7 +61,12 @@ export const Tile = memo(function Tile({ item, x, y, size, selected, picked, hid
       }}
       onContextMenu={(e) => onContextMenu?.(item.path, e)}
     >
-      <img src={thumbUrl(item.key, 's')} alt={item.fileName} loading="lazy" decoding="async" draggable={false} />
+      {edit ? (
+        <EditedImage src={thumbUrl(item.key, 's')} alt={item.fileName} edit={edit} box={{ w: size, h: size }} fit="cover" loading="lazy" />
+      ) : (
+        <img src={thumbUrl(item.key, 's')} alt={item.fileName} loading="lazy" decoding="async" draggable={false} />
+      )}
+      {unsaved && <span className="gallery-tile-unsaved" aria-label="Edited, not saved" title="Edited, not saved" />}
       {(starred || hidden) && (
         <span className="gallery-tile-marks">
           {starred && (
