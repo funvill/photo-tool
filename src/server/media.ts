@@ -99,6 +99,8 @@ export interface ExtractedMetadata {
   camera: string | null;
   /** Lens and exposure settings; `{}` when the file has none. */
   exif: PhotoExif;
+  /** False when the file itself could not be read (everything above is then empty, not "none in the file"). */
+  read: boolean;
 }
 
 const positive = (v: unknown): number | undefined => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : undefined);
@@ -146,7 +148,7 @@ export async function readMetadata(originalPath: string): Promise<ExtractedMetad
   try {
     data = await readFile(originalPath);
   } catch {
-    return { capturedAt, gpsLat, gpsLon, camera, exif };
+    return { capturedAt, gpsLat, gpsLon, camera, exif, read: false };
   }
   try {
     const tags = await exifr.parse(data, { reviveValues: false, pick: ['DateTimeOriginal', 'CreateDate', 'DateTimeDigitized', 'ModifyDate', 'DateTime', 'Make', 'Model', 'LensModel', 'LensMake', 'FocalLength', 'FocalLengthIn35mmFormat', 'FNumber', 'ExposureTime', 'ISO', 'ExposureBiasValue', 'Flash'] });
@@ -165,7 +167,7 @@ export async function readMetadata(originalPath: string): Promise<ExtractedMetad
   } catch {
     // no GPS — fine
   }
-  return { capturedAt, gpsLat, gpsLon, camera, exif };
+  return { capturedAt, gpsLat, gpsLon, camera, exif, read: true };
 }
 
 /** Dimensions after applying EXIF orientation. */

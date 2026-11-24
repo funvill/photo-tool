@@ -42,14 +42,17 @@ describe('readMetadata exif', () => {
     try {
       const file = join(dir, 'a.jpg');
       writeFileSync(file, await sharp({ create: { width: 8, height: 8, channels: 3, background: '#888' } }).withExif({ IFD2: { ISOSpeedRatings: '200', FNumber: '28/10' } }).jpeg().toBuffer());
-      const { exif } = await readMetadata(file);
+      const { exif, read } = await readMetadata(file);
+      expect(read).toBe(true);
       expect(exif.iso).toBe(200);
       expect(exif.aperture).toBeCloseTo(2.8);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
-  it('gives {} for a missing file', async () => {
-    expect((await readMetadata(join(tmpdir(), 'no-such-file.jpg'))).exif).toEqual({});
+  it('gives {} for a missing file, and says it could not be read', async () => {
+    const meta = await readMetadata(join(tmpdir(), 'no-such-file.jpg'));
+    expect(meta.exif).toEqual({});
+    expect(meta.read).toBe(false);
   });
 });

@@ -151,13 +151,16 @@ export class Scanner {
     // A cached row is reused as long as its thumbnails are still on disk.
     if (hit && (await this.thumbsExist(hit.key))) {
       const photo = { ...hit, folder: job.root, relDir };
-      // A row cached before exif was read: read just that, leaving thumbnails and analysis alone.
+      // A row cached before exif was read: read just that, leaving thumbnails and analysis alone. A file
+      // that can't be read just now keeps its row as it was (exif still missing: tried again next time).
       let upgraded = false;
       if (!photo.exif) {
         const meta = await readMetadata(path);
-        photo.exif = meta.exif;
-        photo.camera = meta.camera;
-        upgraded = true;
+        if (meta.read) {
+          photo.exif = meta.exif;
+          photo.camera = meta.camera;
+          upgraded = true;
+        }
       }
       if (upgraded || photo.folder !== hit.folder || photo.relDir !== hit.relDir) this.catalog.put(photo);
       return photo;

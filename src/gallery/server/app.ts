@@ -228,13 +228,15 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
   }));
 
   // Asked by the desktop app's main process before a file action of the right-click menu (copy, show in
-  // folder, delete): which of these paths are photos of a folder open now, in the order asked. Stricter
-  // than drag-check, which takes any photo ever catalogued (a folder opened in an earlier session too).
+  // folder, delete): which of these paths are photos of the folder open now (the last one opened), in
+  // the order asked. Stricter than drag-check, which takes any photo ever catalogued (a folder opened in
+  // an earlier session too); a folder opened before this one, though its scan is still kept, is not open.
   app.post('/api/gallery/file-check', wrap((req, res) => {
     const paths: unknown = req.body?.paths;
     if (!Array.isArray(paths) || !paths.every((p) => typeof p === 'string')) throw new HttpError(400, 'Expected { paths: string[] }');
     const open = new Set<string>();
-    for (const id of jobIds) for (const p of scanner.get(id)?.photos ?? []) open.add(p.path);
+    const last = jobIds.at(-1);
+    for (const p of (last && scanner.get(last)?.photos) || []) open.add(p.path);
     res.json({ paths: (paths as string[]).slice(0, DRAG_MAX).filter((p) => open.has(p)) });
   }));
 
