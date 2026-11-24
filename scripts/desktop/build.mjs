@@ -3,8 +3,9 @@
 //   dist/desktop/app/        main.cjs, preload.cjs, server-host.cjs, package.json and only the
 //                            node_modules that cannot be bundled (sharp, pdfkit, fontkit and
 //                            what they need)
-//   dist/desktop/resources/  fonts, world-atlas, the built editor and the icon (the server's
-//                            resource root, see src/server/resources.ts)
+//   dist/desktop/resources/  fonts, world-atlas, the built editor and gallery (web/index.html,
+//                            web/gallery.html) and the icon (the server's resource root, see
+//                            src/server/resources.ts)
 //   dist/desktop/icon.png    the installer's icon
 //   dist/desktop/icons/      the same icon in the sizes a Linux desktop looks for
 //
@@ -138,6 +139,8 @@ if (dev) {
   const resources = join(out, 'resources');
   rmSync(resources, { recursive: true, force: true });
   run('scripts/collect-resources.ts', resources, '--web');
+  // `--gallery` starts the gallery program from the same build: its page must be there too.
+  if (!existsSync(join(resources, 'web', 'gallery.html'))) throw new Error('The web build has no gallery.html. Run `npm run build` first.');
   run('scripts/launcher/make-icon.ts', join(out, 'icon.png'));
   cpSync(join(out, 'icon.png'), join(resources, 'icon.png'));
   // Linux launchers look an icon up by size in the "hicolor" theme, which has no 1024 px folder:

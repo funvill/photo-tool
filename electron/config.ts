@@ -26,6 +26,20 @@ export function parseSelfTest(argv: readonly string[]): SelfTestArgs | null {
   return photos && out ? { photos: resolve(photos), out: resolve(out) } : null;
 }
 
+/** The same build runs two programs: the editor, and with `--gallery` the photo gallery. */
+export type AppMode = 'editor' | 'gallery';
+
+/** The gallery's own name: its own data, Chromium profile and single-instance lock. */
+export const GALLERY_PRODUCT_NAME = 'Photobook Gallery';
+
+/** `--gallery [folder]` starts the gallery (opening that folder); anything else, the editor. */
+export function parseMode(argv: readonly string[]): { mode: AppMode; folder: string | null } {
+  const i = argv.indexOf('--gallery');
+  if (i < 0) return { mode: 'editor', folder: null };
+  const v = argv[i + 1];
+  return { mode: 'gallery', folder: v && !v.startsWith('--') ? v : null };
+}
+
 // ---- folders
 
 export interface DataLayout {
@@ -50,6 +64,21 @@ export function dataLayout(o: { appData: string; productName: string; packaged: 
     dataDir: given(o.env.PHOTOBOOK_DATA_DIR) ?? (o.selfTestOut ? join(o.selfTestOut, 'data') : join(root, 'data')),
     profileDir: given(o.env.PHOTOBOOK_PROFILE_DIR) ?? (o.selfTestOut ? join(o.selfTestOut, 'profile') : join(root, 'browser')),
   };
+}
+
+/**
+ * The environment the gallery's dataLayout reads. PHOTOBOOK_DATA_DIR and PHOTOBOOK_PROFILE_DIR
+ * belong to the editor: shared, the gallery would write into the editor's data folder, and the
+ * shared Chromium profile would make the two one single instance. The gallery's own are
+ * PHOTOBOOK_GALLERY_DATA_DIR and PHOTOBOOK_GALLERY_PROFILE_DIR.
+ */
+export function galleryEnv(env: Record<string, string | undefined>): Record<string, string | undefined> {
+  return { PHOTOBOOK_DATA_DIR: env.PHOTOBOOK_GALLERY_DATA_DIR, PHOTOBOOK_PROFILE_DIR: env.PHOTOBOOK_GALLERY_PROFILE_DIR };
+}
+
+/** Where the gallery keeps photo info for read-only folders: the editor's, so a star reaches the editor. */
+export function photoInfoFallbackDir(editorDataDir: string): string {
+  return join(editorDataDir, 'photoinfo');
 }
 
 // ---- window place

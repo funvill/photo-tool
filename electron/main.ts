@@ -1,5 +1,7 @@
 // The desktop app: starts the local server in a utility process on a free port of 127.0.0.1,
 // shows the editor from it in one window, and stops the server when the app quits.
+// With `--gallery [folder]` the same build is the gallery program instead: its own name, data,
+// server and window, and its own single instance, so it runs beside the editor (see gallery.ts).
 //
 // Offline by construction: nothing here downloads anything, the window can only reach the app's
 // own local server, and Chromium's own network features are switched off (see hardenSession).
@@ -8,18 +10,26 @@ import { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, screen, session, 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
-import { LICENCE_FILE, MIN_WINDOW, NOTICES_BUTTON, NOTICES_FILE, dataLayout, describeAbout, describeFailure, parseSelfTest, restoreWindow, type WindowState } from './config';
+import { GALLERY_PRODUCT_NAME, LICENCE_FILE, MIN_WINDOW, NOTICES_BUTTON, NOTICES_FILE, dataLayout, describeAbout, describeFailure, galleryEnv, parseMode, parseSelfTest, photoInfoFallbackDir, restoreWindow, type WindowState } from './config';
+import { GALLERY_DESCRIPTION, galleryFolders, galleryPage, launchGallery, type LaunchData } from './gallery';
 import { isAllowedRequest, isAppNavigation, requestHost } from './netGuard';
 import product from './product.json';
 import type { HostMessage, HostReply } from './server-host';
 
-const NAME = product.productName;
-const selfTest = parseSelfTest(process.argv);
-// Development (`npm run dev:desktop`): the editor comes from the Vite dev server.
+const launch = parseMode(process.argv);
+const isGallery = launch.mode === 'gallery';
+const NAME = isGallery ? GALLERY_PRODUCT_NAME : product.productName;
+// The self-test is the editor's.
+const selfTest = isGallery ? null : parseSelfTest(process.argv);
+// Development (`npm run dev:desktop`): the page comes from the Vite dev server.
 const devUrl = !app.isPackaged ? process.env.PHOTOBOOK_DESKTOP_DEV_URL : undefined;
 
+// The name and the folders below decide the single-instance lock, so they are set before it is asked for.
 app.setName(NAME);
-const layout = dataLayout({ appData: app.getPath('appData'), productName: NAME, packaged: app.isPackaged, env: process.env, selfTestOut: selfTest?.out });
+const appData = app.getPath('appData');
+const layout = dataLayout({ appData, productName: NAME, packaged: app.isPackaged, env: isGallery ? galleryEnv(process.env) : process.env, selfTestOut: selfTest?.out });
+// The gallery keeps photo info for read-only folders in the editor's data folder, so stars reach the editor.
+const editorDataDir = isGallery ? dataLayout({ appData, productName: product.productName, packaged: app.isPackaged, env: process.env }).dataDir : layout.dataDir;
 // Chromium's own files go beside the app's data, never into it. Must be set before the app is ready.
 app.setPath('userData', layout.profileDir);
 
@@ -138,7 +148,15 @@ function startServer(): Promise<number> {
       if (!ready) fail(new Error(`The local server stopped while starting (exit code ${code}).\n${serverOutput}`));
       else if (!quitting) void fatal('run', `The local server stopped unexpectedly (exit code ${code}).\n${serverOutput}`);
     });
-    const start: HostMessage = { type: 'start', dataDir: layout.dataDir, port: devUrl ? Number(process.env.PHOTOBOOK_PORT ?? 5174) : 0, resourceRoot: resourceRoot(), devWebUrl: devUrl };
+    const start: HostMessage = {
+      type: 'start',
+      kind: launch.mode,
+      dataDir: layout.dataDir,
+      ...(isGallery ? { photoInfoFallbackDir: photoInfoFallbackDir(editorDataDir) } : {}),
+      port: devUrl ? Number(process.env.PHOTOBOOK_PORT ?? 5174) : 0,
+      resourceRoot: resourceRoot(),
+      devWebUrl: devUrl,
+    };
     child.once('spawn', () => child.postMessage(start));
   });
 }
@@ -286,7 +304,7 @@ function aboutBox() {
   return describeAbout({
     productName: NAME,
     version: app.getVersion(),
-    description: product.description,
+    description: isGallery ? GALLERY_DESCRIPTION : product.description,
     dataDir: layout.dataDir,
     licence: licence ? readFileSync(licence, 'utf8') : null,
     repository: (product as { repository?: string }).repository,
@@ -308,13 +326,14 @@ async function showAbout() {
   }
 }
 
-function buildMenu() {
+/** `fileItems` come first in the File menu: the editor's "Open Gallery", or the gallery's own. */
+function buildMenu(fileItems: MenuItemConstructorOptions[]) {
   const about = () => void showAbout();
   const template: MenuItemConstructorOptions[] = [
     // macOS expects the app menu and the standard Edit menu; Windows and Linux need neither
     // (the editor handles its own shortcuts, and text fields work without a menu).
     ...(process.platform === 'darwin' ? ([{ role: 'appMenu' }, { role: 'editMenu' }] as MenuItemConstructorOptions[]) : []),
-    { label: '&File', submenu: [{ label: 'Open the &data folder', click: () => void shell.openPath(layout.dataDir) }, { type: 'separator' }, { role: 'quit' }] },
+    { label: '&File', submenu: [...fileItems, { label: 'Open the &data folder', click: () => void shell.openPath(layout.dataDir) }, { type: 'separator' }, { role: 'quit' }] },
     {
       label: '&View',
       submenu: [
@@ -327,10 +346,15 @@ function buildMenu() {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-// ---- the page's four functions (see preload.ts)
+// ---- the page's functions (see preload.ts)
+
+/** Did this message come from the app's own page? */
+const fromApp = (e: { senderFrame: Electron.WebFrameMain | null }) => !!e.senderFrame && isAppNavigation(e.senderFrame.url, appOrigin());
+
+/** The gallery's folders to open (null in the editor). */
+const folders = isGallery ? galleryFolders({ window: () => win, fromApp, log }, launch.folder) : null;
 
 function registerDesktopApi() {
-  const fromApp = (e: Electron.IpcMainInvokeEvent) => !!e.senderFrame && isAppNavigation(e.senderFrame.url, appOrigin());
   /** An export's file name → its full path, or null when it is not a file in the exports folder. */
   const exportPath = (name: unknown): string | null => {
     if (typeof name !== 'string' || !name || basename(name) !== name) return null;
@@ -361,6 +385,11 @@ function registerDesktopApi() {
     if (!selfTest) shell.showItemInFolder(path);
     return true;
   });
+  if (!isGallery) {
+    ipcMain.handle('desktop:open-gallery', (e) => {
+      if (fromApp(e) && !selfTest) launchGallery(log);
+    });
+  }
 }
 
 // ---- failures: always a message, never a blank window
@@ -455,7 +484,7 @@ async function main() {
     setTimeout(() => void fatal('start', 'The self-test did not finish within 15 minutes.'), 15 * 60_000).unref();
   }
   hardenSession();
-  buildMenu();
+  buildMenu(folders ? folders.fileMenu() : [{ label: 'Open &Gallery', click: () => launchGallery(log) }, { type: 'separator' }]);
   registerDesktopApi();
   try {
     serverPort = await startServer();
@@ -464,8 +493,10 @@ async function main() {
   }
   log('server ready', { port: serverPort });
   win = createWindow();
+  folders?.watch(win);
+  const base = devUrl ?? `http://127.0.0.1:${serverPort}/`;
   try {
-    await win.loadURL(devUrl ?? `http://127.0.0.1:${serverPort}/`);
+    await win.loadURL(isGallery ? galleryPage(base) : base);
   } catch (e) {
     return fatal('page', String((e as Error)?.message ?? e));
   }
@@ -476,15 +507,17 @@ async function main() {
   }
 }
 
-if (!app.requestSingleInstanceLock()) {
+// The gallery passes its command line along: a second `--gallery <folder>` opens that folder.
+if (!app.requestSingleInstanceLock(isGallery ? ({ argv: process.argv, cwd: process.cwd() } satisfies LaunchData) : undefined)) {
   // Already running: the first copy shows its window (see 'second-instance').
   app.quit();
 } else {
-  app.on('second-instance', () => {
+  app.on('second-instance', (_e, _argv, _cwd, data) => {
     if (!win) return;
     if (win.isMinimized()) win.restore();
     win.show();
     win.focus();
+    folders?.secondInstance(data);
   });
   app.on('web-contents-created', (_e, contents) => hardenContents(contents));
   app.on('window-all-closed', () => {

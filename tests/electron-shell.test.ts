@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_WINDOW, MIN_WINDOW, NOTICES_BUTTON, dataLayout, describeAbout, describeFailure, parseSelfTest, restoreWindow } from '../electron/config';
+import { DEFAULT_WINDOW, GALLERY_PRODUCT_NAME, MIN_WINDOW, NOTICES_BUTTON, dataLayout, describeAbout, describeFailure, galleryEnv, parseMode, parseSelfTest, photoInfoFallbackDir, restoreWindow } from '../electron/config';
 import product from '../electron/product.json';
 import { isAllowedRequest, isAppNavigation, requestHost } from '../electron/netGuard';
 
@@ -118,6 +118,58 @@ describe('self-test flags', () => {
     expect(parseSelfTest(['app.exe', '--self-test-out', 'out'])).toBeNull();
     expect(parseSelfTest(['app.exe', '--self-test', '--self-test-out', 'out'])).toBeNull();
     expect(parseSelfTest(['app.exe', '--self-test', 'photos', '--self-test-out', 'out'])).toEqual({ photos: resolve('photos'), out: resolve('out') });
+  });
+});
+
+describe('gallery mode', () => {
+  it('starts the editor unless --gallery is given', () => {
+    expect(parseMode([])).toEqual({ mode: 'editor', folder: null });
+    expect(parseMode(['app.exe', 'dist/desktop/app'])).toEqual({ mode: 'editor', folder: null });
+  });
+
+  it('--gallery starts the gallery, with the folder after it when there is one', () => {
+    expect(parseMode(['--gallery'])).toEqual({ mode: 'gallery', folder: null });
+    expect(parseMode(['app.exe', '--gallery'])).toEqual({ mode: 'gallery', folder: null });
+    expect(parseMode(['--gallery', 'D:\\Pics'])).toEqual({ mode: 'gallery', folder: 'D:\\Pics' });
+    expect(parseMode(['app.exe', '--gallery', '--no-sandbox'])).toEqual({ mode: 'gallery', folder: null });
+  });
+
+  it('leaves the self-test flags as they were', () => {
+    const argv = ['app.exe', '--self-test', 'photos', '--self-test-out', 'out'];
+    expect(parseMode(argv)).toEqual({ mode: 'editor', folder: null });
+    expect(parseSelfTest(argv)).toEqual({ photos: resolve('photos'), out: resolve('out') });
+    expect(parseSelfTest(['app.exe', '--gallery', 'D:\\Pics', ...argv.slice(1)])).toEqual({ photos: resolve('photos'), out: resolve('out') });
+  });
+
+  it('keeps the gallery\'s data and profile under its own name, apart from the editor\'s', () => {
+    const appData = resolve('/appdata');
+    const editorEnv = { PHOTOBOOK_DATA_DIR: resolve('/editor/data'), PHOTOBOOK_PROFILE_DIR: resolve('/editor/profile') };
+    expect(GALLERY_PRODUCT_NAME).toBe('Photobook Gallery');
+    expect(GALLERY_PRODUCT_NAME).not.toBe(product.productName);
+    const packaged = dataLayout({ appData, productName: GALLERY_PRODUCT_NAME, packaged: true, env: galleryEnv({}) });
+    expect(packaged).toEqual({ dataDir: join(appData, 'Photobook Gallery', 'data'), profileDir: join(appData, 'Photobook Gallery', 'browser') });
+    const source = dataLayout({ appData, productName: GALLERY_PRODUCT_NAME, packaged: false, env: galleryEnv(editorEnv) });
+    // The editor's own overrides never move the gallery into the editor's folders.
+    expect(source).toEqual({ dataDir: join(appData, 'Photobook Gallery Dev', 'data'), profileDir: join(appData, 'Photobook Gallery Dev', 'browser') });
+    expect(dataLayout({ appData, productName: GALLERY_PRODUCT_NAME, packaged: true, env: galleryEnv({ PHOTOBOOK_GALLERY_DATA_DIR: resolve('/g/data'), PHOTOBOOK_GALLERY_PROFILE_DIR: resolve('/g/profile') }) })).toEqual({ dataDir: resolve('/g/data'), profileDir: resolve('/g/profile') });
+  });
+
+  it('keeps photo info for read-only folders with the editor\'s, so a star reaches the editor', () => {
+    const appData = resolve('/appdata');
+    for (const packaged of [true, false]) {
+      for (const env of [{}, { PHOTOBOOK_DATA_DIR: resolve('/somewhere/data') }]) {
+        const editor = dataLayout({ appData, productName: product.productName, packaged, env });
+        expect(photoInfoFallbackDir(editor.dataDir)).toBe(join(editor.dataDir, 'photoinfo'));
+      }
+    }
+    expect(photoInfoFallbackDir(dataLayout({ appData, productName: product.productName, packaged: true, env: {} }).dataDir)).toBe(join(appData, 'Photobook Studio', 'data', 'photoinfo'));
+  });
+
+  it('builds the gallery page beside the editor\'s, with the same content security policy', () => {
+    const csp = (f: string) => /<meta http-equiv="Content-Security-Policy" content="([^"]+)"/.exec(readFileSync(f, 'utf8'))?.[1];
+    expect(csp('src/gallery/web/index.html')).toBeTruthy();
+    expect(csp('src/gallery/web/index.html')).toBe(csp('src/web/index.html'));
+    expect(readFileSync('vite.config.ts', 'utf8')).toContain('gallery.html');
   });
 });
 

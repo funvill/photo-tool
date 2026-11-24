@@ -12,4 +12,13 @@ export interface DesktopApi {
   openFile(exportFile: string): Promise<boolean>;
   /** Show an exported file (by its file name) in the system's file manager. False when it is not an export. */
   showInFolder(exportFile: string): Promise<boolean>;
+  /** Editor window: start the gallery program (or bring it forward when it is already running). */
+  openGallery(): Promise<void>;
+  /** Gallery window: drag these photo files out of the window, as files, into another program. */
+  startDrag(paths: string[]): void;
+  /**
+   * Gallery window: `cb` gets each folder the gallery is asked to open from outside the page
+   * (`--gallery <folder>` at start, or from a second launch). Returns a function that stops listening.
+   */
+  onOpenFolder?(cb: (folder: string) => void): () => void;
 }
