@@ -111,6 +111,9 @@ describe('photoinfo.json (server)', () => {
     expect(res.body.error).toContain("Can't save the star: ");
     expect(res.body.error).toContain('Could not write');
     expect(res.body.error).not.toContain("can't be read");
+    // Its folder is gone, so its star is unknown: the library says so.
+    expect((await byName('c.jpg')).infoUnavailable).toBe(true);
+    expect((await byName('a.jpg')).infoUnavailable).toBeUndefined();
   });
 
   it('broken file gives 409', async () => {
@@ -121,5 +124,6 @@ describe('photoinfo.json (server)', () => {
     expect(res.body.error).toContain("Can't save the star: photoinfo.json in ");
     expect(res.body.error).toContain("can't be read. Fix or delete it.");
     expect(readFileSync(infoPath(), 'utf8')).toBe('{bad');
+    expect((await byName('a.jpg')).infoUnavailable).toBe(true);
   });
 });

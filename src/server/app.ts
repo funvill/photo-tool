@@ -59,7 +59,9 @@ export function createApp(dataDir: string, opts: AppOptions = {}) {
     Promise.resolve(fn(req, res)).catch(next);
 
   const isMissing = (r: AssetRow) => !existsSync(r.original_path);
-  const projectAssets = (projectId: string): PhotoAsset[] => store.projectAssetRows(projectId).map((r) => photoInfo.apply(toPhotoAsset(r, isMissing(r)), r.original_path));
+  // Each photo folder is looked at once per listing, not once per photo.
+  const projectAssets = (projectId: string): PhotoAsset[] =>
+    photoInfo.applyAll(store.projectAssetRows(projectId).map((r) => ({ asset: toPhotoAsset(r, isMissing(r)), path: r.original_path })));
   const requireProject = (id: string) => {
     const p = store.getProject(id);
     if (!p) throw new HttpError(404, 'Project not found');

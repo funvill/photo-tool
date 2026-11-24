@@ -416,6 +416,11 @@ export interface PhotoAsset {
   /** From the folder's photoinfo.json (desktop editor only). */
   people?: string[];
   description?: string;
+  /**
+   * Desktop editor: the photo's folder or its photoinfo.json could not be read (folder offline or moved, file
+   * broken), so its star and other info are unknown. Drafts neither add nor remove such a photo.
+   */
+  infoUnavailable?: boolean;
   contentHash: string;
   exactDuplicateOf: ID | null;
   analysis: PhotoAnalysis | null;

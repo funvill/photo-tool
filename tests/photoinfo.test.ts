@@ -217,6 +217,36 @@ describe('photoinfo', () => {
     expect(readdirSync(dir)).toEqual([PHOTOINFO_NAME]);
   });
 
+  it('applyAll reads each folder once per call, however many photos it holds', () => {
+    writeFileSync(file(), JSON.stringify({ format: 'photoinfo/1', photos: { 'p0.jpg': { star: true } } }));
+    let stamps = 0;
+    let reads = 0;
+    const index = new PhotoInfoIndex(opts, {
+      stamp: (f, o) => (stamps++, folderStamp(f, o)),
+      read: (f, o) => (reads++, readFolderInfo(f, o)),
+    });
+    const rows = Array.from({ length: 25 }, (_, i) => ({ asset: fakeAsset({ favorite: false }), path: join(dir, `p${i}.jpg`) }));
+    const first = index.applyAll(rows);
+    expect(first[0].favorite).toBe(true);
+    expect(first.slice(1).every((a) => !a.favorite)).toBe(true);
+    expect(stamps).toBe(1);
+    expect(reads).toBe(1);
+    index.applyAll(rows);
+    expect(stamps).toBe(2);
+    expect(reads).toBe(1); // unchanged file: served from the cache
+  });
+
+  it('flags photos whose folder is unreachable or whose photoinfo.json is broken', () => {
+    const index = new PhotoInfoIndex(opts);
+    const asset = fakeAsset({ favorite: true });
+    expect(index.apply(asset, join(dir, 'a.jpg')).infoUnavailable).toBeUndefined();
+    const gone = index.apply(asset, join(dir, 'offline', 'a.jpg'));
+    expect(gone.infoUnavailable).toBe(true);
+    expect(gone.favorite).toBe(false);
+    writeFileSync(file(), '{broken');
+    expect(index.apply(asset, join(dir, 'a.jpg')).infoUnavailable).toBe(true);
+  });
+
   it('parsePhotoInfo rejects the wrong shape', () => {
     expect(() => parsePhotoInfo('[]')).toThrow();
     expect(() => parsePhotoInfo('{"photos":[]}')).toThrow();
