@@ -204,6 +204,52 @@ describe('gallery store', () => {
     expect(stop).toHaveBeenCalledTimes(1);
   });
 
+  it('saves any info field the way a star is saved, sending a null to delete one', async () => {
+    vi.useFakeTimers();
+    let stamp = 'one';
+    await openTrip(() => stamp);
+    routes['GET /api/gallery/items'] = () => ({ json: [item()] });
+    routes['PATCH /api/gallery/info'] = (body) => {
+      expect(body).toEqual({ path: 'p/a.jpg', patch: { date: null, people: ['Ann'] }, job: 'j1' });
+      stamp = 'two';
+      return { json: { ...item({ path: 'p/a.jpg', info: { people: ['Ann'] } }), stamp: { before: 'one', after: 'two' } } };
+    };
+    useGallery.setState({ items: [item({ path: 'p/a.jpg', info: { date: '2020-01-01T00:00:00' } })] });
+
+    expect(await useGallery.getState().saveInfo('p/a.jpg', { date: null, people: ['Ann'] })).toBe(true);
+    expect(useGallery.getState().items[0].info).toEqual({ people: ['Ann'] });
+    // The write was ours: the poll does not reload every photo for it.
+    await vi.advanceTimersByTimeAsync(3100);
+    expect(count('GET', '/api/gallery/items')).toBe(0);
+  });
+
+  it("shows the server's message when a field cannot be saved, and applies nothing", async () => {
+    routes['PATCH /api/gallery/info'] = () => ({ status: 409, json: { error: 'photoinfo.json is in use by another program; try again.' } });
+    useGallery.setState({ job: 'j1', root: 'D:\Trip', items: [item({ info: { notes: 'old' } })] });
+
+    expect(await useGallery.getState().saveInfo('D:\Trip\a.jpg', { notes: 'new' })).toBe(false);
+    expect(useGallery.getState().items[0].info.notes).toBe('old');
+    expect(useGallery.getState().toasts).toEqual([expect.objectContaining({ kind: 'error', text: 'photoinfo.json is in use by another program; try again.' })]);
+  });
+
+  it('keeps a description saved while an older reload was on its way', async () => {
+    useGallery.setState({ job: 'j1', root: 'D:\Trip', items: [item()] });
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    routes['GET /api/gallery/items'] = async () => {
+      await held;
+      return { json: [item()] };
+    };
+    routes['PATCH /api/gallery/info'] = () => ({ json: item({ info: { description: 'Beach' } }) });
+
+    const refresh = useGallery.getState().refreshInfo();
+    await vi.waitFor(() => expect(count('GET', '/api/gallery/items')).toBe(1));
+    expect(await useGallery.getState().saveInfo('D:\Trip\a.jpg', { description: 'Beach' })).toBe(true);
+    release();
+    await refresh;
+    expect(useGallery.getState().items[0].info.description).toBe('Beach');
+  });
+
   it('keeps the thumbnail size within 96–320 px', () => {
     useGallery.getState().setThumbSize(20);
     expect(useGallery.getState().thumbSize).toBe(96);

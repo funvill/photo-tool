@@ -25,10 +25,16 @@ export interface GalleryState {
   recursive: boolean;
   recent: RecentFolder[];
   toasts: Toast[];
+  /** The "Tidy photo info" dialog is open. */
+  tidyOpen: boolean;
 
   loadRecent(): Promise<void>;
   open(folder: string, recursive: boolean): Promise<void>;
-  /** Resolves false (after an error toast with the server's message) when the star could not be saved. */
+  /**
+   * Save fields of a photo's info (a null value deletes the field). Resolves false, after an error toast
+   * with the server's message, when it could not be saved; nothing is applied then.
+   */
+  saveInfo(path: string, patch: Record<string, unknown>): Promise<boolean>;
   setStar(path: string, star: boolean): Promise<boolean>;
   /** Reload every photo's info (after another program changed a photoinfo.json). */
   refreshInfo(): Promise<void>;
@@ -37,6 +43,7 @@ export interface GalleryState {
   setRecursive(recursive: boolean): void;
   /** Stop reading and watching the open folder, and go back to the start screen. */
   close(): void;
+  setTidyOpen(open: boolean): void;
   toast(kind: Toast['kind'], text: string): void;
   dismissToast(id: number): void;
 }
@@ -158,6 +165,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
     recursive: true,
     recent: [],
     toasts: [],
+    tidyOpen: false,
 
     async loadRecent() {
       try {
@@ -187,11 +195,11 @@ export const useGallery = create<GalleryState>()((set, get) => {
       await pollJob(gen, job);
     },
 
-    async setStar(path, star) {
+    async saveInfo(path, patch) {
       const job = get().job;
       const gen = generation;
       try {
-        const { stamp, ...updated } = await galleryApi.patchInfo(path, { star }, job ?? undefined);
+        const { stamp, ...updated } = await galleryApi.patchInfo(path, patch, job ?? undefined);
         set((s) => ({ items: s.items.map((i) => (i.path === path ? updated : i)) }));
         if (job && current(gen, job)) {
           saveSeq++;
@@ -206,6 +214,10 @@ export const useGallery = create<GalleryState>()((set, get) => {
         get().toast('error', message(e));
         return false;
       }
+    },
+
+    setStar(path, star) {
+      return get().saveInfo(path, { star });
     },
 
     async refreshInfo() {
@@ -244,7 +256,11 @@ export const useGallery = create<GalleryState>()((set, get) => {
 
     close() {
       stopTimers();
-      set({ job: null, root: null, items: [], progress: null, selected: null });
+      set({ job: null, root: null, items: [], progress: null, selected: null, tidyOpen: false });
+    },
+
+    setTidyOpen(tidyOpen) {
+      set({ tidyOpen });
     },
 
     toast(kind, text) {

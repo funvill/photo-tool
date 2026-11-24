@@ -1,7 +1,7 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
-import { existsSync, statSync } from 'node:fs';
-import { basename, dirname, join } from 'node:path';
-import { folderStamp, infoFor, PhotoInfoWriteError, readFolderInfo, updatePhotoInfo, type FolderInfo, type PhotoInfo, type PhotoInfoOptions } from '../../photoinfo';
+import { existsSync, readdirSync, statSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
+import { folderStamp, forgetPhotos, infoFor, PhotoInfoWriteError, readFolderInfo, updatePhotoInfo, type FolderInfo, type PhotoInfo, type PhotoInfoOptions } from '../../photoinfo';
 import { listPlaces, suggestPlaces } from '../../server/places';
 import { setResourceRoot } from '../../server/resources';
 import { Catalog, type GalleryPhoto } from './catalog';
@@ -194,6 +194,50 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
       for (const name of new Set(people.filter((n): n is string => typeof n === 'string' && n !== ''))) counts.set(name, (counts.get(name) ?? 0) + 1);
     }
     res.json([...counts].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([name]) => name));
+  }));
+
+  /** The lower-cased names in a folder, or undefined when it can't be listed (a drive that is not connected). */
+  const namesIn = (folder: string): Set<string> | undefined => {
+    try {
+      return new Set(readdirSync(folder).map((n) => n.toLowerCase()));
+    } catch {
+      return undefined;
+    }
+  };
+
+  // Entries of photoinfo.json whose photo is no longer in the folder, for the open folder's photo folders.
+  // A folder that can't be listed is left out: its photos are not known to be gone.
+  app.get('/api/gallery/orphans', wrap((req, res) => {
+    const job = requireJob(q(req, 'job'));
+    const out: { folder: string; fileNames: string[] }[] = [];
+    for (const folder of [...new Set(job.photos.map((p) => dirname(p.path)))].sort()) {
+      const names = namesIn(folder);
+      if (!names) continue;
+      const fileNames = Object.keys(readFolderInfo(folder, infoOpts).photos).filter((n) => !names.has(n.toLowerCase())).sort();
+      if (fileNames.length) out.push({ folder, fileNames });
+    }
+    res.json(out);
+  }));
+
+  // Removes entries for photos that are gone. Each name is checked again here, so a photo that came back
+  // since the list was made (or a name that was never an orphan) is refused and nothing is written.
+  app.post('/api/gallery/forget', wrap((req, res) => {
+    const { folder, fileNames } = req.body ?? {};
+    if (typeof folder !== 'string' || !Array.isArray(fileNames) || fileNames.length === 0 || !fileNames.every((n) => typeof n === 'string' && n !== '')) {
+      throw new HttpError(400, 'Expected { folder, fileNames }');
+    }
+    const known = jobIds.some((id) => scanner.get(id)?.photos.some((p) => resolve(dirname(p.path)) === resolve(folder)));
+    if (!known) throw new HttpError(404, 'That folder is no longer open. Open it again.');
+    const names = namesIn(folder);
+    if (!names) throw new HttpError(400, `Can't look in ${folder}, so nothing was removed.`);
+    const present = (fileNames as string[]).filter((n) => /[\\/]/.test(n) || names.has(n.toLowerCase()));
+    if (present.length) throw new HttpError(400, `${present.slice(0, 3).join(', ')}${present.length > 3 ? '…' : ''} ${present.length === 1 ? 'is' : 'are'} still in the folder, so nothing was removed.`);
+    try {
+      res.json({ removed: forgetPhotos(folder, fileNames as string[], infoOpts) });
+    } catch (e) {
+      if (e instanceof PhotoInfoWriteError) throw new HttpError(409, e.message);
+      throw e;
+    }
   }));
 
   app.get('/api/places', (_req, res) => res.json(listPlaces()));

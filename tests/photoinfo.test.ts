@@ -8,6 +8,7 @@ import {
   PHOTOINFO_NAME,
   PhotoInfoWriteError,
   folderStamp,
+  forgetPhotos,
   infoFor,
   parsePhotoInfo,
   readFolderInfo,
@@ -92,6 +93,44 @@ describe('photoinfo', () => {
     const written = JSON.parse(readFileSync(file(), 'utf8'));
     expect(Object.keys(written.photos)).toEqual(['img_1.jpg']);
     expect(written.photos['img_1.jpg']).toEqual({ star: true, notes: 'x' });
+  });
+
+  it('forgetPhotos removes only the named entries and keeps unknown fields and other entries', () => {
+    writeFileSync(file(), '{"format":"photoinfo/1","owner":"x","photos":{"gone.jpg":{"star":true},"Also.JPG":{"notes":"n"},"a.jpg":{"rating":4}}}');
+    expect(forgetPhotos(dir, ['gone.jpg', 'also.jpg', 'never.jpg'], opts)).toBe(2);
+    const written = JSON.parse(readFileSync(file(), 'utf8'));
+    expect(written.owner).toBe('x');
+    expect(written.format).toBe('photoinfo/1');
+    expect(written.photos).toEqual({ 'a.jpg': { rating: 4 } });
+    expect(readdirSync(dir).filter((f) => f.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('forgetPhotos returns 0 without writing when nothing matches', () => {
+    expect(forgetPhotos(dir, ['a.jpg'], opts)).toBe(0);
+    expect(existsSync(file())).toBe(false);
+    updatePhotoInfo(dir, 'a.jpg', { star: true }, opts);
+    const before = readFileSync(file(), 'utf8');
+    let writes = 0;
+    expect(forgetPhotos(dir, ['b.jpg'], { ...opts, writeFile: () => void writes++ })).toBe(0);
+    expect(writes).toBe(0);
+    expect(readFileSync(file(), 'utf8')).toBe(before);
+  });
+
+  it('forgetPhotos goes through the fallback for a read-only folder, and never overwrites a broken file', () => {
+    updatePhotoInfo(dir, 'gone.jpg', { star: true }, opts);
+    updatePhotoInfo(dir, 'a.jpg', { star: true }, opts);
+    const ro = readOnlyOpts();
+    expect(forgetPhotos(dir, ['gone.jpg'], ro)).toBe(1);
+    const info = readFolderInfo(dir, ro);
+    expect(info.source).toBe('fallback');
+    expect(Object.keys(info.photos)).toEqual(['a.jpg']);
+    // The folder's own file is untouched.
+    expect(Object.keys(JSON.parse(readFileSync(file(), 'utf8')).photos).sort()).toEqual(['a.jpg', 'gone.jpg']);
+
+    writeFileSync(file(), '{ not json');
+    rmSync(fallbackDir, { recursive: true, force: true });
+    expect(() => forgetPhotos(dir, ['a.jpg'], opts)).toThrow(PhotoInfoWriteError);
+    expect(readFileSync(file(), 'utf8')).toBe('{ not json');
   });
 
   it('read-only folder falls back', () => {

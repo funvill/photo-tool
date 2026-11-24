@@ -48,6 +48,9 @@ export function FolderBar() {
         )}
         {root && (
           <>
+            <button type="button" className="btn" onClick={() => useGallery.getState().setTidyOpen(true)} title="Remove info saved for photos that are no longer in the folder">
+              Tidy photo info…
+            </button>
             <button type="button" className="btn" onClick={() => useGallery.getState().close()}>
               Close folder
             </button>

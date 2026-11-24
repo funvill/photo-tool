@@ -1,4 +1,3 @@
-import type { PhotoInfo } from '../../photoinfo';
 import type { GalleryInfoReply, GalleryItem } from '../server/app';
 
 // Thin client for the gallery's local server (same origin, 127.0.0.1). Errors carry the server's message.
@@ -17,6 +16,12 @@ export interface RecentFolder {
   openedAt: string;
   /** False when the folder is gone (or its drive is not connected). */
   exists: boolean;
+}
+
+/** Info entries of a folder whose photo is no longer there. */
+export interface OrphanedFolder {
+  folder: string;
+  fileNames: string[];
 }
 
 export interface JobUpdate {
@@ -48,8 +53,14 @@ export const galleryApi = {
   job: (id: string, since: number) => call<JobUpdate>('GET', `/api/gallery/jobs/${encodeURIComponent(id)}?${qs({ since })}`),
   items: (job: string) => call<GalleryItem[]>('GET', `/api/gallery/items?${qs({ job })}`),
   stamp: async (job: string) => (await call<{ stamp: string }>('GET', `/api/gallery/stamp?${qs({ job })}`)).stamp,
+  people: (job: string) => call<string[]>('GET', `/api/gallery/people?${qs({ job })}`),
+  places: () => call<{ id: string; name: string }[]>('GET', '/api/places'),
+  suggestPlaces: (points: [number, number][]) => call<{ id: string; name: string; photos: number }[]>('POST', '/api/places/suggest', { points }),
+  orphans: (job: string) => call<OrphanedFolder[]>('GET', `/api/gallery/orphans?${qs({ job })}`),
+  forget: (folder: string, fileNames: string[]) => call<{ removed: number }>('POST', '/api/gallery/forget', { folder, fileNames }),
   /** With `job`, the reply carries that folder's stamp just before and after the write. */
-  patchInfo: (path: string, patch: Partial<PhotoInfo>, job?: string) => call<GalleryInfoReply>('PATCH', '/api/gallery/info', job ? { path, patch, job } : { path, patch }),
+  /** A null value deletes that field. */
+  patchInfo: (path: string, patch: Record<string, unknown>, job?: string) => call<GalleryInfoReply>('PATCH', '/api/gallery/info', job ? { path, patch, job } : { path, patch }),
 };
 
 /** 's' is 400 px (the grid), 'm' is 1600 px (the hover preview). */

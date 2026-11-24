@@ -33,3 +33,4 @@ export * from './spacing';
 export * from './calendar';
 export * from './draftState';
 export * from './draftUpdate';
+export * from './galleryEdit';

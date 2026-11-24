@@ -1,4 +1,4 @@
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
@@ -200,6 +200,48 @@ describe('gallery server', () => {
     await api('PATCH', '/api/gallery/info', { path: p2, patch: { people: ['Sam'] } });
     await api('PATCH', '/api/gallery/info', { path: p3, patch: { people: ['Sam', 'Alex', 'Zed'] } });
     expect((await api('GET', `/api/gallery/people?job=${jobId}`)).body).toEqual(['Sam', 'Alex', 'Zed']);
+  });
+
+  it('lists info entries whose photo is gone, and forget removes them', async () => {
+    await start();
+    const { jobId, byName } = await loaded();
+    const a = byName('day1-01-arrival.jpg');
+    await api('PATCH', '/api/gallery/info', { path: a.path, patch: { star: true } });
+    writeFileSync(infoFile(), JSON.stringify({ ...readInfo(), owner: 'x', photos: { ...readInfo().photos, 'deleted.jpg': { star: true }, 'Deleted2.JPG': { notes: 'n' } } }));
+    expect((await api('GET', `/api/gallery/orphans?job=${jobId}`)).body).toEqual([{ folder: photos, fileNames: ['deleted.jpg', 'Deleted2.JPG'].sort() }]);
+
+    const res = await api('POST', '/api/gallery/forget', { folder: photos, fileNames: ['deleted.jpg', 'Deleted2.JPG'] });
+    expect(res.body).toEqual({ removed: 2 });
+    expect(Object.keys(readInfo().photos)).toEqual(['day1-01-arrival.jpg']);
+    expect(readInfo().owner).toBe('x');
+    expect((await api('GET', `/api/gallery/orphans?job=${jobId}`)).body).toEqual([]);
+  });
+
+  it('forget refuses a name whose file still exists, and writes nothing', async () => {
+    await start();
+    const { jobId, byName } = await loaded();
+    const a = byName('day1-01-arrival.jpg');
+    await api('PATCH', '/api/gallery/info', { path: a.path, patch: { star: true } });
+    writeFileSync(infoFile(), JSON.stringify({ ...readInfo(), photos: { ...readInfo().photos, 'deleted.jpg': { star: true } } }));
+    const before = readFileSync(infoFile(), 'utf8');
+    const res = await api('POST', '/api/gallery/forget', { folder: photos, fileNames: ['deleted.jpg', 'DAY1-01-arrival.jpg'] });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('DAY1-01-arrival.jpg');
+    expect(readFileSync(infoFile(), 'utf8')).toBe(before);
+
+    // A file that comes back after the list was made is refused too.
+    writeFileSync(join(photos, 'deleted.jpg'), 'x');
+    expect((await api('POST', '/api/gallery/forget', { folder: photos, fileNames: ['deleted.jpg'] })).status).toBe(400);
+    expect(readFileSync(infoFile(), 'utf8')).toBe(before);
+    unlinkSync(join(photos, 'deleted.jpg'));
+
+    // Nothing outside an open folder, and no path tricks.
+    expect((await api('POST', '/api/gallery/forget', { folder: root, fileNames: ['x.jpg'] })).status).toBe(404);
+    expect((await api('POST', '/api/gallery/forget', { folder: photos, fileNames: ['../x.jpg'] })).status).toBe(400);
+    expect((await api('POST', '/api/gallery/forget', { folder: photos, fileNames: [] })).status).toBe(400);
+    expect((await api('GET', '/api/gallery/orphans?job=nope')).status).toBe(404);
+    expect(jobId).toBeTruthy();
+    expect(readFileSync(infoFile(), 'utf8')).toBe(before);
   });
 
   it('serves thumbnails by catalogued key and 404s the rest', async () => {

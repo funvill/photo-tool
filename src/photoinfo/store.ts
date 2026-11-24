@@ -158,29 +158,18 @@ function atomicWrite(target: string, text: string, rename: (from: string, to: st
   }
 }
 
-export function updatePhotoInfo(
-  folder: string,
-  fileName: string,
-  patch: Partial<Record<keyof PhotoInfo, unknown>>,
-  opts: PhotoInfoOptions,
-): PhotoInfo {
-  // Re-read every time so a concurrent writer's changes are kept; only the patched entry changes.
+/** The folder's current content for a write; a file that can't be read is never overwritten. */
+function loadForWrite(folder: string, opts: PhotoInfoOptions): PhotoInfoFile {
   const loaded = load(folder, opts);
   if (loaded.kind === 'broken') {
     const name = loaded.source === 'folder' ? `${PHOTOINFO_NAME} in ${folder}` : `The saved photo info for ${folder} (${loaded.path})`;
     throw new PhotoInfoWriteError(`${name} can't be read. Fix or delete it. (${loaded.error})`);
   }
-  const file: PhotoInfoFile = loaded.kind === 'ok' ? loaded.file : { format: PHOTOINFO_FORMAT, photos: {} };
+  return loaded.kind === 'ok' ? loaded.file : { format: PHOTOINFO_FORMAT, photos: {} };
+}
 
-  const key = findKey(file.photos, fileName) ?? fileName;
-  const entry: PhotoInfo = { ...(file.photos[key] ?? {}) };
-  for (const [field, value] of Object.entries(patch)) {
-    if (value === null || value === undefined) delete entry[field];
-    else entry[field] = value;
-  }
-  if (Object.keys(entry).length === 0) delete file.photos[key];
-  else file.photos[key] = entry;
-
+/** Writes the whole file: to the folder (atomically, retrying a busy file), else to the fallback when it is read-only. */
+function writeFolderInfo(folder: string, file: PhotoInfoFile, opts: PhotoInfoOptions): void {
   const write = opts.writeFile ?? ((target: string, text: string) => atomicWrite(target, text, opts.rename));
   try {
     write(folderFile(folder), serialisePhotoInfo(file));
@@ -201,7 +190,46 @@ export function updatePhotoInfo(
       throw new PhotoInfoWriteError(`Could not write the fallback file either: ${(e2 as Error).message}`);
     }
   }
+}
+
+export function updatePhotoInfo(
+  folder: string,
+  fileName: string,
+  patch: Partial<Record<keyof PhotoInfo, unknown>>,
+  opts: PhotoInfoOptions,
+): PhotoInfo {
+  // Re-read every time so a concurrent writer's changes are kept; only the patched entry changes.
+  const file = loadForWrite(folder, opts);
+
+  const key = findKey(file.photos, fileName) ?? fileName;
+  const entry: PhotoInfo = { ...(file.photos[key] ?? {}) };
+  for (const [field, value] of Object.entries(patch)) {
+    if (value === null || value === undefined) delete entry[field];
+    else entry[field] = value;
+  }
+  if (Object.keys(entry).length === 0) delete file.photos[key];
+  else file.photos[key] = entry;
+
+  writeFolderInfo(folder, file, opts);
   return entry;
+}
+
+/**
+ * Removes the entries of the named photos (their files are gone). Other entries and unknown fields stay.
+ * Returns how many entries were removed; when none matched, nothing is written.
+ */
+export function forgetPhotos(folder: string, fileNames: string[], opts: PhotoInfoOptions): number {
+  const file = loadForWrite(folder, opts);
+  let removed = 0;
+  for (const name of fileNames) {
+    const key = findKey(file.photos, name);
+    if (key === undefined) continue;
+    delete file.photos[key];
+    removed++;
+  }
+  if (removed === 0) return 0;
+  writeFolderInfo(folder, file, opts);
+  return removed;
 }
 
 /**
