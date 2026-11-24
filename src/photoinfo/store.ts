@@ -166,7 +166,10 @@ export function updatePhotoInfo(
 ): PhotoInfo {
   // Re-read every time so a concurrent writer's changes are kept; only the patched entry changes.
   const loaded = load(folder, opts);
-  if (loaded.kind === 'broken') throw new PhotoInfoWriteError(`Refusing to overwrite an unreadable photo info file: ${loaded.error}`);
+  if (loaded.kind === 'broken') {
+    const name = loaded.source === 'folder' ? `${PHOTOINFO_NAME} in ${folder}` : `The saved photo info for ${folder} (${loaded.path})`;
+    throw new PhotoInfoWriteError(`${name} can't be read. Fix or delete it. (${loaded.error})`);
+  }
   const file: PhotoInfoFile = loaded.kind === 'ok' ? loaded.file : { format: PHOTOINFO_FORMAT, photos: {} };
 
   const key = findKey(file.photos, fileName) ?? fileName;

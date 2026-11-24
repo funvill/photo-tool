@@ -100,6 +100,19 @@ describe('photoinfo.json (server)', () => {
     expect((await byName('b.jpg')).description).toBe('edited outside the editor');
   });
 
+  it('a write failure says what went wrong, not that the file is unreadable', async () => {
+    const other = mkdtempSync(join(tmpdir(), 'pi-gone-'));
+    await jpeg(join(other, 'c.jpg'), 200);
+    await finish((await api('POST', `/api/projects/${projectId}/import`, { folder: other })).body);
+    const c = await byName('c.jpg');
+    rmSync(other, { recursive: true, force: true });
+    const res = await api('PATCH', `/api/projects/${projectId}/assets/${c.id}`, { favorite: true });
+    expect(res.status).toBe(409);
+    expect(res.body.error).toContain("Can't save the star: ");
+    expect(res.body.error).toContain('Could not write');
+    expect(res.body.error).not.toContain("can't be read");
+  });
+
   it('broken file gives 409', async () => {
     writeFileSync(infoPath(), '{bad');
     const a = await byName('a.jpg');

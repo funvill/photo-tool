@@ -1,7 +1,7 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { existsSync, statSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { basename, join } from 'node:path';
 import { API_VERSION, SCHEMA_VERSION, UnknownSizeError, createBook, createPoster, posterSize, migrateDocument, type BookDocument, type PhotoAnalysis, type PhotoAsset } from '../core';
 import { Store, toPhotoAsset, type AssetRow } from './db';
 import { DRIVES, DRIVES_LABEL, browseParent, browsePath, listDrives } from './folders';
@@ -184,7 +184,7 @@ export function createApp(dataDir: string, opts: AppOptions = {}) {
       try {
         photoInfo.setStar(existing.original_path, !!favorite);
       } catch (e) {
-        if (e instanceof PhotoInfoWriteError) throw new HttpError(409, `Can't save the star: photoinfo.json in ${dirname(existing.original_path)} can't be read. Fix or delete it.`);
+        if (e instanceof PhotoInfoWriteError) throw new HttpError(409, `Can't save the star: ${e.message}`);
         throw e;
       }
     }
