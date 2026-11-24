@@ -299,6 +299,16 @@ describe('gallery store', () => {
     expect(g().selection).toEqual(['a', 'c']);
   });
 
+  it('shows a drag the desktop app could not start as an error, until it stops listening', () => {
+    let send: ((message: string) => void) | undefined;
+    const stop = vi.fn();
+    const unsubscribe = connectDesktop({ onDragFailed: (cb) => ((send = cb), stop) });
+    send!("Couldn't drag the photos: the gallery did not answer in time. Try again.");
+    expect(useGallery.getState().toasts).toEqual([expect.objectContaining({ kind: 'error', text: "Couldn't drag the photos: the gallery did not answer in time. Try again." })]);
+    unsubscribe();
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
   it('closing the viewer selects the last photo viewed', () => {
     useGallery.setState({ items: [item({ path: 'a' }), item({ path: 'b' })], selected: 'a', selection: ['a', 'b'] });
     useGallery.getState().openViewer('a');

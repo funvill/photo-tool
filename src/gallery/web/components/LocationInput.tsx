@@ -1,5 +1,5 @@
-import { useState, type FocusEvent, type KeyboardEvent } from 'react';
-import { parseLocation } from '../../../core';
+import { useEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from 'react';
+import { locationToSave, parseLocation } from '../../../core';
 
 export interface LocationFields {
   lat: string;
@@ -32,10 +32,13 @@ export function LocationInput({
   const [fields, setFields] = useState<LocationFields>(initial);
   const [search, setSearch] = useState('');
   const [error, setError] = useState('');
+  /** The location last sent to be saved (JSON), until the photo's location changes. */
+  const sent = useRef<string | null>(null);
   if (seen !== key) {
     setSeen(key);
     setFields(initial);
     setError('');
+    sent.current = null;
   }
 
   const set = (patch: Partial<LocationFields>) => setFields((f) => ({ ...f, ...patch }));
@@ -57,7 +60,9 @@ export function LocationInput({
       setFields(initial);
       return;
     }
-    await onSave(parsed.location);
+    const sending = JSON.stringify(parsed.location);
+    sent.current = sending;
+    if (!(await onSave(parsed.location)) && sent.current === sending) sent.current = null;
   };
 
   const onBlur = (e: FocusEvent<HTMLDivElement>) => {
@@ -69,6 +74,20 @@ export function LocationInput({
       void commit(fields);
     }
   };
+  // The panel can close (another photo selected, a folder opened from outside) without the fields
+  // being left first: valid changes they hold are saved then; a bad number is not.
+  const latest = useRef({ fields, initial, hasOverride, onSave });
+  latest.current = { fields, initial, hasOverride, onSave };
+  useEffect(
+    () => () => {
+      const l = latest.current;
+      const save = locationToSave(l.fields, l.initial, l.hasOverride);
+      // Already on its way from a blur or Enter.
+      if (save && JSON.stringify(save.location) !== sent.current) void l.onSave(save.location);
+    },
+    [],
+  );
+
   const pick = (name: string) => {
     const next = { ...fields, name };
     setFields(next);

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { dragFiles, MAX_DRAG_FILES } from '../electron/drag';
+import { dragFiles, dragRequest, MAX_DRAG_FILES, PREPARED_DRAG_MS, preparedDragFor, type PreparedDrag } from '../electron/drag';
 import { createGalleryApp } from '../src/gallery/server/app';
 
 describe('dragFiles', () => {
@@ -29,6 +29,33 @@ describe('dragFiles', () => {
   it('caps a drag at 500 files', () => {
     expect(MAX_DRAG_FILES).toBe(500);
     expect(dragFiles(Array.from({ length: 600 }, (_, i) => `C:\\x\\${i}.jpg`), catalogued, exists)).toHaveLength(500);
+  });
+});
+
+describe('a drag checked on pointerdown', () => {
+  const prepared: PreparedDrag = { requested: ['C:\\x\\a.jpg', 'C:\\x\\b.jpg'], files: ['C:\\x\\a.jpg'], icon: 'C:\\t\\k_s.jpg', at: 1000 };
+
+  it('is used when the drag asks for exactly the prepared list, in time', () => {
+    expect(preparedDragFor(prepared, ['C:\\x\\a.jpg', 'C:\\x\\b.jpg'], 1000 + 50)).toBe(prepared);
+    expect(PREPARED_DRAG_MS).toBe(10_000);
+    expect(preparedDragFor(prepared, ['C:\\x\\a.jpg', 'C:\\x\\b.jpg'], 1000 + PREPARED_DRAG_MS)).toBe(prepared);
+  });
+
+  it('is not used for another list: other paths, another order, fewer, or nothing prepared', () => {
+    expect(preparedDragFor(prepared, ['C:\\x\\a.jpg', 'C:\\x\\c.jpg'], 1050)).toBeNull();
+    expect(preparedDragFor(prepared, ['C:\\x\\b.jpg', 'C:\\x\\a.jpg'], 1050)).toBeNull();
+    expect(preparedDragFor(prepared, ['C:\\x\\a.jpg'], 1050)).toBeNull();
+    expect(preparedDragFor(undefined, ['C:\\x\\a.jpg'], 1050)).toBeNull();
+  });
+
+  it('expires after 10 s', () => {
+    expect(preparedDragFor(prepared, ['C:\\x\\a.jpg', 'C:\\x\\b.jpg'], 1000 + PREPARED_DRAG_MS + 1)).toBeNull();
+  });
+
+  it('takes from the page only non-empty strings, at most 500', () => {
+    expect(dragRequest(['C:\\x\\a.jpg', 3, '', null, 'C:\\x\\b.jpg'])).toEqual(['C:\\x\\a.jpg', 'C:\\x\\b.jpg']);
+    expect(dragRequest('C:\\x\\a.jpg')).toEqual([]);
+    expect(dragRequest(Array.from({ length: 700 }, (_, i) => `C:\\x\\${i}.jpg`))).toHaveLength(MAX_DRAG_FILES);
   });
 });
 

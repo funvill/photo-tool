@@ -1,12 +1,12 @@
 // The gallery program's part of the main process (`--gallery [folder]`): its page, its File menu,
 // handing it folders to open, and starting it from the editor. main.ts runs everything else
 // (the server, hardening, the window) the same way for both programs.
-import { app, dialog, ipcMain, nativeImage, type BrowserWindow, type IpcMainEvent, type MenuItemConstructorOptions, type NativeImage } from 'electron';
+import { app, dialog, ipcMain, nativeImage, type BrowserWindow, type IpcMainEvent, type MenuItemConstructorOptions, type NativeImage, type WebContents } from 'electron';
 import { spawn } from 'node:child_process';
 import { statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { parseMode } from './config';
-import { dragFiles, MAX_DRAG_FILES, type DragCheck } from './drag';
+import { dragFiles, dragRequest, preparedDragFor, sameDragList, type DragCheck, type PreparedDrag } from './drag';
 
 export const GALLERY_DESCRIPTION = 'Look through a folder of photos, star the best ones and drag them into other programs. Works offline.';
 
@@ -120,30 +120,88 @@ async function dragCheck(port: number, paths: string[]): Promise<DragCheck> {
   };
 }
 
+const DRAG_FAILED = "Couldn't drag the photos: the gallery did not answer in time. Try again.";
+
 /**
- * Dragging photos out of the gallery window ('gallery:start-drag', sent by the page on a tile's
- * dragstart): the original files, only those the gallery's server has catalogued and that are still
- * on disk, at most MAX_DRAG_FILES. Nothing happens when none is left.
+ * Dragging photos out of the gallery window: the original files, only those the gallery's server has
+ * catalogued and that are still on disk, at most MAX_DRAG_FILES. Nothing happens when none is left.
+ *
+ * Windows starts a drag from the mouse as it is when startDrag is called, so a drag that waits for
+ * the server can miss a quick flick. The page therefore sends 'gallery:prepare-drag' when the mouse
+ * button goes down on a tile, and the files are checked then; on 'gallery:start-drag' (dragstart) for
+ * that same list the drag starts at once. Any other drag is checked then, the slower way. A check that
+ * fails is told to the page ('gallery:drag-failed').
  */
 export function galleryDrag(o: { fromApp: (e: IpcMainEvent) => boolean; serverPort: () => number; log: (...a: unknown[]) => void }) {
-  ipcMain.on('gallery:start-drag', (e, requested: unknown) => {
-    if (!o.fromApp(e) || !Array.isArray(requested)) return;
-    const paths = requested.filter((p): p is string => typeof p === 'string' && p !== '').slice(0, MAX_DRAG_FILES);
-    if (!paths.length) return;
-    void (async () => {
-      let check: DragCheck;
-      try {
-        check = await dragCheck(o.serverPort(), paths);
-      } catch (err) {
+  // Per gallery page (its webContents id): the drag checked on the last pointerdown, or one being checked.
+  const prepared = new Map<number, PreparedDrag>();
+  const preparing = new Map<number, { requested: string[]; done: Promise<PreparedDrag> }>();
+  const watched = new Set<number>();
+  const forget = (sender: WebContents) => {
+    if (watched.has(sender.id)) return;
+    watched.add(sender.id);
+    const id = sender.id;
+    sender.once('destroyed', () => {
+      prepared.delete(id);
+      preparing.delete(id);
+      watched.delete(id);
+    });
+  };
+
+  const check = async (requested: string[]): Promise<PreparedDrag> => {
+    const reply = await dragCheck(o.serverPort(), requested);
+    const catalogued = new Set(reply.paths);
+    return { requested, files: dragFiles(requested, (p) => catalogued.has(p), isFile), icon: reply.icon, at: Date.now() };
+  };
+
+  const start = (sender: WebContents, p: PreparedDrag) => {
+    // Looked at again now (synchronously): a file may have gone since the button went down.
+    const files = p.files.filter(isFile);
+    if (!files.length || sender.isDestroyed()) return;
+    o.log('drag', { files: files.length });
+    sender.startDrag({ file: files[0], files, icon: dragIcon(p.icon) });
+  };
+
+  ipcMain.on('gallery:prepare-drag', (e, raw: unknown) => {
+    if (!o.fromApp(e)) return;
+    const id = e.sender.id;
+    forget(e.sender);
+    prepared.delete(id);
+    preparing.delete(id);
+    const requested = dragRequest(raw);
+    if (!requested.length) return;
+    const entry = { requested, done: check(requested) };
+    preparing.set(id, entry);
+    entry.done.then(
+      (p) => {
+        if (preparing.get(id) !== entry) return;
+        preparing.delete(id);
+        prepared.set(id, p);
+      },
+      (err) => {
+        if (preparing.get(id) === entry) preparing.delete(id);
+        o.log('drag: could not check the files ahead', String(err));
+      },
+    );
+  });
+
+  ipcMain.on('gallery:start-drag', (e, raw: unknown) => {
+    if (!o.fromApp(e)) return;
+    const requested = dragRequest(raw);
+    if (!requested.length) return;
+    const sender = e.sender;
+    const ready = preparedDragFor(prepared.get(sender.id), requested, Date.now());
+    if (ready) return start(sender, ready);
+    // Not checked ahead for this list: wait for the check under way, or make one.
+    const pending = preparing.get(sender.id);
+    const done = pending && sameDragList(pending.requested, requested) ? pending.done : check(requested);
+    done.then(
+      (p) => start(sender, p),
+      (err) => {
         o.log('drag: could not check the files with the server', String(err));
-        return;
-      }
-      const catalogued = new Set(check.paths);
-      const files = dragFiles(paths, (p) => catalogued.has(p), isFile);
-      if (!files.length || e.sender.isDestroyed()) return;
-      o.log('drag', { files: files.length });
-      e.sender.startDrag({ file: files[0], files, icon: dragIcon(check.icon) });
-    })();
+        if (!sender.isDestroyed()) sender.send('gallery:drag-failed', DRAG_FAILED);
+      },
+    );
   });
 }
 

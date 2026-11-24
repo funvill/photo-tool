@@ -17,6 +17,13 @@ export interface DesktopApi {
   /** Gallery window: drag these photo files out of the window, as files, into another program. */
   startDrag(paths: string[]): void;
   /**
+   * Gallery window: the mouse button went down on a tile that would drag these files. They are
+   * checked now, so that a drag that follows (startDrag with the same list) starts at once.
+   */
+  prepareDrag?(paths: string[]): void;
+  /** Gallery window: `cb` gets the message when a drag could not start. Returns a function that stops listening. */
+  onDragFailed?(cb: (message: string) => void): () => void;
+  /**
    * Gallery window: `cb` gets each folder the gallery is asked to open from outside the page
    * (`--gallery <folder>` at start, or from a second launch). Returns a function that stops listening.
    */

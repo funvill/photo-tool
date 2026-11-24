@@ -18,6 +18,12 @@ const api: DesktopApi = {
   showInFolder: (exportFile) => ipcRenderer.invoke('desktop:show-in-folder', String(exportFile)),
   openGallery: () => ipcRenderer.invoke('desktop:open-gallery'),
   startDrag: (paths) => ipcRenderer.send('gallery:start-drag', Array.isArray(paths) ? paths.map(String) : []),
+  prepareDrag: (paths) => ipcRenderer.send('gallery:prepare-drag', Array.isArray(paths) ? paths.map(String) : []),
+  onDragFailed: (cb) => {
+    const listener = (_e: Electron.IpcRendererEvent, message: unknown) => cb(typeof message === 'string' ? message : "Couldn't drag the photos.");
+    ipcRenderer.on('gallery:drag-failed', listener);
+    return () => void ipcRenderer.removeListener('gallery:drag-failed', listener);
+  },
   onOpenFolder: (cb) => {
     const listener = (_e: Electron.IpcRendererEvent, folder: unknown) => {
       if (typeof folder === 'string') cb(folder);

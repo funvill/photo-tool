@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fromDateTimeLocal, normalisePeople, parseLocation, toDateTimeLocal } from '../src/core';
+import { fromDateTimeLocal, locationToSave, normalisePeople, parseLocation, toDateTimeLocal } from '../src/core';
 
 describe('gallery edit rules', () => {
   it('normalises people: trimmed, no repeats ignoring case, no empties', () => {
@@ -29,5 +29,16 @@ describe('gallery edit rules', () => {
     }
     expect(parseLocation('10', '', '')).toMatchObject({ ok: false, message: 'Enter both latitude and longitude.' });
     expect(parseLocation('', '', 'Canada').ok).toBe(false);
+  });
+
+  it('saves location fields left unsaved (the panel closed while typing) only when they changed and are valid', () => {
+    const saved = { lat: '49.28', lon: '-123.12', name: '' };
+    expect(locationToSave({ ...saved, name: 'Vancouver' }, saved, true)).toEqual({ location: { lat: 49.28, lon: -123.12, name: 'Vancouver' } });
+    expect(locationToSave(saved, saved, true)).toBeNull();
+    expect(locationToSave({ ...saved, lat: '95' }, saved, true)).toBeNull();
+    expect(locationToSave({ ...saved, lon: '' }, saved, true)).toBeNull();
+    // Emptied: deletes a saved location; with only the camera's GPS there is nothing to delete.
+    expect(locationToSave({ lat: '', lon: '', name: '' }, saved, true)).toEqual({ location: null });
+    expect(locationToSave({ lat: '', lon: '', name: '' }, saved, false)).toBeNull();
   });
 });

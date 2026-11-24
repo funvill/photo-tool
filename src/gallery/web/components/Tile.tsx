@@ -16,6 +16,8 @@ export interface TileProps {
   onStar(path: string, star: boolean): void;
   /** Double-click: open the photo in the viewer. */
   onOpen(path: string): void;
+  /** The left button went down on the tile: a drag may follow, so the files are checked now. */
+  onDragReady(path: string): void;
   /** The tile is being dragged: the desktop app drags the photo files out instead. */
   onDragOut(path: string): void;
   onHoverStart(path: string, el: HTMLElement): void;
@@ -25,7 +27,7 @@ export interface TileProps {
 const onActions = (e: SyntheticEvent) => !!(e.target as HTMLElement).closest('.gallery-tile-actions');
 
 /** One photo in the grid: its thumbnail, a star badge when starred, and a star button on hover. */
-export const Tile = memo(function Tile({ item, x, y, size, selected, picked, onSelect, onStar, onOpen, onDragOut, onHoverStart, onHoverEnd }: TileProps) {
+export const Tile = memo(function Tile({ item, x, y, size, selected, picked, onSelect, onStar, onOpen, onDragReady, onDragOut, onHoverStart, onHoverEnd }: TileProps) {
   const starred = item.info.star === true;
   return (
     <div
@@ -36,6 +38,7 @@ export const Tile = memo(function Tile({ item, x, y, size, selected, picked, onS
       draggable
       onClick={(e) => !onActions(e) && onSelect(item.path, { ctrl: e.ctrlKey || e.metaKey, shift: e.shiftKey })}
       onDoubleClick={(e) => !onActions(e) && onOpen(item.path)}
+      onPointerDown={(e) => e.button === 0 && !onActions(e) && onDragReady(item.path)}
       onDragStart={(e) => {
         // The page's own drag would carry a picture of the tile; the desktop app drags the files.
         e.preventDefault();

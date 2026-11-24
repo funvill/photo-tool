@@ -58,3 +58,19 @@ export function parseLocation(latText: string, lonText: string, nameText: string
   if (!lat || !lon) return { ok: false, message: 'Enter both latitude and longitude.' };
   return { ok: true, location: { lat: lat.value, lon: lon.value, ...(name ? { name } : {}) } };
 }
+
+/**
+ * What location fields left without a save (the panel closed while typing) save: nothing when they
+ * are as `saved`, not valid, or emptied with no saved location to delete (`hasOverride` false);
+ * else the location, null deleting it.
+ */
+export function locationToSave(
+  fields: { lat: string; lon: string; name: string },
+  saved: { lat: string; lon: string; name: string },
+  hasOverride: boolean,
+): { location: { lat: number; lon: number; name?: string } | null } | null {
+  if (fields.lat === saved.lat && fields.lon === saved.lon && fields.name === saved.name) return null;
+  const parsed = parseLocation(fields.lat, fields.lon, fields.name);
+  if (!parsed.ok || (parsed.location === null && !hasOverride)) return null;
+  return { location: parsed.location };
+}

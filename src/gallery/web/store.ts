@@ -409,8 +409,14 @@ export const useVisibleItems = (): GalleryItem[] => useGallery((s) => selectVisi
 
 /**
  * Open each folder the desktop app hands the page (`--gallery <folder>`, a second launch, File >
- * Open folder), with the current "Include subfolders" choice. Returns a function that stops listening.
+ * Open folder), with the current "Include subfolders" choice, and show a drag that could not start
+ * as an error. Returns a function that stops listening.
  */
-export function connectDesktop(d: Pick<DesktopApi, 'onOpenFolder'> | undefined): () => void {
-  return d?.onOpenFolder?.((folder) => void useGallery.getState().open(folder, useGallery.getState().recursive)) ?? (() => undefined);
+export function connectDesktop(d: Pick<DesktopApi, 'onOpenFolder' | 'onDragFailed'> | undefined): () => void {
+  const stopFolders = d?.onOpenFolder?.((folder) => void useGallery.getState().open(folder, useGallery.getState().recursive));
+  const stopDrags = d?.onDragFailed?.((message) => useGallery.getState().toast('error', message));
+  return () => {
+    stopFolders?.();
+    stopDrags?.();
+  };
 }

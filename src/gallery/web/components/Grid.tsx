@@ -12,6 +12,12 @@ const GAP = 6;
 const PAD = 12;
 const HOVER_DELAY_MS = 400;
 
+/** What dragging this tile takes: every selected photo (in grid order) when it is selected, else just it. */
+function dragList(path: string): string[] {
+  const s = useGallery.getState();
+  return dragPaths(selectVisible(s).map((i) => i.path), s.selection, path);
+}
+
 /**
  * The photos of the open folder. Only the rows on screen (and a couple either side) are drawn, so a
  * folder of thousands of photos scrolls smoothly.
@@ -57,11 +63,10 @@ export function Grid({ onOpen }: { onOpen: (path: string) => void }) {
 
   const onSelect = useCallback((path: string, mods: { ctrl: boolean; shift: boolean }) => useGallery.getState().clickSelect(path, mods), []);
   const onStar = useCallback((path: string, star: boolean) => void useGallery.getState().setStar(path, star), []);
-  // A selected tile drags every selected photo (in grid order); any other tile drags just itself.
-  const onDragOut = useCallback((path: string) => {
-    const s = useGallery.getState();
-    desktop?.startDrag?.(dragPaths(selectVisible(s).map((i) => i.path), s.selection, path));
-  }, []);
+  // The files are worked out when the button goes down (so the desktop app can check them before the
+  // drag) and again on dragstart: the same rule, so the same list unless the selection changed.
+  const onDragReady = useCallback((path: string) => desktop?.prepareDrag?.(dragList(path)), []);
+  const onDragOut = useCallback((path: string) => desktop?.startDrag?.(dragList(path)), []);
 
   // Enter or Space opens the selected photo in the viewer (not while typing, or while the viewer is open).
   useEffect(() => {
@@ -115,6 +120,7 @@ export function Grid({ onOpen }: { onOpen: (path: string) => void }) {
         onSelect={onSelect}
         onStar={onStar}
         onOpen={onOpen}
+        onDragReady={onDragReady}
         onDragOut={onDragOut}
         onHoverStart={hover.start}
         onHoverEnd={hover.hide}
