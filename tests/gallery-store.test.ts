@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GalleryItem } from '../src/gallery/server/app';
 
-const { useGallery, connectDesktop, selectVisible } = await import('../src/gallery/web/store');
+const { useGallery, connectDesktop, selectVisible, selectStackInfo } = await import('../src/gallery/web/store');
 
 function item(over: Partial<GalleryItem> = {}): GalleryItem {
   return {
@@ -432,5 +432,125 @@ describe('gallery store', () => {
     const three = [a, b, { ...small('c'), analysis: { ...analysis, dHash: '00ff00ff00ff00ff' } }];
     vi.setSystemTime(Date.now() + 2500);
     expect(selectVisible({ ...state, items: three, progress: scanning }).map((i) => i.path)).toEqual(['a', 'b', 'c']);
+  });
+  describe('review: hidden, stacks, flags and removal', () => {
+    const photos = (...names: string[]) => names.map((n) => item({ path: n, fileName: `${n}.jpg`, key: n }));
+    const g = () => useGallery.getState();
+    const setup = (items: GalleryItem[], selected: string | null, extra: Record<string, unknown> = {}) =>
+      useGallery.setState({ job: 'j1', root: 'D:\Trip', items, sort: 'name', filter: {}, stacked: false, openStacks: [], selected, selection: selected ? [selected] : [], anchor: selected, ...extra });
+    /** A server that applies the patch to the photo it is for and answers with it. */
+    const serve = () => {
+      const saved: { path: string; patch: Record<string, unknown> }[] = [];
+      routes['PATCH /api/gallery/info'] = (body) => {
+        const b = body as { path: string; patch: Record<string, unknown> };
+        saved.push({ path: b.path, patch: b.patch });
+        const old = g().items.find((i) => i.path === b.path)!;
+        const info = { ...old.info, ...b.patch } as Record<string, unknown>;
+        for (const k of Object.keys(info)) if (info[k] === null) delete info[k];
+        return { json: { ...old, info } };
+      };
+      return saved;
+    };
+
+    it("toggleFlag('hidden') hides the selected photo and selects the next one", async () => {
+      setup(photos('a', 'b', 'c'), 'b');
+      const saved = serve();
+      await g().toggleFlag('hidden');
+      expect(saved).toEqual([{ path: 'b', patch: { hidden: true } }]);
+      expect(g().selected).toBe('c');
+      expect(g().selection).toEqual(['c']);
+    });
+
+    it("toggleFlag('hidden') on the last shown photo selects the previous one", async () => {
+      setup(photos('a', 'b', 'c'), 'c');
+      serve();
+      await g().toggleFlag('hidden');
+      expect(g().selected).toBe('b');
+    });
+
+    it('hiding every photo leaves nothing selected', async () => {
+      setup(photos('a'), 'a');
+      serve();
+      await g().toggleFlag('hidden');
+      expect(g().selected).toBeNull();
+      expect(g().selection).toEqual([]);
+      expect(selectVisible(g())).toEqual([]);
+    });
+
+    it('toggleFlag on a multi-selection sets every selected photo to the opposite of the focused one', async () => {
+      setup(photos('a', 'b', 'c'), 'b', { selection: ['a', 'b'] });
+      const saved = serve();
+      await g().toggleFlag('hidden');
+      expect(saved).toEqual([{ path: 'a', patch: { hidden: true } }, { path: 'b', patch: { hidden: true } }]);
+      expect(g().selected).toBe('c');
+      expect(g().selection).toEqual(['c']);
+    });
+
+    it("toggleFlag('hidden') on a hidden photo with filter 'show' sends hidden: null", async () => {
+      setup([item({ path: 'a', info: { hidden: true } }), ...photos('b')], 'a', { filter: { hidden: 'show' } });
+      const saved = serve();
+      await g().toggleFlag('hidden');
+      expect(saved).toEqual([{ path: 'a', patch: { hidden: null } }]);
+      expect(g().items[0].info.hidden).toBeUndefined();
+      expect(g().selected).toBe('a');
+    });
+
+    it("toggleFlag('star') stars through setStar", async () => {
+      setup(photos('a', 'b'), 'a');
+      const saved = serve();
+      await g().toggleFlag('star');
+      expect(saved).toEqual([{ path: 'a', patch: { star: true } }]);
+      expect(g().items[0].info.star).toBe(true);
+      expect(g().selected).toBe('a');
+    });
+
+    const burst = (name: string, at: string) =>
+      item({
+        path: name, fileName: `${name}.jpg`, key: name, capturedAt: at,
+        analysis: { sharpness: 100, meanLuma: 0.45, clippedShadows: 0, clippedHighlights: 0, dHash: '0123456789abcdef', saliencyX: 0.5, saliencyY: 0.5 },
+      });
+
+    it('stacked list folds a group and toggleStack unfolds it', () => {
+      setup([burst('a', '2026-01-01T10:00:00'), burst('b', '2026-01-01T10:00:01'), ...photos('z')], null, { stacked: true });
+      expect(selectVisible(g()).map((i) => i.path)).toHaveLength(2);
+      const info = selectStackInfo(g());
+      expect([...info.values()]).toEqual([expect.objectContaining({ size: 2, open: false, top: true })]);
+      const id = [...info.values()][0].id;
+      g().toggleStack(id);
+      expect(g().openStacks).toEqual([id]);
+      expect(selectVisible(g()).map((i) => i.path).sort()).toEqual(['a', 'b', 'z']);
+      expect(selectVisible(g())).toBe(selectVisible(g()));
+      g().toggleStack(id);
+      expect(g().openStacks).toEqual([]);
+      expect(selectVisible(g())).toHaveLength(2);
+    });
+
+    it('setStacked(false) shows every photo', () => {
+      setup([burst('a', '2026-01-01T10:00:00'), burst('b', '2026-01-01T10:00:01')], null, { stacked: true });
+      expect(selectVisible(g())).toHaveLength(1);
+      g().setStacked(false);
+      expect(selectVisible(g())).toHaveLength(2);
+      expect(selectStackInfo(g()).size).toBe(0);
+    });
+
+    it('removeItems drops the photos and moves the selection', () => {
+      setup(photos('a', 'b', 'c'), 'b', { selection: ['a', 'b'] });
+      g().removeItems(['a', 'b']);
+      expect(g().items.map((i) => i.path)).toEqual(['c']);
+      expect(g().selected).toBe('c');
+      expect(g().selection).toEqual(['c']);
+    });
+
+    it('opening a folder selects the first photo', async () => {
+      routes['POST /api/gallery/open'] = () => ({ status: 202, json: { jobId: 'j1' } });
+      routes['GET /api/gallery/recent'] = () => ({ json: [] });
+      routes['GET /api/gallery/jobs/j1'] = () => ({ json: { total: 2, processed: 2, startedAt: 0, done: true, errors: [], items: photos('b', 'a') } });
+      routes['GET /api/gallery/stamp'] = () => ({ json: { stamp: 's' } });
+      routes['GET /api/gallery/items'] = () => ({ json: photos('b', 'a') });
+      useGallery.setState({ sort: 'name', filter: {}, stacked: false });
+      await g().open('D:\Trip', true);
+      expect(g().selected).toBe('a');
+      expect(g().selection).toEqual(['a']);
+    });
   });
 });

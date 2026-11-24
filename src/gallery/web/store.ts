@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import type { DesktopApi } from '../../shared/desktopApi';
 import { filterItems, galleryFacts, sortItems, type GalleryFacts, type GalleryFilter, type GallerySortKey } from '../../core/gallerySort';
-import { clickSelect } from '../../core/galleryViewer';
+import { clickSelect, flagTargets, nextAfterRemoval } from '../../core/galleryViewer';
+import { stackItems, type StackInfo } from '../../core/galleryStacks';
 import { galleryApi, type GalleryItem, type JobUpdate, type RecentFolder } from './api';
 
 // The gallery's state: the open folder, its photos (filled in while the folder is read), the
@@ -33,6 +34,10 @@ export interface GalleryState {
   /** Order and filters of the grid, kept for the session (in memory, not saved): a new folder keeps the sort and the filters except the subfolder. */
   sort: GallerySortKey;
   filter: GalleryFilter;
+  /** Fold the near-identical shots of a burst into one tile (on by default). */
+  stacked: boolean;
+  /** The ids of the stacks shown unfolded; cleared when a folder is opened or closed. */
+  openStacks: string[];
   /** "Include subfolders" for the next folder opened. */
   recursive: boolean;
   recent: RecentFolder[];
@@ -65,6 +70,15 @@ export interface GalleryState {
   setFilter(patch: Partial<GalleryFilter>): void;
   clearFilter(): void;
   setRecursive(recursive: boolean): void;
+  setStacked(on: boolean): void;
+  toggleStack(id: string): void;
+  /**
+   * Star or hide the selected photo (every selected one when several are): they all get the opposite of the
+   * selected photo's value. A photo that then leaves the list is replaced in the selection by the next one.
+   */
+  toggleFlag(field: 'star' | 'hidden'): Promise<void>;
+  /** Drop photos from the list (they were deleted); the selection moves on to the next one. */
+  removeItems(paths: string[]): void;
   /** Stop reading and watching the open folder, and go back to the start screen. */
   close(): void;
   setTidyOpen(open: boolean): void;
@@ -166,6 +180,11 @@ export const useGallery = create<GalleryState>()((set, get) => {
       jobTimer = setTimeout(() => void pollJob(gen, job), JOB_POLL_MS);
       return;
     }
+    // Nothing selected yet: start on the first photo, so the keys have somewhere to begin.
+    if (get().selected === null) {
+      const first = selectVisible(get())[0];
+      if (first) get().select(first.path);
+    }
     if (u.errors.length) get().toast('error', `${plural(u.errors.length, 'photo')} could not be read: ${u.errors.slice(0, 3).map((e) => e.path.split(/[\\/]/).pop()).join(', ')}${u.errors.length > 3 ? '…' : ''}`);
     await watchInfo(gen, job);
   };
@@ -178,6 +197,19 @@ export const useGallery = create<GalleryState>()((set, get) => {
   };
 
   /** After a filter change: photos it hides leave the selection (what a drag would take). */
+  /** After photos left the list (hidden, deleted, filtered out): move the selection on from `before`, the list as it was. */
+  const settleSelection = (before: string[]) => {
+    const s = get();
+    const after = selectVisible(s).map((i) => i.path);
+    if (s.selected !== null && !after.includes(s.selected)) {
+      get().select(nextAfterRemoval(before, after, s.selected));
+      return;
+    }
+    const shown = new Set(after);
+    const selection = s.selection.filter((p) => shown.has(p));
+    if (selection.length !== s.selection.length) set({ selection });
+  };
+
   const pruneSelection = () => {
     const s = get();
     if (!s.selection.length) return;
@@ -223,6 +255,8 @@ export const useGallery = create<GalleryState>()((set, get) => {
     thumbSize: savedThumbSize(),
     sort: 'date',
     filter: {},
+    stacked: true,
+    openStacks: [],
     recursive: true,
     recent: [],
     toasts: [],
@@ -241,7 +275,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
       stopTimers();
       const gen = generation;
       // The subfolders of the old folder mean nothing in this one.
-      set((s) => ({ filter: withoutRelDir(s.filter), job: null, root: folder, items: [], ...noSelection, progress: { total: 0, processed: 0, startedAt: Date.now() } }));
+      set((s) => ({ filter: withoutRelDir(s.filter), job: null, root: folder, items: [], openStacks: [], ...noSelection, progress: { total: 0, processed: 0, startedAt: Date.now() } }));
       let job: string;
       try {
         job = (await galleryApi.open(folder, recursive)).jobId;
@@ -368,10 +402,41 @@ export const useGallery = create<GalleryState>()((set, get) => {
       set({ recursive });
     },
 
+    setStacked(stacked) {
+      const before = selectVisible(get()).map((i) => i.path);
+      set({ stacked });
+      settleSelection(before);
+    },
+
+    toggleStack(id) {
+      const before = selectVisible(get()).map((i) => i.path);
+      set((s) => ({ openStacks: s.openStacks.includes(id) ? s.openStacks.filter((o) => o !== id) : [...s.openStacks, id] }));
+      settleSelection(before);
+    },
+
+    async toggleFlag(field) {
+      const s = get();
+      const byPath = new Map(s.items.map((i) => [i.path, i]));
+      const targets = flagTargets(s.selection, s.selected, (p) => byPath.get(p)?.info[field] === true);
+      if (!targets) return;
+      const before = selectVisible(s).map((i) => i.path);
+      await Promise.all(
+        targets.paths.map((p) => (field === 'star' ? get().setStar(p, targets.value) : get().saveInfo(p, { hidden: targets.value ? true : null }))),
+      );
+      settleSelection(before);
+    },
+
+    removeItems(paths) {
+      const before = selectVisible(get()).map((i) => i.path);
+      const gone = new Set(paths);
+      set((s) => ({ items: s.items.filter((i) => !gone.has(i.path)) }));
+      settleSelection(before);
+    },
+
     close() {
       cancelScan();
       stopTimers();
-      set({ job: null, root: null, items: [], progress: null, ...noSelection, tidyOpen: false });
+      set({ job: null, root: null, items: [], openStacks: [], progress: null, ...noSelection, tidyOpen: false });
     },
 
     setTidyOpen(tidyOpen) {
@@ -393,33 +458,51 @@ export const useGallery = create<GalleryState>()((set, get) => {
 // What the grid shows: the photos filtered and sorted. One list for the grid and the viewer, worked out
 // again only when the photos, sort or filter change. The facts (interesting score, colour, quality flags,
 // bursts) are costly on a big folder, so they are worked out only when a sort or filter reads them.
-const needsFacts = (sort: GallerySortKey, f: GalleryFilter) => sort === 'interesting' || sort === 'colour' || !!f.lowQuality || !!f.nearDuplicates;
+const needsFacts = (sort: GallerySortKey, f: GalleryFilter, stacked?: boolean) => !!stacked || sort === 'interesting' || sort === 'colour' || !!f.lowQuality || !!f.nearDuplicates;
 const NO_FACTS = new Map<string, GalleryFacts>();
+const NO_STACKS = new Map<string, StackInfo>();
 let factsMemo: { items: GalleryItem[]; facts: Map<string, GalleryFacts>; at: number } | null = null;
-let visibleMemo: { items: GalleryItem[]; sort: GallerySortKey; filter: GalleryFilter; visible: GalleryItem[]; stale: boolean } | null = null;
+let visibleMemo: {
+  items: GalleryItem[]; sort: GallerySortKey; filter: GalleryFilter; stacked: boolean; openStacks: string[] | undefined;
+  visible: GalleryItem[]; stackOf: Map<string, StackInfo>; stale: boolean;
+} | null = null;
 /** While a folder is still being read, facts are refreshed at most this often. */
 const FACTS_SCAN_THROTTLE_MS = 2000;
 
-export function selectVisible(s: Pick<GalleryState, 'items' | 'sort' | 'filter'> & { progress?: GalleryState['progress'] }): GalleryItem[] {
+type VisibleInput = Pick<GalleryState, 'items' | 'sort' | 'filter'> & { progress?: GalleryState['progress']; stacked?: boolean; openStacks?: string[] };
+
+export function selectVisible(s: VisibleInput): GalleryItem[] {
+  const stacked = !!s.stacked;
   const m = visibleMemo;
-  if (m && m.items === s.items && m.sort === s.sort && m.filter === s.filter && !(m.stale && !s.progress)) return m.visible;
+  if (m && m.items === s.items && m.sort === s.sort && m.filter === s.filter && m.stacked === stacked && m.openStacks === s.openStacks && !(m.stale && !s.progress)) return m.visible;
+  const withFacts = needsFacts(s.sort, s.filter, stacked);
   let facts = NO_FACTS;
-  if (needsFacts(s.sort, s.filter)) {
+  if (withFacts) {
     const now = Date.now();
     // Mid-scan the list grows every half second: keep the last facts (new photos have none yet) for a while.
-    const fresh = factsMemo?.items === s.items || (!!s.progress && !!factsMemo && now - factsMemo.at < FACTS_SCAN_THROTTLE_MS);
+    const fresh = factsMemo?.items === s.items || (!!s.progress && !!factsMemo && now >= factsMemo.at && now - factsMemo.at < FACTS_SCAN_THROTTLE_MS);
     if (!fresh) factsMemo = { items: s.items, facts: galleryFacts(s.items), at: now };
     facts = factsMemo!.facts;
   }
-  const visible = sortItems(filterItems(s.items, s.filter, facts), s.sort, facts);
+  const sorted = sortItems(filterItems(s.items, s.filter, facts), s.sort, facts);
+  const folded = stacked ? stackItems(sorted, facts, new Set(s.openStacks ?? [])) : null;
+  const visible = folded ? folded.items : sorted;
   // Built from stale facts: remembered (the selector must return the same list for the same state), but redone once the scan ends.
-  const stale = needsFacts(s.sort, s.filter) && factsMemo?.items !== s.items;
-  visibleMemo = { items: s.items, sort: s.sort, filter: s.filter, visible, stale };
+  const stale = withFacts && factsMemo?.items !== s.items;
+  visibleMemo = { items: s.items, sort: s.sort, filter: s.filter, stacked, openStacks: s.openStacks, visible, stackOf: folded ? folded.stackOf : NO_STACKS, stale };
   return visible;
+}
+
+/** The stacks in the visible list, by photo path (empty when stacking is off): same memo as selectVisible. */
+export function selectStackInfo(s: VisibleInput): Map<string, StackInfo> {
+  selectVisible(s);
+  return visibleMemo!.stackOf;
 }
 
 /** The photos to show, in order: the grid and the viewer step through this one list. */
 export const useVisibleItems = (): GalleryItem[] => useGallery((s) => selectVisible(s));
+
+export const useStackInfo = (): Map<string, StackInfo> => useGallery((s) => selectStackInfo(s));
 
 /**
  * Open each folder the desktop app hands the page (`--gallery <folder>`, a second launch, File >
