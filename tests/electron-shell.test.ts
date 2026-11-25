@@ -379,7 +379,8 @@ describe('desktop packaging', () => {
     const config = code('electron-builder.config.cjs');
     expect(config).not.toMatch(/nsis-web|squirrel/i);
     expect(config).toMatch(/publish: null/);
-    expect(config).toMatch(/asarUnpack: \[[^\]]*sharp[^\]]*@img/);
+    // sharp and @img (native, with DLLs) are unpacked, with the rest of node_modules.
+    expect(config).toMatch(/asarUnpack: \[[^\]]*'node_modules\/\*\*'/);
     expect(code('electron/main.ts', 'electron/preload.ts', 'electron/server-host.ts', 'electron/selfTest.ts')).not.toMatch(/crashReporter|autoUpdater|electron-updater|update-electron-app/);
     expect(JSON.stringify(JSON.parse(read('package.json')).devDependencies)).not.toMatch(/updater/);
   });
@@ -408,7 +409,9 @@ describe('desktop packaging', () => {
     delete require.cache[path];
     const config = require(path);
     delete require.cache[path];
-    for (const p of ['tagging-worker.cjs', 'node_modules/@huggingface/**', 'node_modules/onnxruntime-node/**', 'node_modules/onnxruntime-common/**']) {
+    // The worker's requires resolve on the real disk only: Transformers.js, onnxruntime and sharp's own
+    // dependencies (detect-libc, semver) must all be unpacked, so all of node_modules is.
+    for (const p of ['tagging-worker.cjs', 'node_modules/**']) {
       expect(config.asarUnpack, p).toContain(p);
     }
     // The worker thread is started from the unpacked copy; in development there is no app.asar.

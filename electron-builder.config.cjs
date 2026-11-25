@@ -27,9 +27,10 @@ module.exports = {
   files: ['**/*', '!**/*.map', '!**/*.d.ts', '!**/*.d.cts', '!**/*.d.mts', '!**/*.md', '!**/*.ts'],
   asar: true,
   // sharp, onnxruntime-node (photo tagging) and their DLLs only load from real files. The tagging worker thread is
-  // started from a real file too, with Transformers.js (and its tokenizers) beside it: none of it relies on Electron's
-  // app.asar reading inside a worker thread.
-  asarUnpack: ['node_modules/sharp/**', 'node_modules/@img/**', 'node_modules/onnxruntime-node/**', 'node_modules/onnxruntime-common/**', 'node_modules/@huggingface/**', 'tagging-worker.cjs'],
+  // started from a real file too (app.asar.unpacked/tagging-worker.cjs), and Node resolves its requires on the real
+  // disk only, so every module it reaches must be there: all of node_modules (only the runtime modules build.mjs
+  // copies) is unpacked, rather than a list that silently misses one (sharp's detect-libc did).
+  asarUnpack: ['node_modules/**', 'tagging-worker.cjs'],
   // The modules in dist/desktop/app are prebuilt for this platform already.
   npmRebuild: false,
   nodeGypRebuild: false,
