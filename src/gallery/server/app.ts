@@ -14,7 +14,9 @@ import { GalleryFolderError, Scanner } from './scanner';
 import type { ModelChoice } from '../../core/tagModels';
 import { modelRoutes } from './models/routes';
 import { readTaggingSettings } from './models/store';
-import type { TaggerBackend } from './tagging/backend';
+import { workerBackend, type TaggerBackend } from './tagging/backend';
+import { TaggingQueue } from './tagging/queue';
+import { cpus } from 'node:os';
 
 // The gallery's HTTP API. Bound to 127.0.0.1 by main.ts (or the desktop shell) — never reachable from the network.
 
@@ -29,8 +31,11 @@ export interface GalleryAppOptions {
   resourceRoot?: string;
   /** Replaces how photoinfo.json is written or renamed. A seam for tests (a read-only or busy folder). */
   photoInfoSeams?: Pick<PhotoInfoOptions, 'writeFile' | 'rename'>;
-  /** Seams for photo tagging: model downloads, the model list and what runs the models. For tests and the e2e server. */
-  tagging?: { fetch?: typeof fetch; catalogue?: readonly ModelChoice[]; backend?: TaggerBackend };
+  /**
+   * Photo tagging: `workerFile` is the tagging worker to run (built, or from source in development). The rest are
+   * seams for tests and the e2e server: model downloads, the model list, what runs the models, which picture they get.
+   */
+  tagging?: { fetch?: typeof fetch; catalogue?: readonly ModelChoice[]; backend?: TaggerBackend; workerFile?: string; imageOf?: (p: GalleryPhoto) => Promise<string> };
 }
 
 /** What the computer found in a photo, from the models chosen in Settings (no embedding, at most 12 keywords). */
@@ -77,7 +82,23 @@ class HttpError extends Error {
 export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { app: express.Express; close(): void } {
   if (opts.resourceRoot) setResourceRoot(opts.resourceRoot);
   const catalog = new Catalog(dataDir);
-  const scanner = new Scanner(catalog, dataDir);
+  // Photo tagging: the models run in a worker thread with half the processor's threads.
+  // Without a worker file (tests that never choose a model) a model would fail to load and show as not working.
+  const backend = opts.tagging?.backend ?? workerBackend(Math.max(1, Math.floor(cpus().length / 2)), opts.tagging?.workerFile ?? '');
+  const tagging = new TaggingQueue({
+    catalog,
+    backend,
+    dataDir,
+    catalogue: opts.tagging?.catalogue,
+    imageOf: opts.tagging?.imageOf ?? (async (p) => catalog.thumbPath(p.key, 'm')),
+  });
+  tagging.setSettings(readTaggingSettings(dataDir));
+  // Tagging starts when the open folder's scan is done (not one cancelled because another folder was opened).
+  const scanner = new Scanner(catalog, dataDir, {
+    onDone: (job) => {
+      if (!job.cancelled && jobIds.at(-1) === job.id) tagging.startJob(job.id, () => job.photos.filter((p) => existsSync(p.path)));
+    },
+  });
   const infoOpts: PhotoInfoOptions = { fallbackDir: opts.photoInfoFallbackDir, ...opts.photoInfoSeams };
   const jobIds: string[] = [];
 
@@ -204,6 +225,8 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     }
     jobIds.push(job.id);
     while (jobIds.length > MAX_JOBS) scanner.forget(jobIds.shift()!);
+    // The earlier folder's tagging stops after the photo in hand.
+    tagging.clearJob();
     res.status(202).json({ jobId: job.id });
   }));
 
@@ -339,6 +362,7 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     const out: GalleryPhoto[] = [];
     for (const path of (paths as string[]).slice(0, DRAG_MAX)) {
       const photo = last ? await scanner.refresh(last, path) : null;
+      if (photo) tagging.wake();
       if (photo) out.push(photo);
     }
     res.json(itemsFor(out));
@@ -449,7 +473,21 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     }
   }));
 
-  const models = modelRoutes(app, dataDir, { fetch: opts.tagging?.fetch, catalogue: opts.tagging?.catalogue });
+  const models = modelRoutes(app, dataDir, {
+    fetch: opts.tagging?.fetch,
+    catalogue: opts.tagging?.catalogue,
+    onSettings: (s) => tagging.setSettings(s),
+    onModelsChanged: () => tagging.refresh(),
+  });
+
+  app.get('/api/gallery/tagging/status', (_req, res) => res.json(tagging.status()));
+
+  app.post('/api/gallery/tagging/focus', wrap((req, res) => {
+    const { job, paths } = req.body ?? {};
+    if (typeof job !== 'string' || !Array.isArray(paths) || !paths.every((p) => typeof p === 'string')) throw new HttpError(400, 'Send the job and a list of paths.');
+    if (jobIds.at(-1) === job) tagging.focus(paths as string[]);
+    res.status(204).end();
+  }));
 
   app.get('/api/places', (_req, res) => res.json(listPlaces()));
   app.post('/api/places/suggest', wrap((req, res) => {
@@ -478,6 +516,9 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     app,
     close: () => {
       models.stop();
+      // The worker is stopped; a photo being looked at is dropped (stop() marks the queue stopped at once,
+      // so nothing is written to the catalogue after it is closed).
+      void tagging.stop();
       catalog.close();
     },
   };

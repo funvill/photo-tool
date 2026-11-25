@@ -33,6 +33,8 @@ interface ScannerOptions {
   analyze?: (workPath: string) => Promise<PhotoAnalysis>;
   /** How folders are listed. A seam for tests (a subfolder that can't be read). */
   readdir?: ReadDir;
+  /** Called when a scan ends (finished or cancelled). */
+  onDone?: (job: ScanJob) => void;
 }
 
 /**
@@ -56,11 +58,13 @@ export class Scanner {
   private concurrency: number;
   private analyze: (workPath: string) => Promise<PhotoAnalysis>;
   private readdir?: ReadDir;
+  private onDone?: (job: ScanJob) => void;
 
   constructor(private catalog: Catalog, private dataDir: string, opts: ScannerOptions = {}) {
     this.concurrency = Math.max(1, opts.concurrency ?? 4);
     this.analyze = opts.analyze ?? defaultAnalyze;
     this.readdir = opts.readdir;
+    this.onDone = opts.onDone;
   }
 
   /** Starts a scan and returns at once; poll `get` for progress. Any earlier scan still running is cancelled. */
@@ -132,6 +136,7 @@ export class Scanner {
     }
     this.running.delete(job);
     job.done = true;
+    this.onDone?.(job);
   }
 
   /** One photo for this scan, read once even when another scan is reading the same file right now. */

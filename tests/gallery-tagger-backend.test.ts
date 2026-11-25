@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { findModel } from '../src/core/tagModels';
-import { ModelLoadError, workerBackend, taggingWorkerSource } from '../src/gallery/server/tagging/backend';
+import { ModelLoadError, workerBackend } from '../src/gallery/server/tagging/backend';
+import { taggingWorkerSource } from '../src/gallery/server/tagging/workerSource';
 import { VOCABULARY } from '../src/gallery/server/tagging/vocabulary';
 
 const TRIP = join(process.cwd(), 'fixtures', 'generated', 'trip');

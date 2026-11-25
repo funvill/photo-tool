@@ -1,6 +1,7 @@
 import { join, resolve } from 'node:path';
 import { projectRoot, webDir } from '../../server/resources';
 import { createGalleryApp } from './app';
+import { taggingWorkerSource } from './tagging/workerSource';
 
 // Development entry for the gallery's server (the desktop shell starts it itself in the packaged app).
 // `--production` is the same as NODE_ENV=production, for shells that can't set a variable inline (Windows).
@@ -17,7 +18,9 @@ const fake = process.env.PHOTOBOOK_GALLERY_FAKE_TAGGING === '1' ? await import('
 
 const { app, close } = createGalleryApp(dataDir, {
   photoInfoFallbackDir: join(editorDataDir, 'photoinfo'),
-  ...(fake ? { tagging: { fetch: fake.fakeFetch({ chunkDelayMs: 3 }), catalogue: fake.FAKE_CATALOGUE } } : {}),
+  tagging: fake
+    ? { fetch: fake.fakeFetch({ chunkDelayMs: 3 }), catalogue: fake.FAKE_CATALOGUE, backend: fake.fakeBackend({ delayMs: 40 }), imageOf: async (p: { path: string }) => p.path }
+    : { workerFile: taggingWorkerSource() },
   ...(production ? { staticDir: webDir() } : { devWebUrl: `http://127.0.0.1:${webPort}/gallery.html` }),
 });
 

@@ -83,3 +83,44 @@ export function fakeFetch(o: FakeFetchOptions = {}): typeof fetch {
     });
   }) as typeof fetch;
 }
+
+/** Words a fake model sees in a photo: its file name's words ("day1-05-harbour-pano.jpg" → harbour, pano). */
+const wordsOf = (path: string) =>
+  (path.split(/[\\/]/).pop() ?? '').replace(/\.[^.]+$/, '').split(/[^a-z]+/i).map((w) => w.toLowerCase()).filter((w) => w.length > 2 && !/^day$/.test(w));
+
+/** Fake search by meaning: these words mean the same as the one they point at. */
+const SAME_AS: Record<string, string> = { seaside: 'harbour', port: 'harbour', coffee: 'cafe' };
+const DIM = 64;
+const embed = (words: string[]): Float32Array => {
+  const v = new Float32Array(DIM);
+  for (const w of words) {
+    const word = SAME_AS[w] ?? w;
+    let h = 0;
+    for (const c of word) h = (h * 31 + c.charCodeAt(0)) % DIM;
+    v[h] += 1;
+  }
+  const n = Math.hypot(...v) || 1;
+  return v.map((x) => x / n);
+};
+
+/** A tagging backend for tests: describes and keywords a photo from its file name (give it the photo's own path). */
+export function fakeBackend(o: { delayMs?: number } = {}): import('../../src/gallery/server/tagging/backend').TaggerBackend {
+  const wait = () => new Promise((r) => setTimeout(r, o.delayMs ?? 0));
+  return {
+    async load() {},
+    async describe(path) {
+      await wait();
+      const words = wordsOf(path);
+      return { description: `A picture of ${words.join(' and ') || 'something'}.`, objects: words.slice(0, 1).map((label) => ({ label, count: 2 })) };
+    },
+    async keywords(path) {
+      await wait();
+      const words = wordsOf(path);
+      return { keywords: words.map((label, i) => ({ label, score: 0.9 - i * 0.1 })), embedding: embed(words) };
+    },
+    async embedText(text) {
+      return embed(text.toLowerCase().split(/[^a-z]+/).filter(Boolean));
+    },
+    async close() {},
+  };
+}

@@ -2,7 +2,6 @@
 // (./worker.ts), so the server stays responsive; tests use a fake.
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import type { ModelChoice, TagPart } from '../../../core/tagModels';
 import { VOCABULARY } from './vocabulary';
@@ -29,9 +28,6 @@ export interface TaggerBackend {
 }
 
 export class ModelLoadError extends Error {}
-
-/** The worker's source file, for running from source (development, tests). The desktop app runs its built copy. */
-export const taggingWorkerSource = (): string => fileURLToPath(new URL('./worker.ts', import.meta.url));
 
 const fileSize = (path: string): number | null => {
   try {

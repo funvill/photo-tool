@@ -50,6 +50,8 @@ async function createServer(msg: StartMessage, post: (m: HostReply) => void): Pr
     const { createGalleryApp } = await import('../src/gallery/server/app');
     return createGalleryApp(msg.dataDir, {
       photoInfoFallbackDir: msg.photoInfoFallbackDir,
+      // Built beside this bundle by scripts/desktop/build.mjs (both the packaged and the development build).
+      tagging: { workerFile: join(__dirname, 'tagging-worker.cjs') },
       ...(msg.resourceRoot ? { resourceRoot: msg.resourceRoot, staticDir: join(msg.resourceRoot, 'web') } : { devWebUrl: msg.devWebUrl }),
     });
   }

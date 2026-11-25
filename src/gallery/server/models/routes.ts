@@ -9,6 +9,8 @@ export interface ModelRoutesOptions {
   catalogue?: readonly ModelChoice[];
   /** Called after the settings change (chosen models, pause) or a model is removed. */
   onSettings?(s: TaggingSettings): void;
+  /** Called after a download ends or a model is removed. */
+  onModelsChanged?(): void;
 }
 
 export function modelRoutes(app: express.Express, dataDir: string, o: ModelRoutesOptions): { stop(): void } {
@@ -55,6 +57,7 @@ export function modelRoutes(app: express.Express, dataDir: string, o: ModelRoute
       })
       .finally(() => {
         if (downloading === current) downloading = null;
+        o.onModelsChanged?.();
       });
     res.status(202).json({ id: m.id });
   });
@@ -66,6 +69,7 @@ export function modelRoutes(app: express.Express, dataDir: string, o: ModelRoute
     removeModel(dataDir, m.id);
     const s = readTaggingSettings(dataDir);
     if (s[m.part] === m.id) saveSettings({ ...s, [m.part]: null });
+    o.onModelsChanged?.();
     res.status(204).end();
   });
 
