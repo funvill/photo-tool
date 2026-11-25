@@ -104,14 +104,19 @@ export interface DataLayout {
  * A copy run from source uses "<name> Dev", so development never touches an installed app's data.
  * A self-test keeps both inside its output folder (<out>/data and <out>/profile) unless they are
  * given explicitly: it must never write into a real user's data, and can run beside the installed app.
+ * Only one of the two given (outside a self-test): the other goes beside it, as <given>-browser or
+ * <given>-data, never under <appData>/<name>. A folder made there would count as the carry-over
+ * having happened (dataFolders.ts), and the old name's data would never move.
  */
 export function dataLayout(o: { appData: string; productName: string; packaged: boolean; env: Record<string, string | undefined>; envPrefix: string; selfTestOut?: string }): DataLayout {
   const root = programFolder(o.appData, o.productName, o.packaged);
   const given = (v: string | undefined) => (v ? resolve(v) : null);
+  const data = given(o.env[`${o.envPrefix}_DATA_DIR`]);
+  const profile = given(o.env[`${o.envPrefix}_PROFILE_DIR`]);
   return {
     root,
-    dataDir: given(o.env[`${o.envPrefix}_DATA_DIR`]) ?? (o.selfTestOut ? join(o.selfTestOut, 'data') : join(root, 'data')),
-    profileDir: given(o.env[`${o.envPrefix}_PROFILE_DIR`]) ?? (o.selfTestOut ? join(o.selfTestOut, 'profile') : join(root, 'browser')),
+    dataDir: data ?? (o.selfTestOut ? join(o.selfTestOut, 'data') : profile ? `${profile}-data` : join(root, 'data')),
+    profileDir: profile ?? (o.selfTestOut ? join(o.selfTestOut, 'profile') : data ? `${data}-browser` : join(root, 'browser')),
   };
 }
 

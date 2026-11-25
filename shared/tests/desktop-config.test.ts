@@ -56,10 +56,16 @@ describe('desktop folders', () => {
     expect(l.profileDir).toBe(join(resolve('/appdata'), 'Photobook Editor', 'browser'));
   });
 
-  it('PHOTOBOOK_DATA_DIR moves the data only', () => {
-    const l = dataLayout({ ...base, env: { PHOTOBOOK_DATA_DIR: resolve('/somewhere/data') } });
-    expect(l.dataDir).toBe(resolve('/somewhere/data'));
-    expect(l.profileDir).toBe(join(resolve('/appdata'), 'Photobook Editor', 'browser'));
+  it('one folder given: the other goes beside it, never under <appData>/<name> (that would mark the carry-over as done)', () => {
+    const l = dataLayout({ ...base, env: { PHOTOBOOK_DATA_DIR: resolve('/somewhere/books') } });
+    expect(l.dataDir).toBe(resolve('/somewhere/books'));
+    expect(l.profileDir).toBe(resolve('/somewhere/books-browser'));
+    const p = dataLayout({ ...base, env: { PHOTOBOOK_PROFILE_DIR: resolve('/somewhere/chromium') } });
+    expect(p.profileDir).toBe(resolve('/somewhere/chromium'));
+    expect(p.dataDir).toBe(resolve('/somewhere/chromium-data'));
+    // A self-test still keeps the one not given in its output folder.
+    expect(dataLayout({ ...base, env: { PHOTOBOOK_DATA_DIR: resolve('/somewhere/books') }, selfTestOut: resolve('/out') }).profileDir).toBe(join(resolve('/out'), 'profile'));
+    expect(dataLayout({ ...base, env: { PHOTOBOOK_PROFILE_DIR: resolve('/p') }, selfTestOut: resolve('/out') }).dataDir).toBe(join(resolve('/out'), 'data'));
   });
 
   it('with envPrefix PHOTO_TOOL reads PHOTO_TOOL_DATA_DIR and ignores PHOTOBOOK_DATA_DIR', () => {

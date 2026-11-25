@@ -46,7 +46,7 @@ Each program has its own commands:
 
 **Run from source** (`npm run dev`, `npm run dev:photo-tool` and the `dev:desktop` commands), the data is in the project's `./data` folder: `./data/photo-tool`, `./data/photobook-editor` and, shared, `./data/photoinfo-shared`.
 
-**Moving them.** `PHOTO_TOOL_DATA_DIR` and `PHOTO_TOOL_PROFILE_DIR` choose Photo Tool's data and browser-profile folders, `PHOTOBOOK_DATA_DIR` and `PHOTOBOOK_PROFILE_DIR` the editor's, and `PHOTOINFO_FALLBACK_DIR` the shared one. `PHOTO_TOOL_WEB_PORT` / `PHOTO_TOOL_PORT` and `PHOTOBOOK_WEB_PORT` / `PHOTOBOOK_PORT` move the ports.
+**Moving them.** `PHOTO_TOOL_DATA_DIR` and `PHOTO_TOOL_PROFILE_DIR` choose Photo Tool's data and browser-profile folders, `PHOTOBOOK_DATA_DIR` and `PHOTOBOOK_PROFILE_DIR` the editor's, and `PHOTOINFO_FALLBACK_DIR` the shared one. Set only one of a program's pair and the other goes beside it (`<data folder>-browser`, or `<profile folder>-data`); a program with either set does not carry its old folder over, and the old folder stays where it is for the next start without them. `PHOTO_TOOL_WEB_PORT` / `PHOTO_TOOL_PORT` and `PHOTOBOOK_WEB_PORT` / `PHOTOBOOK_PORT` move the ports.
 
 ### Coming from Photobook Studio and Photobook Gallery
 

@@ -30,9 +30,11 @@ const env = {
   // Vite and the app's server both read these.
   [`${prefix}_WEB_PORT`]: String(webPort),
   [`${prefix}_PORT`]: String(apiPort),
-  PHOTOBOOK_DATA_DIR: resolve(process.env.PHOTOBOOK_DATA_DIR ?? join(root, 'data', 'photobook-editor')),
+  // Only a profile folder given: the data goes beside it (<profile>-data), as in the servers' dirs.ts
+  // and the installed programs, not into the ./data folder whose carry-over that variable skips.
+  PHOTOBOOK_DATA_DIR: resolve(process.env.PHOTOBOOK_DATA_DIR || (process.env.PHOTOBOOK_PROFILE_DIR ? `${resolve(process.env.PHOTOBOOK_PROFILE_DIR)}-data` : join(root, 'data', 'photobook-editor'))),
   PHOTOBOOK_PROFILE_DIR: resolve(process.env.PHOTOBOOK_PROFILE_DIR ?? join(root, 'data', 'photobook-editor-browser')),
-  PHOTO_TOOL_DATA_DIR: resolve(process.env.PHOTO_TOOL_DATA_DIR ?? join(root, 'data', 'photo-tool')),
+  PHOTO_TOOL_DATA_DIR: resolve(process.env.PHOTO_TOOL_DATA_DIR || (process.env.PHOTO_TOOL_PROFILE_DIR ? `${resolve(process.env.PHOTO_TOOL_PROFILE_DIR)}-data` : join(root, 'data', 'photo-tool'))),
   PHOTO_TOOL_PROFILE_DIR: resolve(process.env.PHOTO_TOOL_PROFILE_DIR ?? join(root, 'data', 'photo-tool-browser')),
   PHOTOINFO_FALLBACK_DIR: resolve(process.env.PHOTOINFO_FALLBACK_DIR ?? join(root, 'data', 'photoinfo-shared')),
   [`${prefix}_DESKTOP_DEV_URL`]: `http://127.0.0.1:${webPort}/`,

@@ -288,6 +288,14 @@ describe('resolveDirs', () => {
     expect((await loadDirs('photo-tool')).resolveDirs({ PHOTO_TOOL_DATA_DIR: join(root, 'd') }, root).dataDir).toBe(join(root, 'd'));
     expect((await loadDirs('photobook-editor')).resolveDirs({ PHOTOBOOK_DATA_DIR: join(root, 'd') }, root).dataDir).toBe(join(root, 'd'));
   });
+
+  it('only the _PROFILE_DIR given: the data goes beside it, not into the part its own carry-over skipped (final review, Important 1)', async () => {
+    for (const [program, prefix, part] of [['photo-tool', 'PHOTO_TOOL', 'photoTool'], ['photobook-editor', 'PHOTOBOOK', 'editor']] as const) {
+      const dirs = (await loadDirs(program)).resolveDirs({ [`${prefix}_PROFILE_DIR`]: join(root, 'chosen', 'profile') }, root);
+      expect(dirs.carryOver, program).not.toContain(part);
+      expect(dirs.dataDir, program).toBe(join(root, 'chosen', 'profile-data'));
+    }
+  });
 });
 
 describe('the dev entry points', () => {
@@ -333,5 +341,10 @@ describe('the dev entry points', () => {
     expect(dev.indexOf('carry-over-dev-data')).toBeLessThan(dev.indexOf('build.mjs'));
     const names = Object.values(devDataLayout('ROOT')).map((p) => p.slice(join('ROOT', 'data').length + 1));
     for (const name of [...names, 'photobook-editor-browser', 'photo-tool-browser']) expect(dev).toContain(`join(root, 'data', '${name}')`);
+  });
+
+  it('dev.mjs: only a _PROFILE_DIR given puts the data beside it, as resolveDirs does', () => {
+    const dev = read('scripts/desktop/dev.mjs');
+    for (const prefix of ['PHOTOBOOK', 'PHOTO_TOOL']) expect(dev).toContain(`process.env.${prefix}_PROFILE_DIR ? \`\${resolve(process.env.${prefix}_PROFILE_DIR)}-data\``);
   });
 });

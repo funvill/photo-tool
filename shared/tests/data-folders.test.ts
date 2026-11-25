@@ -2,9 +2,9 @@
 // shared fallback. Every test works in its own temporary folder: a real %APPDATA% is never touched.
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { CarryOverError, carryOver, carryOverAll, carryOverRefusal, pidAlive, prepareProgramFolders, programRunning } from '../electron/dataFolders';
+import { CarryOverError, carryOver, carryOverAll, carryOverRefusal, pidAlive, prepareProgramFolders, programRunning, selfTestCarriesOver } from '../electron/dataFolders';
 
 let root: string;
 beforeEach(() => {
@@ -284,6 +284,108 @@ describe('prepareProgramFolders', () => {
     const r = prepareProgramFolders({ names, appData: root, packaged: false, env: {}, selfTestOut: join(root, 'out'), setUserData: () => {} });
     expect(r.carried).toEqual({ data: 'skipped', photoinfo: 'skipped' });
     expect(r.layout.profileDir).toBe(join(root, 'out', 'profile'));
+  });
+});
+
+describe('one of the two folders given by hand (final review, Important 1)', () => {
+  const programs = [
+    { productName: 'Photobook Editor', envPrefix: 'PHOTOBOOK' as const, oldProductName: 'Photobook Studio' },
+    { productName: 'Photo Tool', envPrefix: 'PHOTO_TOOL' as const, oldProductName: 'Photobook Gallery' },
+  ];
+  const seedOld = (old: string) => {
+    put(join(root, old, 'data', 'marker.txt'), 'real data');
+    put(join(root, old, 'browser', 'settings.json'), '{}');
+  };
+  const under = (path: string, dir: string) => path === dir || path.startsWith(dir + sep);
+
+  for (const names of programs) {
+    for (const variant of ['DATA_DIR', 'PROFILE_DIR'] as const) {
+      it(`${names.productName}, only ${names.envPrefix}_${variant} set: nothing goes into the new folder, and the next ordinary start still moves the old one`, () => {
+        seedOld(names.oldProductName);
+        const before = contents(join(root, names.oldProductName));
+        const newFolder = join(root, names.productName);
+        const given = join(root, 'chosen', variant === 'DATA_DIR' ? 'my-data' : 'my-profile');
+        const env = { [`${names.envPrefix}_${variant}`]: given, PHOTOINFO_FALLBACK_DIR: join(root, 'fb') };
+        let userData = '';
+        const r = prepareProgramFolders({ names, appData: root, packaged: true, env, setUserData: (d) => (userData = d) });
+        expect(r.carried.data).toBe('skipped');
+        // Neither folder the program is about to make is under the new name: that would mark the move as done.
+        for (const p of [r.layout.dataDir, r.layout.profileDir, userData]) expect(under(p, newFolder), p).toBe(false);
+        expect(r.layout.dataDir).not.toBe(r.layout.profileDir);
+        expect(under(r.layout.profileDir, r.layout.dataDir) || under(r.layout.dataDir, r.layout.profileDir)).toBe(false);
+        // The program runs and makes both of its folders.
+        mkdirSync(r.layout.dataDir, { recursive: true });
+        mkdirSync(r.layout.profileDir, { recursive: true });
+        expect(existsSync(newFolder)).toBe(false);
+        expect(contents(join(root, names.oldProductName))).toEqual(before);
+        // Started again without the variable: the old folder moves.
+        const again = prepareProgramFolders({ names, appData: root, packaged: true, env: { PHOTOINFO_FALLBACK_DIR: join(root, 'fb') }, setUserData: () => {} });
+        expect(again.carried.data).toBe('moved');
+        expect(contents(newFolder)).toEqual(before);
+        expect(existsSync(join(root, names.oldProductName))).toBe(false);
+      });
+    }
+  }
+
+  it('a new folder that is there already without data, while the old one holds data, is refused rather than reported as already-there', () => {
+    const names = programs[1]!;
+    seedOld(names.oldProductName);
+    put(join(root, names.productName, 'browser', 'Local State'), '{}');
+    let thrown: unknown;
+    try {
+      carryOverAll({ appData: root, packaged: true, env: {}, ...names });
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(CarryOverError);
+    expect((thrown as CarryOverError).step).toBe('new-folder-without-data');
+    expect((thrown as CarryOverError).from).toBe(join(root, names.oldProductName));
+    expect((thrown as CarryOverError).to).toBe(join(root, names.productName));
+    expect(contents(join(root, names.oldProductName))).toEqual({ 'data/marker.txt': 'real data', 'browser/settings.json': '{}' });
+    expect(contents(join(root, names.productName))).toEqual({ 'browser/Local State': '{}' });
+  });
+
+  it('both folders holding data is still already-there (the new one is in use)', () => {
+    const names = programs[0]!;
+    seedOld(names.oldProductName);
+    put(join(root, names.productName, 'data', 'books.sqlite'), 'db');
+    expect(carryOverAll({ appData: root, packaged: true, env: {}, ...names }).data).toBe('already-there');
+  });
+});
+
+describe('the self-test moves folders only on a CI runner that asks for it', () => {
+  const names = { productName: 'Photo Tool', envPrefix: 'PHOTO_TOOL' as const, oldProductName: 'Photobook Gallery' };
+  const seed = () => put(join(root, 'Photobook Gallery', 'data', 'marker.txt'), 'm');
+
+  it('the switch alone, or GitHub Actions alone, moves nothing', () => {
+    seed();
+    for (const env of [{ PHOTO_TOOLS_CI_SELF_TEST_CARRY_OVER: '1' }, { GITHUB_ACTIONS: 'true' }, { PHOTO_TOOLS_CI_SELF_TEST_CARRY_OVER: 'yes', GITHUB_ACTIONS: 'true' }]) {
+      expect(selfTestCarriesOver(env)).toBe(false);
+      const r = prepareProgramFolders({ names, appData: root, packaged: true, env, selfTestOut: join(root, 'out'), setUserData: () => {} });
+      expect(r.carried).toEqual({ data: 'skipped', photoinfo: 'skipped' });
+    }
+    expect(existsSync(join(root, 'Photo Tool'))).toBe(false);
+  });
+
+  it('both: the self-test carries the old folder over, and still keeps its own data in its output folder', () => {
+    seed();
+    const env = { PHOTO_TOOLS_CI_SELF_TEST_CARRY_OVER: '1', GITHUB_ACTIONS: 'true' };
+    expect(selfTestCarriesOver(env)).toBe(true);
+    const r = prepareProgramFolders({ names, appData: root, packaged: true, env, selfTestOut: join(root, 'out'), setUserData: () => {} });
+    expect(r.carried).toEqual({ data: 'moved', photoinfo: 'nothing-to-move' });
+    expect(contents(join(root, 'Photo Tool'))).toEqual({ 'data/marker.txt': 'm' });
+    expect(r.layout.dataDir).toBe(join(root, 'out', 'data'));
+  });
+});
+
+describe('carryOverRefusal', () => {
+  it('a new folder without data says which folder to remove, and does not blame the old program', () => {
+    const m = carryOverRefusal({ productName: 'Photo Tool', envPrefix: 'PHOTO_TOOL', oldProductName: 'Photobook Gallery' }, { from: 'OLD', to: 'NEW', step: 'new-folder-without-data' });
+    expect(m.title).toBe("Photo Tool can't start yet");
+    expect(m.message).not.toContain('may still be running');
+    expect(m.message).toContain('NEW');
+    expect(m.message).toContain('OLD');
+    expect(m.message).toContain('Nothing was changed');
   });
 });
 

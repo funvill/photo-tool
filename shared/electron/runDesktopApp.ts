@@ -74,10 +74,34 @@ export interface ProgramContext {
  * Linux only prints the message). Chromium is first pointed at a throwaway profile folder, so it never
  * makes its default one (<appData>/<package.json productName>), which may be the folder to move to.
  */
-function refuseToStart(names: ProgramNames, e: CarryOverError) {
+function refuseToStart(names: ProgramNames, e: CarryOverError, selfTest: SelfTestArgs | null) {
   console.error(e.message);
   app.setPath('userData', mkdtempSync(join(tmpdir(), 'photo-tools-refused-')));
   const { title, message } = carryOverRefusal(names, e);
+  if (selfTest) {
+    // Only reachable in CI (a self-test moves folders only with selfTestCarriesOver): the same
+    // message box, closed by itself after a few seconds since no one is there to click, and a
+    // record of the refusal beside where result.json would be.
+    void app.whenReady().then(async () => {
+      const closeAfter = AbortSignal.timeout(3000);
+      const backstop = setTimeout(() => app.exit(1), 15_000);
+      let dialogClosed = false;
+      try {
+        await dialog.showMessageBox({ type: 'error', title, message, buttons: ['Close'], noLink: true, signal: closeAfter });
+        dialogClosed = true;
+      } finally {
+        clearTimeout(backstop);
+        try {
+          mkdirSync(selfTest.out, { recursive: true });
+          writeFileSync(join(selfTest.out, 'refused.json'), JSON.stringify({ refused: true, step: e.step, from: e.from, to: e.to, title, message, dialogClosed }, null, 2));
+        } catch (err) {
+          console.error(String(err));
+        }
+        app.exit(1);
+      }
+    });
+    return;
+  }
   void app.whenReady().then(() => {
     dialog.showMessageBoxSync({ type: 'error', title, message, buttons: ['Close'], noLink: true });
     app.exit(1);
@@ -109,7 +133,7 @@ export function runDesktopApp(program: DesktopProgram): void {
     prepared = prepareProgramFolders({ names, appData, packaged: app.isPackaged, env, selfTestOut: selfTest?.out, setUserData: (dir) => app.setPath('userData', dir) });
   } catch (e) {
     if (!(e instanceof CarryOverError)) throw e;
-    refuseToStart(names, e);
+    refuseToStart(names, e, selfTest);
     return;
   }
   const { layout, photoInfoFallbackDir: sharedPhotoInfo, carried } = prepared;

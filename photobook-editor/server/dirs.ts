@@ -6,7 +6,9 @@ import { devCarryOverParts, devDataLayout, type DevDataPart } from '../../shared
 export function resolveDirs(env: Record<string, string | undefined>, root: string): { dataDir: string; photoInfoFallbackDir: string; carryOver: DevDataPart[] } {
   const layout = devDataLayout(root);
   return {
-    dataDir: resolve(env.PHOTOBOOK_DATA_DIR ?? layout.editor),
+    // Only the profile given: the data goes beside it, as the desktop shell does (shared/electron/config.ts
+    // dataLayout), not into ./data/photobook-editor, whose carry-over that variable skips.
+    dataDir: env.PHOTOBOOK_DATA_DIR ? resolve(env.PHOTOBOOK_DATA_DIR) : env.PHOTOBOOK_PROFILE_DIR ? `${resolve(env.PHOTOBOOK_PROFILE_DIR)}-data` : layout.editor,
     // Read-only photo folders keep their info in a folder shared with Photo Tool, so a star set there reaches the editor.
     photoInfoFallbackDir: resolve(env.PHOTOINFO_FALLBACK_DIR ?? layout.photoinfo),
     // The parts of the old ./data layout this server carries over: its own and the shared photo info,
