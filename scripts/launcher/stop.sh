@@ -3,7 +3,7 @@
 set -u
 PROJECT="$(cd "$(dirname "$0")/../.." && pwd)"
 PORT="${PHOTOBOOK_PORT:-5174}"
-DATA="${PHOTOBOOK_DATA_DIR:-$PROJECT/data}"
+DATA="${PHOTOBOOK_DATA_DIR:-$PROJECT/data/photobook-editor}"
 PIDFILE="$DATA/server-$PORT.pid"
 
 kill_tree() {

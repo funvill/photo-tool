@@ -4,12 +4,12 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSy
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CarryOverError } from '../electron/dataFolders';
-import { carryOverDevData, devCarryOverSkipped, devDataLayout } from '../server/devData';
+import { carryOverDevData, carryOverDevDataOrQuit, devCarryOverParts, devDataLayout, type DevDataPart } from '../server/devData';
 
 const project = resolve(__dirname, '../..');
-type Dirs = { dataDir: string; photoInfoFallbackDir: string; carryOver: boolean };
+type Dirs = { dataDir: string; photoInfoFallbackDir: string; carryOver: DevDataPart[] };
 // Loaded by a computed path: shared must not import the programs, and the boundary rule would flag a static import.
 const loadDirs = (program: string) =>
   import(/* @vite-ignore */ pathToFileURL(resolve(project, program, 'server/dirs.ts')).href) as Promise<{ resolveDirs(env: Record<string, string | undefined>, root: string): Dirs }>;
@@ -77,25 +77,25 @@ describe('carryOverDevData', () => {
     oldLayout();
     carryOverDevData(root);
     let renames = 0;
-    expect(carryOverDevData(root, () => void renames++)).toEqual({ moved: [] });
+    expect(carryOverDevData(root, () => void renames++)).toEqual({ moved: [], leftovers: [] });
     expect(renames).toBe(0);
     expect(contents(data)).toEqual(SPLIT);
   });
 
-  it('once split, a new file at the top of data/ is not swept into the editor', () => {
+  it('once split, a new file at the top of data/ is not swept into the editor, but is named as left over', () => {
     oldLayout();
     carryOverDevData(root);
     put(join(data, 'notes.txt'));
-    expect(carryOverDevData(root)).toEqual({ moved: [] });
+    expect(carryOverDevData(root)).toEqual({ moved: [], leftovers: [join(data, 'notes.txt')] });
     expect(existsSync(join(data, 'notes.txt'))).toBe(true);
   });
 
   it('no old data: nothing is created', () => {
     mkdirSync(data);
-    expect(carryOverDevData(root)).toEqual({ moved: [] });
+    expect(carryOverDevData(root)).toEqual({ moved: [], leftovers: [] });
     expect(readdirSync(data)).toEqual([]);
     rmSync(data, { recursive: true });
-    expect(carryOverDevData(root)).toEqual({ moved: [] });
+    expect(carryOverDevData(root)).toEqual({ moved: [], leftovers: [] });
     expect(existsSync(data)).toBe(false);
   });
 
@@ -141,9 +141,20 @@ describe('carryOverDevData', () => {
     expect(readdirSync(data).sort()).toEqual(['photo-tool', 'photobook-editor', 'photoinfo-shared']);
   });
 
-  it('never merges into a folder that is there already: it throws naming it', () => {
+  it('never merges into a folder that is there already: the old one is left and named, the other parts still move', () => {
     oldLayout();
     put(join(data, 'photo-tool', 'catalog.db'), 'newer');
+    const result = carryOverDevData(root);
+    expect(result.leftovers).toEqual([join(data, 'gallery')]);
+    expect(readFileSync(join(data, 'photo-tool', 'catalog.db'), 'utf8')).toBe('newer');
+    expect(readFileSync(join(data, 'gallery', 'catalog.db'), 'utf8')).toBe('catalog');
+    expect(contents(join(data, 'photobook-editor'))).toEqual({ 'photobook.db': 'db', 'exports/x.pdf': 'pdf' });
+    expect(contents(join(data, 'photoinfo-shared'))).toEqual({ 'a.json': 'info' });
+  });
+
+  it('never overwrites inside the staging folder: a clash there throws naming it', () => {
+    oldLayout();
+    put(join(data, 'photobook-editor.moving', 'photobook.db'), 'staged');
     let err: CarryOverError | undefined;
     try {
       carryOverDevData(root);
@@ -151,10 +162,43 @@ describe('carryOverDevData', () => {
       err = e as CarryOverError;
     }
     expect(err).toBeInstanceOf(CarryOverError);
-    expect(err!.from).toBe(join(data, 'gallery'));
-    expect(err!.to).toBe(join(data, 'photo-tool'));
-    expect(readFileSync(join(data, 'photo-tool', 'catalog.db'), 'utf8')).toBe('newer');
-    expect(readFileSync(join(data, 'gallery', 'catalog.db'), 'utf8')).toBe('catalog');
+    expect(err!.from).toBe(join(data, 'photobook.db'));
+    expect(err!.to).toBe(join(data, 'photobook-editor.moving', 'photobook.db'));
+    expect(readFileSync(join(data, 'photobook.db'), 'utf8')).toBe('db');
+    expect(readFileSync(join(data, 'photobook-editor.moving', 'photobook.db'), 'utf8')).toBe('staged');
+  });
+
+  it('photobook-editor there already: old entries, a half-filled staging folder, gallery and photoinfo are named as left over, not merged', () => {
+    oldLayout();
+    put(join(data, 'photobook-editor', 'photobook.db'), 'interim');
+    put(join(data, 'photo-tool', 'catalog.db'), 'interim');
+    put(join(data, 'photoinfo-shared', 'b.json'), 'interim');
+    put(join(data, 'photobook-editor.moving', 'old.db'), 'staged');
+    const before = contents(data);
+    let renames = 0;
+    const result = carryOverDevData(root, () => void renames++);
+    expect(renames).toBe(0);
+    expect(result.moved).toEqual([]);
+    expect([...result.leftovers].sort()).toEqual(['exports', 'gallery', 'photobook-editor.moving', 'photobook.db', 'photoinfo'].map((n) => join(data, n)).sort());
+    expect(contents(data)).toEqual(before);
+  });
+
+  it('carryOverDevDataOrQuit warns about each leftover, saying where it belongs and to move it by hand', () => {
+    oldLayout();
+    put(join(data, 'photobook-editor', 'photobook.db'), 'interim');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    try {
+      const result = carryOverDevDataOrQuit(root);
+      expect(result.leftovers).toEqual([join(data, 'exports'), join(data, 'photobook.db')]);
+      const text = warn.mock.calls.flat().join('\n');
+      for (const l of result.leftovers) expect(text).toContain(l);
+      expect(text).toContain(join(data, 'photobook-editor'));
+      expect(text).toMatch(/by hand/);
+    } finally {
+      warn.mockRestore();
+      log.mockRestore();
+    }
   });
 
   it('leaves dotfiles and the dev browser profiles where they are', () => {
@@ -175,22 +219,55 @@ describe('carryOverDevData', () => {
   });
 });
 
-describe('when the data folders were chosen by hand, nothing is carried over', () => {
-  it('devCarryOverSkipped', () => {
-    expect(devCarryOverSkipped({})).toBe(false);
-    for (const v of ['PHOTOBOOK_DATA_DIR', 'PHOTO_TOOL_DATA_DIR', 'PHOTOINFO_FALLBACK_DIR', 'PHOTOBOOK_PROFILE_DIR', 'PHOTO_TOOL_PROFILE_DIR']) {
-      expect(devCarryOverSkipped({ [v]: join(root, 'x') }), v).toBe(true);
-    }
+describe('a folder chosen by hand skips only its own part (Ruling B)', () => {
+  it('devCarryOverParts', () => {
+    expect(devCarryOverParts({})).toEqual(['editor', 'photoTool', 'photoinfo']);
+    expect(devCarryOverParts({ PHOTOBOOK_DATA_DIR: 'x' })).toEqual(['photoTool', 'photoinfo']);
+    expect(devCarryOverParts({ PHOTOBOOK_PROFILE_DIR: 'x' })).toEqual(['photoTool', 'photoinfo']);
+    expect(devCarryOverParts({ PHOTO_TOOL_DATA_DIR: 'x' })).toEqual(['editor', 'photoinfo']);
+    expect(devCarryOverParts({ PHOTO_TOOL_PROFILE_DIR: 'x' })).toEqual(['editor', 'photoinfo']);
+    expect(devCarryOverParts({ PHOTOINFO_FALLBACK_DIR: 'x' })).toEqual(['editor', 'photoTool']);
+    expect(devCarryOverParts({ PHOTOINFO_FALLBACK_DIR: 'x' }, ['editor', 'photoinfo'])).toEqual(['editor']);
   });
 
-  it('each server carries over only on the default ./data paths', async () => {
-    for (const program of ['photo-tool', 'photobook-editor']) {
-      const { resolveDirs } = await loadDirs(program);
-      const prefix = program === 'photo-tool' ? 'PHOTO_TOOL' : 'PHOTOBOOK';
-      expect(resolveDirs({}, root).carryOver, program).toBe(true);
-      expect(resolveDirs({ [`${prefix}_DATA_DIR`]: join(root, 'd') }, root).carryOver, program).toBe(false);
-      expect(resolveDirs({ PHOTOINFO_FALLBACK_DIR: join(root, 'p') }, root).carryOver, program).toBe(false);
-    }
+  it("the editor's PHOTOBOOK_DATA_DIR set: Photo Tool's data and the photo info still move, the editor's entries stay", () => {
+    oldLayout();
+    carryOverDevData(root, undefined, devCarryOverParts({ PHOTOBOOK_DATA_DIR: join(root, 'elsewhere') }));
+    expect(contents(data)).toEqual({ 'photobook.db': 'db', 'exports/x.pdf': 'pdf', 'photo-tool/catalog.db': 'catalog', 'photoinfo-shared/a.json': 'info' });
+  });
+
+  it("Photo Tool's PHOTO_TOOL_DATA_DIR set: the editor's data and the photo info still move, gallery stays", () => {
+    oldLayout();
+    carryOverDevData(root, undefined, devCarryOverParts({ PHOTO_TOOL_DATA_DIR: join(root, 'elsewhere') }));
+    expect(contents(data)).toEqual({ 'photobook-editor/photobook.db': 'db', 'photobook-editor/exports/x.pdf': 'pdf', 'gallery/catalog.db': 'catalog', 'photoinfo-shared/a.json': 'info' });
+  });
+
+  it('PHOTOINFO_FALLBACK_DIR set: photoinfo stays, both programs still move', () => {
+    oldLayout();
+    carryOverDevData(root, undefined, devCarryOverParts({ PHOTOINFO_FALLBACK_DIR: join(root, 'elsewhere') }));
+    expect(contents(data)).toEqual({ 'photobook-editor/photobook.db': 'db', 'photobook-editor/exports/x.pdf': 'pdf', 'photo-tool/catalog.db': 'catalog', 'photoinfo/a.json': 'info' });
+  });
+
+  it('a server carries over its own part and the photo info only', async () => {
+    expect((await loadDirs('photobook-editor')).resolveDirs({}, root).carryOver).toEqual(['editor', 'photoinfo']);
+    expect((await loadDirs('photo-tool')).resolveDirs({}, root).carryOver).toEqual(['photoTool', 'photoinfo']);
+    expect((await loadDirs('photobook-editor')).resolveDirs({ PHOTOBOOK_DATA_DIR: 'd' }, root).carryOver).toEqual(['photoinfo']);
+    expect((await loadDirs('photo-tool')).resolveDirs({ PHOTOINFO_FALLBACK_DIR: 'p' }, root).carryOver).toEqual(['photoTool']);
+  });
+
+  it("Playwright's server environments carry nothing over (playwright.config.ts)", async () => {
+    oldLayout();
+    const before = contents(data);
+    const noRename = () => {
+      throw new Error('no rename expected');
+    };
+    const editor = (await loadDirs('photobook-editor')).resolveDirs({ PHOTOBOOK_DATA_DIR: 'test-results/e2e-data', PHOTOINFO_FALLBACK_DIR: 'test-results/e2e-photoinfo' }, root);
+    const tool = (await loadDirs('photo-tool')).resolveDirs({ PHOTO_TOOL_DATA_DIR: 'test-results/e2e-photo-tool', PHOTOINFO_FALLBACK_DIR: 'test-results/e2e-photo-tool-photoinfo' }, root);
+    expect(editor.carryOver).toEqual([]);
+    expect(tool.carryOver).toEqual([]);
+    expect(carryOverDevData(root, noRename, editor.carryOver)).toEqual({ moved: [], leftovers: [] });
+    expect(carryOverDevData(root, noRename, tool.carryOver)).toEqual({ moved: [], leftovers: [] });
+    expect(contents(data)).toEqual(before);
   });
 });
 
@@ -220,10 +297,34 @@ describe('the dev entry points', () => {
     for (const program of ['photo-tool', 'photobook-editor']) {
       const main = read(`${program}/server/main.ts`);
       expect(main, program).toContain("from './dirs'");
-      expect(main, program).toContain('carryOverDevDataOrQuit(');
+      expect(main, program).toMatch(/^carryOverDevDataOrQuit\(.*, carryOver\);$/m);
       expect(main.indexOf('carryOverDevDataOrQuit('), program).toBeLessThan(main.search(/create(Gallery)?App\(/));
       expect(main, program).not.toMatch(/join\([^)]*'data'/);
     }
+  });
+
+  it("draft-from-folder.ts writes into the editor's folder from dirs.ts, after the carry-over", () => {
+    const draft = read('scripts/draft-from-folder.ts');
+    expect(draft).toContain("from '../photobook-editor/server/dirs'");
+    expect(draft).not.toMatch(/\?\? 'data'/);
+    expect(draft).toMatch(/^carryOverDevDataOrQuit\(.*, carryOver\);$/m);
+    expect(draft.indexOf('carryOverDevDataOrQuit(')).toBeLessThan(draft.indexOf('createApp('));
+  });
+
+  it('the macOS launcher runs the editor on ./data/photobook-editor, after the carry-over', () => {
+    const start = read('scripts/launcher/start.sh');
+    const stop = read('scripts/launcher/stop.sh');
+    // The shell scripts cannot import devDataLayout: pinned to it here.
+    expect(devDataLayout('$PROJECT').editor.replace(/\\/g, '/')).toBe('$PROJECT/data/photobook-editor');
+    const editorDefault = 'DATA="${PHOTOBOOK_DATA_DIR:-$PROJECT/data/photobook-editor}"';
+    expect(start).toContain(editorDefault);
+    expect(stop).toContain(editorDefault);
+    const carry = start.indexOf('scripts/carry-over-dev-data.ts');
+    expect(carry).toBeGreaterThan(-1);
+    expect(carry).toBeLessThan(start.indexOf('mkdir -p "$DATA"'));
+    // The editor's page is built where the server serves it from (webDir('photobook-editor')).
+    expect(start).toContain('vite build --config photobook-editor/vite.config.ts');
+    expect(start).toContain('$PROJECT/dist/photobook-editor/web/index.html');
   });
 
   it("dev.mjs runs the carry-over script before starting, and its folders are devDataLayout's", () => {

@@ -10,8 +10,8 @@ const production = process.env.NODE_ENV === 'production' || process.argv.include
 const root = projectRoot() ?? process.cwd();
 // ./data/photo-tool and ./data/photoinfo-shared, or the folders the environment names (dirs.ts).
 const { dataDir, photoInfoFallbackDir, carryOver } = resolveDirs(process.env, root);
-// On the default folders, the old one-folder ./data layout is split per program first, once.
-if (carryOver) carryOverDevDataOrQuit(root);
+// The old one-folder ./data layout is split per program first, once: the parts whose folders are the defaults.
+carryOverDevDataOrQuit(root, carryOver);
 const port = Number(process.env.PHOTO_TOOL_PORT ?? 5176);
 const webPort = Number(process.env.PHOTO_TOOL_WEB_PORT ?? 5175);
 

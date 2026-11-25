@@ -2,15 +2,19 @@
 //
 //   npx tsx scripts/draft-from-folder.ts <photo folder> [title] [pages] [style]
 //
-// The book lands in the same data directory the app uses (./data, or PHOTOBOOK_DATA_DIR), so it
-// is on the home page the next time the app starts. Stop the app first: both write the database.
+// The book lands in the same data directory the editor uses when run from source
+// (./data/photobook-editor, or PHOTOBOOK_DATA_DIR: photobook-editor/server/dirs.ts), so it is on the
+// home page the next time the editor starts. Like the editor, it first splits an old one-folder ./data
+// layout per program (shared/server/devData.ts). Stop the app first: both write the database.
 
 import { resolve } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import { generateDraft, printablePages, type BookDocument, type PhotoAsset } from '../photobook-editor/core';
 import { createApp } from '../photobook-editor/server/app';
-import { devDataLayout } from '../shared/server/devData';
+import { resolveDirs } from '../photobook-editor/server/dirs';
+import { carryOverDevDataOrQuit } from '../shared/server/devData';
+import { projectRoot } from '../shared/server/resources';
 
 const [folderArg, title = 'Untitled book', pagesArg = '86', style = 'collage'] = process.argv.slice(2);
 if (!folderArg) {
@@ -19,14 +23,15 @@ if (!folderArg) {
 }
 const folder = resolve(folderArg);
 const pages = Number(pagesArg);
-const dataDir = resolve(process.env.PHOTOBOOK_DATA_DIR ?? 'data');
+const root = projectRoot() ?? process.cwd();
+// Stars for read-only photo folders go to the folder shared with Photo Tool, as `npm run dev` uses.
+const { dataDir, photoInfoFallbackDir, carryOver } = resolveDirs(process.env, root);
 
 // Blurb's Large Square trims to 11.75 in, not 12: the PDF page is 855 x 864 pt with 9 pt of bleed
 // on the top, bottom and outside edges (Blurb's size calculator, checked 2026-11-22).
 const BLURB_LARGE_SQUARE_TRIM_MM = 11.75 * 25.4;
 
-// Stars for read-only photo folders: the folder shared with Photo Tool, as `npm run dev` uses.
-const photoInfoFallbackDir = resolve(process.env.PHOTOINFO_FALLBACK_DIR ?? devDataLayout(process.cwd()).photoinfo);
+carryOverDevDataOrQuit(root, carryOver);
 const { app, store } = createApp(dataDir, { photoInfoFallbackDir });
 const server = await new Promise<Server>((done) => {
   const s = app.listen(0, '127.0.0.1', () => done(s));
