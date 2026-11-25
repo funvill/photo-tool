@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { rename, rm } from 'node:fs/promises';
 import sharp, { type Sharp } from 'sharp';
-import { editFormatFor, editPlan, type EditFormat, type PhotoEdit } from '../core';
+import { editFormatFor, editPlan, type EditFormat, type PhotoEdit } from '../core/photoEdit';
 
 // Renders a photo edit (crop, rotate, straighten) into a new file. The steps follow `editPlan` in
 // core/photoEdit.ts, the same plan the page uses for its preview. The original is only read.

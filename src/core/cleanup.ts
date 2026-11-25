@@ -1,4 +1,4 @@
-import type { PhotoAsset } from './model';
+import type { PhotoAsset } from './photoAsset';
 import { chronological, groupSimilar, scorePhotos } from './curation';
 
 // Library clean-up: suggestions for which photos to hide — the weaker frames of each burst of

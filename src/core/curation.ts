@@ -1,4 +1,4 @@
-import type { PhotoAsset } from './model';
+import type { PhotoAsset } from './photoAsset';
 import { clamp } from './units';
 
 // Rules-based curation: similarity grouping, scoring, sequencing.

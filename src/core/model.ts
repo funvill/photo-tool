@@ -5,6 +5,9 @@
 //    x ∈ [0, 2W], y ∈ [0, H]; bleed extends outside that range.
 //  - Rotation is degrees clockwise about the element centre.
 //  - Crop centre (cx, cy) is normalized to the auto-oriented source image.
+import type { PhotoAnalysis } from './photoAnalysis';
+import type { PhotoAsset } from './photoAsset';
+export type { PhotoAnalysis, PhotoAsset };
 
 export const SCHEMA_VERSION = 3 as const;
 
@@ -377,58 +380,6 @@ export interface Cover extends Spread {
   spineMm: number;
 }
 
-/** Analysis computed once at import; all values are cheap, local, and deterministic. */
-export interface PhotoAnalysis {
-  /** Variance of the Laplacian on a 256px greyscale thumbnail. Higher = sharper. */
-  sharpness: number;
-  /** Mean luminance 0..1. */
-  meanLuma: number;
-  /** Fraction of pixels crushed to near-black / blown to near-white. */
-  clippedShadows: number;
-  clippedHighlights: number;
-  /** 64-bit difference hash as 16 hex chars. */
-  dHash: string;
-  /** Edge-energy centre of mass, normalized 0..1 — a cheap stand-in for "where the subject is". */
-  saliencyX: number;
-  saliencyY: number;
-  /** Mean colour (sRGB 0–255). Photos imported before colour analysis get it on next library load. */
-  avgColor?: [number, number, number];
-  /** 3 × 3 grid of mean colours (27 numbers, row-major RGB): palette plus rough composition. */
-  colorGrid?: number[];
-  /** Has see-through pixels (a cutout or sticker). Missing = opaque (checked on next library load). */
-  transparent?: boolean;
-}
-
-export interface PhotoAsset {
-  id: ID;
-  fileName: string;
-  format: string;
-  fileSizeBytes: number;
-  /** Dimensions after EXIF orientation has been applied. */
-  widthPx: number;
-  heightPx: number;
-  capturedAt: string | null;
-  gpsLat: number | null;
-  gpsLon: number | null;
-  rating: number;
-  favorite: boolean;
-  tags: string[];
-  /** From the folder's photoinfo.json (desktop editor only). */
-  people?: string[];
-  description?: string;
-  /**
-   * Desktop editor: the photo's folder or its photoinfo.json could not be read (folder offline or moved, file
-   * broken), so its star and other info are unknown. Drafts neither add nor remove such a photo.
-   */
-  infoUnavailable?: boolean;
-  contentHash: string;
-  exactDuplicateOf: ID | null;
-  analysis: PhotoAnalysis | null;
-  /** Per-project: user excluded this photo from automatic drafts. */
-  excluded: boolean;
-  /** Original file could not be found at its recorded path. */
-  missing: boolean;
-}
 
 export interface Rect {
   x: number;

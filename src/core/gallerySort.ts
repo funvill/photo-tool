@@ -1,5 +1,6 @@
 import { cleanupSuggestions, type PhotoFlags } from './cleanup';
-import type { PhotoAnalysis, PhotoAsset } from './model';
+import type { PhotoAnalysis } from './photoAnalysis';
+import type { PhotoAsset } from './photoAsset';
 import { colourVariety } from './photoScore';
 
 // The gallery's sorts and filters, free of any UI or server. The "facts" of a folder (interesting

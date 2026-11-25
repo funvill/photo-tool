@@ -6,7 +6,8 @@ import { promisify } from 'node:util';
 import { basename, extname, join } from 'node:path';
 import sharp from 'sharp';
 import exifr from 'exifr';
-import type { PhotoAnalysis, PhotoExif } from '../core';
+import type { PhotoAnalysis } from '../core/photoAnalysis';
+import type { PhotoExif } from '../core/photoFacts';
 import { heicToJpeg } from './heic';
 
 // Media pipeline: everything runs locally. Originals are only ever read.

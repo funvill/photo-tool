@@ -1,5 +1,5 @@
 import { useId, useState } from 'react';
-import { normalisePeople } from '../../../core';
+import { normalisePeople } from '../../../core/galleryEdit';
 import { Icon } from '../../../web/components/Icon';
 
 /**

@@ -1,15 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import {
-  aspectRatio,
-  formatAperture,
-  formatBias,
-  formatFocal,
-  formatShutter,
-  fromDateTimeLocal,
-  megapixels,
-  normalisePeople,
-  toDateTimeLocal,
-} from '../../../core';
+import { aspectRatio, formatAperture, formatBias, formatFocal, formatShutter, megapixels } from '../../../core/photoFacts';
+import { fromDateTimeLocal, normalisePeople, toDateTimeLocal } from '../../../core/galleryEdit';
 import { Icon } from '../../../web/components/Icon';
 import { formatSize, formatTaken } from '../../../web/components/HoverPreview';
 import { galleryApi, type GalleryItem } from '../api';

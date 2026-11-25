@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import sharp from 'sharp';
 import { folderStamp, forgetPhotos, infoFor, PhotoInfoWriteError, readFolderInfo, updatePhotoInfo, type FolderInfo, type PhotoInfo, type PhotoInfoOptions } from '../../photoinfo';
-import { isIdentityEdit, parseEdit } from '../../core';
+import { isIdentityEdit, parseEdit } from '../../core/photoEdit';
 import { hashFile, workingFile } from '../../server/media';
 import { editFormatFor, renderEdited } from '../../server/photoEditRender';
 import { listPlaces, suggestPlaces } from '../../server/places';

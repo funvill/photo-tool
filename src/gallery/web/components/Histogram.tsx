@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { histogram, type Histogram as Bins } from '../../../core';
+import { histogram, type Histogram as Bins } from '../../../core/histogram';
 import { thumbUrl, type GalleryItem } from '../api';
 
 const W = 256;

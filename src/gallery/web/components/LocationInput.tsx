@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FocusEvent, type KeyboardEvent } from 'react';
-import { locationToSave, parseLocation } from '../../../core';
+import { locationToSave, parseLocation } from '../../../core/galleryEdit';
 
 export interface LocationFields {
   lat: string;

@@ -3,7 +3,7 @@ import sharp from 'sharp';
 import { statSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, relative, resolve } from 'node:path';
-import type { PhotoAnalysis } from '../../core';
+import type { PhotoAnalysis } from '../../core/photoAnalysis';
 import { analyze as defaultAnalyze, fileStat, hashFile, isSupported, orientedSize, readMetadata, THUMB_SIZES, workingFile, writeJpegThumb, type ThumbSize } from '../../server/media';
 import { photoKey, type Catalog, type GalleryPhoto } from './catalog';
 import { GalleryFolderError, listPhotos, type ReadDir } from './walk';
