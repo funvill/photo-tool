@@ -112,7 +112,7 @@ describe('web version storage', () => {
   });
 
   it('rejects files that are not backups', async () => {
-    await expect(restoreProject(await open(), new Blob(['hello'])) ).rejects.toThrow(/isn’t a Photobook Studio backup/);
+    await expect(restoreProject(await open(), new Blob(['hello'])) ).rejects.toThrow(/isn’t a Photobook Editor backup/);
   });
 });
 

@@ -142,7 +142,7 @@ describe('saveToFile', () => {
     expect(ra).toEqual({ ok: false, saved: true, error: 'The photo was saved, but its old edit could not be cleared from the photo info: info locked' });
     const b = fakes({ refreshFails: true });
     const rb = await saveToFile(ORIGINAL, edit, b.deps);
-    expect(rb).toEqual({ ok: false, saved: true, error: 'The photo was saved, but the gallery could not read it again: server down' });
+    expect(rb).toEqual({ ok: false, saved: true, error: 'The photo was saved, but Photo Tool could not read it again: server down' });
   });
 
   it('stops, removing the temp file, when the server wrote another format than expected', async () => {

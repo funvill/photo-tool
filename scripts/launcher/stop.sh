@@ -1,5 +1,5 @@
 #!/bin/bash
-# Stop the Photobook Studio server started by start.sh (and its child processes).
+# Stop the Photobook Editor server started by start.sh (and its child processes).
 set -u
 PROJECT="$(cd "$(dirname "$0")/../.." && pwd)"
 PORT="${PHOTOBOOK_PORT:-5174}"

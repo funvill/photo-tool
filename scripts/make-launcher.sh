@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build "Photobook Studio.app": a double-clickable launcher for this project.
+# Build "Photobook Editor.app": a double-clickable launcher for this project.
 #
 #   npm run launcher                 build into dist/ and install into ~/Applications
 #   scripts/make-launcher.sh --no-install
@@ -9,7 +9,7 @@
 set -euo pipefail
 
 PROJECT="$(cd "$(dirname "$0")/.." && pwd)"
-NAME="Photobook Studio"
+NAME="Photobook Editor"
 PORT=""
 DATA=""
 INSTALL=1

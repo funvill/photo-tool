@@ -9,7 +9,7 @@ import {
 } from '../shared/pdfWriter';
 import { fontFile } from '../../shared/server/resources';
 
-// Print export on the local server. The drawing lives in src/shared/pdfWriter.ts (shared with the
+// Print export on the local server. The drawing lives in photobook-editor/shared/pdfWriter.ts (shared with the
 // web version); this module supplies sharp for the photos, the font files from disk, and writes
 // each PDF to a file. Every export is re-opened from disk and verified.
 

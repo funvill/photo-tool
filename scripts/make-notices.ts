@@ -77,7 +77,7 @@ export function licenceFiles(dir: string): string[] {
  * What one installer carries, for its notices: `modules`, the npm packages the program ships (its
  * run-time modules: what its bundles import and the packages its resource files come from; each is
  * listed with everything it depends on), and `productName`, the program's name for the heading.
- * Left out, every production dependency in package.json and the editor's name (today's single build).
+ * Left out (running this script by hand), every production dependency in package.json and the editor's name.
  */
 export interface NoticesFor {
   modules?: readonly string[];

@@ -63,7 +63,7 @@ export function WebNotes({ onRestored }: { onRestored: () => void }) {
       {open && (
         <div className="web-notes-body">
           <p>
-            Photobook Studio runs entirely in this browser. Books, thumbnails and imported photos are stored here, on this device; nothing is uploaded and there is no account.
+            Photobook Editor runs entirely in this browser. Books, thumbnails and imported photos are stored here, on this device; nothing is uploaded and there is no account.
           </p>
           <ul>
             <li>
@@ -86,7 +86,7 @@ export function WebNotes({ onRestored }: { onRestored: () => void }) {
               Back up books you care about: the <Icon name="download" size={12} /> button on each book saves one file with its pages and photos.
             </li>
             <li><strong>Exports</strong> (print PDFs, poster images, the flipbook) are made in the browser and downloaded; big books take a while and need memory.</li>
-            <li>Not in the web version: the Mac app launcher and updates, and folder paths typed by hand. For those, run Photobook Studio locally (see the project’s README).</li>
+            <li>Not in the web version: the Mac app launcher and updates, and folder paths typed by hand. For those, run Photobook Editor locally (see the project’s README).</li>
           </ul>
         </div>
       )}

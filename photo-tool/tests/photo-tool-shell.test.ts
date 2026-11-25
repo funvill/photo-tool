@@ -232,6 +232,17 @@ describe('the Photo Tool program', () => {
     // Only the old name to move data from is left.
     expect(main().replace("oldProductName: 'Photobook Gallery'", '')).not.toContain(old);
   });
+
+  it('its messages call it Photo Tool, never "the gallery" (code names keep "gallery")', () => {
+    const inText = /(['"`])(?:(?!\1).)*\bthe gallery\b(?:(?!\1).)*\1/i;
+    const hits = [...filesUnder('photo-tool/web'), ...filesUnder('photo-tool/electron'), ...filesUnder('photo-tool/server')].flatMap((f) =>
+      readFileSync(f, 'utf8')
+        .split('\n')
+        .map((line, i) => ({ at: `${f.slice(root.length + 1)}:${i + 1}`, line: line.trim() }))
+        .filter(({ line }) => !/^(\/\/|\/?\*)/.test(line) && inText.test(line.replace(/\s\/\/ .*$/, ''))),
+    );
+    expect(hits.map((h) => `${h.at}: ${h.line}`)).toEqual([]);
+  });
 });
 
 describe("Photo Tool's self-test photos", () => {

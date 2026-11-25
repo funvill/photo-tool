@@ -718,7 +718,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
     if (updated) applyItem(path, updated);
     else await get().refreshInfo();
     // Replaced, but a later step failed (reading it again, say): said even in Save all, as the photo was saved.
-    if (!r.ok) get().toast('error', r.error ?? 'The photo was saved, but the gallery could not read it again.');
+    if (!r.ok) get().toast('error', r.error ?? 'The photo was saved, but Photo Tool could not read it again.');
     return true;
   };
 

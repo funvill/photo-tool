@@ -73,7 +73,7 @@ async function startDemoWelcome() {
   const DemoWelcome = (window as unknown as { DemoWelcome: DemoWelcomeApi }).DemoWelcome;
   DemoWelcome.init({
     id: 'photobook-studio',
-    name: 'Photobook Studio',
+    name: 'Photobook Editor',
     accent: '#e7a65f',
     demo: 'A three-day Amalfi Coast trip drafted into a travel journal and a lemon grove poster, plus a Japanese teas poster designed by hand.',
     fresh: 'Make your own book: import a folder of photos and it drafts the pages. The demo projects stay alongside, marked Demo.',

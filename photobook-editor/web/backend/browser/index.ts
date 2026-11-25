@@ -9,7 +9,7 @@ import { fontBytes } from './fonts';
 import { alignDropped } from './drop';
 import { BrowserImporter } from './importer';
 
-// The web version's backend: everything src/server/app.ts does, in the page. Same methods and
+// The web version's backend: everything photobook-editor/server/app.ts does, in the page. Same methods and
 // response shapes as the HTTP client, so the editor doesn't know the difference. Errors carry the
 // status codes the server would send (the editor checks 409 for save conflicts).
 

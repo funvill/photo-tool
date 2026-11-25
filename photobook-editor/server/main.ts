@@ -32,7 +32,7 @@ const { app, store } = createApp(dataDir, { photoInfoFallbackDir, ...(production
 
 // 127.0.0.1 only: the API is never exposed to the local network.
 const server = app.listen(port, '127.0.0.1', () => {
-  console.log(`Photobook Studio API on http://127.0.0.1:${port}  (data: ${dataDir})`);
+  console.log(`Photobook Editor API on http://127.0.0.1:${port}  (data: ${dataDir})`);
   console.log(production ? `\n  Open the editor: http://127.0.0.1:${port}\n` : `\n  Open the editor: http://127.0.0.1:${webPort}  (this port only serves data)\n`);
 });
 

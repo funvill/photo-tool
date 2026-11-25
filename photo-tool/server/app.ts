@@ -560,7 +560,7 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     // Dev mode: this port is only the API; the gallery is served by Vite. Send people there.
     app.get(/^\/(?!api\/).*/, (req, res) => res.redirect(302, opts.devWebUrl + req.originalUrl.slice(1)));
   } else if (opts.staticDir) {
-    app.get(/^\/(?!api\/).*/, (_req, res) => res.status(503).type('text').send('The gallery has not been built yet. Run `npm run build:photo-tool`.'));
+    app.get(/^\/(?!api\/).*/, (_req, res) => res.status(503).type('text').send('Photo Tool has not been built yet. Run `npm run build:photo-tool`.'));
   }
 
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {

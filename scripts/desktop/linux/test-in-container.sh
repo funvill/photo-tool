@@ -1,18 +1,22 @@
 #!/bin/bash
 # Runs inside a test container started with --network none (see docker-test.mjs).
-#   /pkg     the packages (read-only)      /photos  a few JPEGs (read-only)
+#   /pkg     one program's packages (read-only)      /photos  a few JPEGs (read-only)
 #   /out     where the evidence goes
-# Usage: test-in-container.sh deb|appimage [extra app flags, e.g. --no-sandbox]
+# Usage: test-in-container.sh <program> deb|appimage [extra app flags, e.g. --no-sandbox]
+#   <program>    photo-tool or photobook-editor: the package, the command and /opt/<program>
+#   ENV_PREFIX   the program's variable prefix (PHOTO_TOOL or PHOTOBOOK), for its data folders
+#   PRODUCT      the name in its window title (Photo Tool or Photobook Editor)
 # Starts as root (dpkg needs it); the app itself always runs as the ordinary user "tester".
 set -u
-mode=$1; shift
+P=$1; mode=$2; shift 2
 flags="$*"
+: "${ENV_PREFIX:?ENV_PREFIX is not set}" "${PRODUCT:?PRODUCT is not set}"
 out=/out
 work=/home/tester/selftest
 mkdir -p "$out"; chmod 777 "$out"
 exec > >(tee "$out/test.log") 2>&1
 
-echo "== $(. /etc/os-release; echo "$PRETTY_NAME")  mode=$mode  flags='$flags'"
+echo "== $(. /etc/os-release; echo "$PRETTY_NAME")  program=$P  mode=$mode  flags='$flags'"
 echo "== network interfaces: $(ls /sys/class/net | tr '\n' ' ')"
 echo "== user namespaces for an ordinary user: $(runuser -u tester -- unshare -Ur true 2>&1 && echo available || echo NOT available)"
 
@@ -35,12 +39,13 @@ run_app() { # run_app <label> <command...>: the self-test as "tester" on a virtu
       echo "server peak memory: $((peak / 1024)) MB" > "$out/$label-server-memory.txt"
       d=$(ls /tmp/.X11-unix 2>/dev/null | head -1 | sed 's/^X/:/')
       for a in /tmp/xvfb-run.*/Xauthority; do
-        w=$(XAUTHORITY=$a DISPLAY=$d xwininfo -root -tree 2>/dev/null | grep -i photobook); [ -n "$w" ] && echo "$w" > "$out/$label-windows.txt"
+        w=$(XAUTHORITY=$a DISPLAY=$d xwininfo -root -tree 2>/dev/null | grep -iF "$PRODUCT"); [ -n "$w" ] && echo "$w" > "$out/$label-windows.txt"
       done
     done
   ) &
   local sampler=$!
-  runuser -u tester -- env PHOTOBOOK_DATA_DIR="$work/data" HOME=/home/tester \
+  # Its data, browser profile and the shared photo info all go under $work, as in CI.
+  runuser -u tester -- env "${ENV_PREFIX}_DATA_DIR=$work/data" "${ENV_PREFIX}_PROFILE_DIR=$work/profile" PHOTOINFO_FALLBACK_DIR="$work/photoinfo" HOME=/home/tester \
     timeout 900 xvfb-run -a -s '-screen 0 1600x1000x24' "$@" $flags --self-test /photos --self-test-out "$work/out" > "$out/$label-stdout.txt" 2>&1
   local code=$?
   touch /tmp/app-finished; wait $sampler; rm -f /tmp/app-finished
@@ -61,24 +66,24 @@ if [ "$mode" = deb ]; then
   touch /tmp/before-install; sleep 1
   echo "== dpkg -i"
   dpkg -i /pkg/*.deb; echo "== dpkg exit code $?"
-  dpkg -s photobook-studio | grep -E '^(Status|Version|Depends|Recommends)'
+  dpkg -s $P | grep -E '^(Status|Version|Depends|Recommends)'
   echo "== dependencies not satisfied:"; dpkg --audit; apt-get check 2>&1 | tail -5
-  echo "== shared libraries the program cannot find:"; ldd "/opt/photobook-studio/photobook-studio" | grep 'not found'
-  ls -l "/opt/photobook-studio/chrome-sandbox" /usr/bin/photobook-studio /etc/alternatives/photobook-studio /etc/apparmor.d/photobook-studio 2>&1
+  echo "== shared libraries the program cannot find:"; ldd "/opt/$P/$P" | grep 'not found'
+  ls -l "/opt/$P/chrome-sandbox" /usr/bin/$P /etc/alternatives/$P /etc/apparmor.d/$P 2>&1
   if [ -n "${FORCE_SUID_SANDBOX:-}" ]; then
     # What the install script does on a system without user namespaces, and Chromium told to
     # use that setuid helper even though this kernel has them.
-    chmod 4755 /opt/photobook-studio/chrome-sandbox; flags="$flags --disable-namespace-sandbox"
-    ls -l /opt/photobook-studio/chrome-sandbox
+    chmod 4755 /opt/$P/chrome-sandbox; flags="$flags --disable-namespace-sandbox"
+    ls -l /opt/$P/chrome-sandbox
   fi
-  run_app deb photobook-studio; code=$?
-  find / -xdev \( -path /proc -o -path /sys -o -path /tmp -o -path /out -o -path /var/lib/dpkg -o -path /var/log -o -path /var/cache \) -prune -o -newer /tmp/before-install -print 2>/dev/null | grep -v "^/opt/photobook-studio/\|^$work" | sort > "$out/files-after-install-and-run.txt"
+  run_app deb $P; code=$?
+  find / -xdev \( -path /proc -o -path /sys -o -path /tmp -o -path /out -o -path /var/lib/dpkg -o -path /var/log -o -path /var/cache \) -prune -o -newer /tmp/before-install -print 2>/dev/null | grep -v "^/opt/$P/\|^$work" | sort > "$out/files-after-install-and-run.txt"
   touch /tmp/before-remove; sleep 1
-  echo "== dpkg -r"; dpkg -r photobook-studio; echo "== dpkg -r exit code $?"
+  echo "== dpkg -r"; dpkg -r $P; echo "== dpkg -r exit code $?"
   echo "== left behind by the package after removal:"
-  ls -ld "/opt/photobook-studio" /usr/bin/photobook-studio /etc/alternatives/photobook-studio /etc/apparmor.d/photobook-studio /usr/share/applications/photobook-studio.desktop /usr/share/doc/photobook-studio 2>&1 | sed 's/^/   /'
-  find /usr/share/icons -name 'photobook*' | sed 's/^/   /'
-  dpkg -l photobook-studio 2>&1 | tail -1
+  ls -ld "/opt/$P" /usr/bin/$P /etc/alternatives/$P /etc/apparmor.d/$P /usr/share/applications/$P.desktop /usr/share/doc/$P 2>&1 | sed 's/^/   /'
+  find /usr/share/icons -name "$P*" | sed 's/^/   /'
+  dpkg -l $P 2>&1 | tail -1
   echo "== left behind in the user's home (the books are meant to stay):"
   find /home/tester -newer /tmp/before-install -maxdepth 2 | sed 's/^/   /' | head -40
 else

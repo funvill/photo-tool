@@ -3,7 +3,7 @@ import { fontFilePath } from '../core';
 import { textOutline as outline, type OutlineRequest } from '../shared/textOutline';
 import { fontFile } from '../../shared/server/resources';
 
-// Text → vector outline (see src/shared/textOutline.ts), with the font files read from disk.
+// Text → vector outline (see photobook-editor/shared/textOutline.ts), with the font files read from disk.
 
 const fonts = new Map<string, Font>();
 

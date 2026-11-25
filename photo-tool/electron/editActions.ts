@@ -51,7 +51,7 @@ export interface SaveAsDeps extends CommonDeps {
   copyInfo(to: string, patch: Record<string, unknown>): Promise<void>;
 }
 
-const BAD_FORMAT = 'The gallery wrote the edited photo in an unexpected format, so nothing was changed.';
+const BAD_FORMAT = 'Photo Tool wrote the edited photo in an unexpected format, so nothing was changed.';
 const failure = (err: unknown) => (err instanceof Error ? err.message : String(err));
 const NOT_A_PHOTO = 'That photo is not in the open folder any more.';
 const isHeic = (path: string) => /\.(heic|heif)$/i.test(path);
@@ -115,7 +115,7 @@ export async function saveToFile(path: string, edit: PhotoEdit, deps: SaveToFile
   try {
     return { ok: true, item: (await deps.refresh([path]))[0] };
   } catch (err) {
-    return { ok: false, saved: true, error: `The photo was saved, but the gallery could not read it again: ${failure(err)}` };
+    return { ok: false, saved: true, error: `The photo was saved, but Photo Tool could not read it again: ${failure(err)}` };
   }
 }
 
@@ -161,7 +161,7 @@ export async function saveAs(path: string, edit: PhotoEdit, deps: SaveAsDeps, in
   try {
     item = (await deps.refresh([target]))[0];
   } catch (err) {
-    return { ok: false, saved: true, savedPath: target, error: `The copy was saved as ${target}, but the gallery could not read it: ${failure(err)}` };
+    return { ok: false, saved: true, savedPath: target, error: `The copy was saved as ${target}, but Photo Tool could not read it: ${failure(err)}` };
   }
   if (item === undefined) return { ok: true, savedPath: target };
   try {

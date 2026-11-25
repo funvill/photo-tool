@@ -1,5 +1,5 @@
 #!/bin/bash
-# Start Photobook Studio for the Mac launcher app (or by hand): clear leftover servers, rebuild the
+# Start Photobook Editor for the Mac launcher app (or by hand): clear leftover servers, rebuild the
 # editor if the code changed, start the server in the background, wait until it answers.
 # Prints the editor URL on success; exits non-zero with a message on failure.
 #

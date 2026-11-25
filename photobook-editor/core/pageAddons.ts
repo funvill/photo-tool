@@ -134,7 +134,7 @@ export const PAGE_ADDONS: PageAddon[] = [
   },
   {
     id: 'colophon', name: 'Colophon', category: 'back', description: 'Small print at the foot of the page: who made it, when.',
-    items: [S('line', 0.44, 0.82, 0.12, 0.002), T('caption', 'Photographs and words by us.\nMade with Photobook Studio, {year}.', 0.1, 0.84, 0.8, 0.08)],
+    items: [S('line', 0.44, 0.82, 0.12, 0.002), T('caption', 'Photographs and words by us.\nMade with Photobook Editor, {year}.', 0.1, 0.84, 0.8, 0.08)],
   },
 ];
 

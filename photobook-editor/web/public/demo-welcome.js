@@ -1,4 +1,9 @@
-/* Demo or fresh start, for visitors arriving from Jen's portfolio.
+/* Unused: it belonged to the web version, which this repository no longer builds or publishes
+   (photobook-editor/vite.config.ts ships nothing from web/public). Kept as it came, with the rest of
+   the in-browser code, until that is removed; its links and its master copy are not this
+   repository's.
+
+   Demo or fresh start, for visitors arriving from Jen's portfolio.
 
    The portfolio's "Open the app" links add ?from=portfolio. When a page opened that way has
    nothing saved yet, this offers two ways in: see the demo (the app filled with sample data,

@@ -7,7 +7,7 @@ import { decode, resized } from './canvas';
 import { fontBytes } from './fonts';
 import { serve } from './rpc';
 
-// Print PDFs in a worker: the server's drawing code (src/shared/pdfWriter.ts) with the photos cut
+// Print PDFs in a worker: the server's drawing code (photobook-editor/shared/pdfWriter.ts) with the photos cut
 // and scaled on an OffscreenCanvas instead of sharp. Each photo is decoded once, cut to its
 // printed size at 300 DPI and encoded, then dropped, so memory stays near one photo at a time.
 

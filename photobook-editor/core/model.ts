@@ -1,4 +1,4 @@
-// Domain model for Photobook Studio.
+// Domain model for Photobook Editor.
 // Conventions (see docs/ARCHITECTURE.md §3):
 //  - All document geometry is in millimetres.
 //  - Element coordinates are in *spread space*: origin at the top-left of the left page's trim box,

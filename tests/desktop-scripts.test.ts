@@ -45,6 +45,26 @@ describe('desktop build scripts', () => {
     }
   });
 
+  it("the program table's variable prefix is the one each program's main.ts gives", async () => {
+    const { PROGRAMS } = (await loadPrograms()) as unknown as { PROGRAMS: Record<string, { main: string; envPrefix: string }> };
+    for (const p of Object.values(PROGRAMS)) expect(readFileSync(p.main, 'utf8'), p.main).toContain(`envPrefix: '${p.envPrefix}'`);
+  });
+
+  it('the Linux container scripts test each program under its own name, from its own installer folder', () => {
+    const old = ['photobook', 'studio'].join('-');
+    for (const f of ['scripts/desktop/linux/test-in-container.sh', 'scripts/desktop/linux/docker-test.mjs', 'scripts/desktop/linux/docker-build.mjs']) {
+      const text = readFileSync(f, 'utf8');
+      expect(text, f).not.toContain(old);
+      // The .mjs scripts take the programs from the one table; the shell script is told which one.
+      if (f.endsWith('.mjs')) expect(text, f).toContain('programs.mjs');
+    }
+    const sh = readFileSync('scripts/desktop/linux/test-in-container.sh', 'utf8');
+    for (const v of ['_DATA_DIR', '_PROFILE_DIR', 'PHOTOINFO_FALLBACK_DIR']) expect(sh, v).toContain(v);
+    for (const f of ['scripts/desktop/linux/docker-test.mjs', 'scripts/desktop/linux/docker-build.mjs']) {
+      expect(readFileSync(f, 'utf8'), f).toMatch(/join\(root, 'dist\/installer', program\)/);
+    }
+  });
+
   it('the run-time module list refuses an entry file that does not exist, rather than leaving its packages out', async () => {
     const { packageImports } = await import('../scripts/import-graph');
     expect(() => packageImports(['electron/no-such-main.ts'], '.')).toThrow(/electron\/no-such-main\.ts/);

@@ -377,8 +377,8 @@ describe('gallery store', () => {
     let send: ((message: string) => void) | undefined;
     const stop = vi.fn();
     const unsubscribe = connectDesktop({ onDragFailed: (cb) => ((send = cb), stop) });
-    send!("Couldn't drag the photos: the gallery did not answer in time. Try again.");
-    expect(useGallery.getState().toasts).toEqual([expect.objectContaining({ kind: 'error', text: "Couldn't drag the photos: the gallery did not answer in time. Try again." })]);
+    send!("Couldn't drag the photos: Photo Tool did not answer in time. Try again.");
+    expect(useGallery.getState().toasts).toEqual([expect.objectContaining({ kind: 'error', text: "Couldn't drag the photos: Photo Tool did not answer in time. Try again." })]);
     unsubscribe();
     expect(stop).toHaveBeenCalledTimes(1);
   });

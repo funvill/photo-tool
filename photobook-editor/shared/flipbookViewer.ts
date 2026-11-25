@@ -33,7 +33,7 @@ export function flipbookHtml(data: FlipbookData): string {
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="generator" content="Photobook Studio">
+<meta name="generator" content="Photobook Editor">
 <title>${escapeHtml(data.title || 'Photobook')}</title>
 <style>${STYLE}</style>
 </head>

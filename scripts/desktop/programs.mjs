@@ -2,6 +2,9 @@
 // scripts/desktop/build.mjs (what to bundle) and scripts/collect-resources.ts (whose packages its
 // notices list), and the `--program <name>` argument that picks one. Types: programs.d.mts.
 //
+// `envPrefix` is what the program's own variables start with (${envPrefix}_DATA_DIR, _PROFILE_DIR, ...),
+// as its electron/main.ts gives it; the Linux test scripts use it to keep a test run's data apart.
+//
 // Native or self-locating modules stay real folders in node_modules (`external`):
 //   sharp    a native addon with DLLs beside it (both programs)
 //   pdfkit   finds its built-in font metrics and colour profile relative to its own file (the editor)
@@ -17,6 +20,7 @@ const ROOT = resolve(import.meta.dirname, '../..');
 export const PROGRAMS = {
   'photo-tool': {
     product: 'photo-tool/product.json',
+    envPrefix: 'PHOTO_TOOL',
     main: 'photo-tool/electron/main.ts',
     serverHost: 'photo-tool/electron/server-host.ts',
     preload: 'photo-tool/electron/preload.ts',
@@ -26,6 +30,7 @@ export const PROGRAMS = {
   },
   'photobook-editor': {
     product: 'photobook-editor/product.json',
+    envPrefix: 'PHOTOBOOK',
     main: 'photobook-editor/electron/main.ts',
     serverHost: 'photobook-editor/electron/server-host.ts',
     preload: 'photobook-editor/electron/preload.ts',

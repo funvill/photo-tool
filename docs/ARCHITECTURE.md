@@ -1,4 +1,6 @@
-# Photobook Studio — Architecture
+# Photobook Editor — Architecture
+
+How Photobook Editor is built. Its code is in `photobook-editor/`; what it shares with Photo Tool (the desktop shell, `photoinfo.json`, reading photos) is in `shared/`. Paths below are inside `photobook-editor/` unless they say otherwise.
 
 ## 1. Starting point
 
@@ -16,12 +18,12 @@ The repository was empty: no existing framework or structure to preserve. Enviro
 ## 2. Architecture
 
 ```
-┌──────────────────────── src/web (React, Vite) ────────────────────────┐
+┌────────────────────────── web (React, Vite) ──────────────────────────┐
 │  Library sidebar · Spread canvas · Navigator · Inspector · Preflight   │
 │  Zustand store: document + bounded snapshot history (undo/redo)        │
 └───────────────▲───────────────────────────────────────────────────────┘
                 │ imports pure functions          HTTP (127.0.0.1 only)
-┌───────────────┴──────── src/core (pure TS) ─────┐   ┌──── src/server (Node) ─────┐
+┌───────────────┴────────── core (pure TS) ───────┐   ┌────── server (Node) ───────┐
 │ model · geometry (crop/placement/DPI) · units   │◄──│ SQLite catalog + projects  │
 │ templates · styles · curation · generator       │   │ import jobs (background)   │
 │ preflight · commands · schema/migrations        │   │ media: hash, EXIF, thumbs, │
@@ -30,9 +32,9 @@ The repository was empty: no existing framework or structure to preserve. Enviro
                                                       └────────────────────────────┘
 ```
 
-**Decision: local Node server + browser UI now, Tauri later.** The brief suggests Tauri 2, but Rust is not installed. A Node process bound to `127.0.0.1` gives the same guarantees that matter (real filesystem paths, persistent SQLite, background processing, nothing leaves the machine) with one language. All domain logic lives in `src/core`, which imports nothing from Node, React, or the server — enforced by a test — so a Tauri shell can later host the same UI and call the same core.
+**Decision: local Node server + browser UI now, Tauri later.** The brief suggests Tauri 2, but Rust is not installed. A Node process bound to `127.0.0.1` gives the same guarantees that matter (real filesystem paths, persistent SQLite, background processing, nothing leaves the machine) with one language. All domain logic lives in `core`, which imports nothing from Node, React, or the server — enforced by a test — so a Tauri shell can later host the same UI and call the same core.
 
-**Web version.** The same UI also ships as a static site (GitHub Pages) with the backend running in the browser: `src/web/api.ts` hands components whichever `Backend` the build selected (HTTP to this server, or IndexedDB + Web Workers). Code both sides need (PDF drawing and verification, outlines, the flipbook viewer) is in `src/shared`, which imports nothing from Node. See [WEB_VERSION.md](WEB_VERSION.md).
+**The in-browser backend (unused).** The same UI once also shipped as a static web site, with the backend running in the browser (IndexedDB and Web Workers). That web version is no longer built or published. `web/api.ts` still hands components a `Backend`, and the build always selects HTTP to the local server; the in-browser code (`web/backend/browser`) stays, switched off, until it is removed. Code both sides needed (PDF drawing and verification, outlines, the flipbook viewer) is in `photobook-editor/shared`, which imports nothing from Node.
 
 **Why the generator runs in the client:** core is pure, so "Generate draft" is just another document command. That makes it undoable like any edit, and the server never needs to know about layouts.
 
@@ -41,7 +43,7 @@ The repository was empty: no existing framework or structure to preserve. Enviro
 - Server listens on `127.0.0.1` only; there is no outbound network code anywhere.
 - Fonts are bundled from `@fontsource/*` packages; no CDN, no remote fonts.
 - The web page ships a Content-Security-Policy restricting all fetches to `'self'`.
-- Originals are never modified. Thumbnails, HEIC conversions, and exports go to the data directory (`./data` by default, `PHOTOBOOK_DATA_DIR` to override).
+- Originals are never modified. Thumbnails, HEIC conversions, and exports go to the data directory (`%APPDATA%\Photobook Editor\data` when installed, `./data/photobook-editor` run from source, `PHOTOBOOK_DATA_DIR` to override; see the [README](../README.md#where-the-data-lives)).
 - A test scans the source tree for external URLs.
 
 ## 3. Data schema
@@ -54,7 +56,7 @@ The repository was empty: no existing framework or structure to preserve. Enviro
 | Project ↔ photo membership, exclusions | SQLite `project_assets` | Import can add photos while the editor autosaves — no write races on the document |
 | Book document (spreads, elements, settings) | SQLite `projects.doc` (JSON, versioned) | Small, edited as a unit, saved atomically |
 | Recovery history | SQLite `project_revisions` (last 50) | Restore after a bad edit or interrupted session |
-| Thumbnails / HEIC conversions / exports | `data/thumbs`, `data/derived`, `data/exports` | Binary files stay out of the DB |
+| Thumbnails / HEIC conversions / exports | `thumbs/`, `derived/`, `exports/` in the data directory | Binary files stay out of the DB |
 
 ### Coordinate conventions (the most important rules)
 
@@ -65,7 +67,7 @@ The repository was empty: no existing framework or structure to preserve. Enviro
 - **Rotation:** degrees clockwise about the element's centre.
 - **Crop:** `{ cx, cy, zoom }`. `cx, cy ∈ [0,1]` are normalized coordinates *in the auto-oriented source image* of the point shown at the frame's centre. `zoom ≥ 1` multiplies the baseline scale (cover: smallest scale that fills the frame; contain: largest scale that fits). One function, `imagePlacement()`, turns this into a rectangle and is used by both the CSS preview and the PDF export.
 
-### Document types (abridged — full definitions in `src/core/model.ts`)
+### Document types (abridged — full definitions in `core/model.ts`)
 
 ```ts
 interface BookDocument {
@@ -94,17 +96,17 @@ Z-order = array order. Element ids, asset ids, and spread ids are stable UUIDs.
 
 ### Covers, surfaces and printers (schema v2)
 
-- `src/core/printers.ts` — data-only presets (sizes, bleed, bleed at spine, spine rule, cover wrap, page limits), with sources cited. `spineWidth(doc)` returns the width *and* where it came from (`table`, `formula`, `manual`, `estimate`).
+- `core/printers.ts` — data-only presets (sizes, bleed, bleed at spine, spine rule, cover wrap, page limits), with sources cited. `spineWidth(doc)` returns the width *and* where it came from (`table`, `formula`, `manual`, `estimate`).
 - `doc.cover` is a `Spread` plus `spineMm`. Cover coordinates: x = 0 at the back cover's left trim; back | spine | front. `reconcileCover()` runs after every edit and shifts front-cover elements when the spine width changes, so adding pages never misaligns the cover.
-- `src/core/surface.ts` — a *surface* is a spread or the cover. Canvas, snapping, guides, preflight and PDF export all read `SurfaceGeometry` (trim size, bleed/wrap, panels, folds, fold zone, safe areas) instead of assuming two pages.
+- `core/surface.ts` — a *surface* is a spread or the cover. Canvas, snapping, guides, preflight and PDF export all read `SurfaceGeometry` (trim size, bleed/wrap, panels, folds, fold zone, safe areas) instead of assuming two pages.
 - Elements gained a third type, `shape` (filled rectangle), used for title panels.
 - Schema v1 → v2 migration: books become `custom`-printer books without a cover.
 
 ### Typography (schema v3)
 
-`style.textStyles` holds one `TextStyle` per role (title, subtitle, heading, body, caption, quote, label); `src/core/typography.ts` defines the packs. Text elements carry `styleLinked`; linked boxes are restyled when the pack or a role changes, keeping each box's size ratio to its role. Letter spacing (em) and uppercase are rendered identically by CSS and PDFKit (`characterSpacing`, `toUpperCase`). The v2 → v3 migration rebuilds role styles from the old heading/body/caption fonts at the old sizes, so nothing moves.
+`style.textStyles` holds one `TextStyle` per role (title, subtitle, heading, body, caption, quote, label); `core/typography.ts` defines the packs. Text elements carry `styleLinked`; linked boxes are restyled when the pack or a role changes, keeping each box's size ratio to its role. Letter spacing (em) and uppercase are rendered identically by CSS and PDFKit (`characterSpacing`, `toUpperCase`). The v2 → v3 migration rebuilds role styles from the old heading/body/caption fonts at the old sizes, so nothing moves.
 
-### SQLite (`src/server/db.ts`)
+### SQLite (`server/db.ts`)
 
 ```sql
 meta(key PRIMARY KEY, value)                              -- schema_version
@@ -130,13 +132,13 @@ Saves use optimistic concurrency (`baseRevision`); a stale tab cannot silently o
 | M5 | Scale | 500-image import without UI stalls (measured); 2,000-image library; virtualized grid |
 | M6 | Desktop shell | Tauri wrapper once Rust is installed |
 
-Acceptance criteria from the brief map to tests in `tests/` — see `README.md` for what passes today.
+Acceptance criteria from the brief map to tests in `photobook-editor/tests/` — see [photobook-editor/README.md](../photobook-editor/README.md) for what passes today.
 
 ## 5. Major technical risks
 
 1. **Crop geometry drift between preview and PDF.** Mitigation: one placement function in core; EXIF orientation applied once (sharp `.rotate()`) for thumbnails, previews and export alike; a unit test asserts preview and export compute the same visible rectangle; exported pages are rendered and compared visually.
 2. **Local photo storage.** Originals are referenced by path, so files can move. Mitigation: content hash + file name stored; missing files detected on every library load; relink scans a folder and matches by name+size, then hash.
-3. **HEIC.** libvips prebuilds cannot decode HEVC. Mitigation: convert once with macOS `sips` into `data/derived`. Not portable to Windows/Linux — documented.
+3. **HEIC.** libvips prebuilds cannot decode HEVC. Mitigation: convert once with macOS `sips` into the data directory's `derived/`. Not portable to Windows/Linux — documented.
 4. **Automatic layout quality.** Without face detection, crops can cut subjects. Mitigation: a cheap edge-energy "saliency centre" computed at import biases crops and keeps the subject out of the gutter on spread-spanning photos. Deterministic seeded generator so results are reproducible and testable.
 5. **Text fidelity.** Browser and PDFKit wrap lines independently. Mitigation: identical font files and metrics; export measures overflow and reports it. Residual risk: an occasional different line break.
 6. **PDF correctness.** File creation proves nothing. Mitigation: every export is re-parsed (pdf-lib) to check page count, MediaBox, TrimBox, BleedBox; tests render pages and check them visually.

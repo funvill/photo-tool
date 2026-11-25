@@ -55,7 +55,7 @@ export interface GalleryFacts {
   isKeeper: boolean;
 }
 
-/** What these functions need of a gallery photo (GalleryItem satisfies it; src/core must not import the server). */
+/** What these functions need of a gallery photo (GalleryItem satisfies it; core must not import the server). */
 export interface GalleryItemLike {
   path: string;
   fileName: string;

@@ -59,6 +59,6 @@ describe('the gallery reaches no book code', () => {
       root,
     );
     for (const f of ['photo-tool/server/main.ts', 'photo-tool/web/index.html', 'photo-tool/web/main.tsx', 'photo-tool/server/tagging/worker.ts']) expect(closure.has(f)).toBe(true);
-    for (const f of ['book', 'templates', 'generator', 'index', 'model']) expect(closure.has(`src/core/${f}.ts`)).toBe(false);
+    for (const f of ['book', 'templates', 'generator', 'index', 'model']) expect(closure.has(`photobook-editor/core/${f}.ts`)).toBe(false);
   });
 });

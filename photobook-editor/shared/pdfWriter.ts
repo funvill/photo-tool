@@ -9,7 +9,7 @@ import {
 // Print export. Geometry comes from core (same functions the editor preview uses); this module only
 // translates millimetres to points and pixels. Every export is re-opened and verified afterwards.
 //
-// Shared by the local server (src/server/pdf.ts: sharp + files) and the web version (a worker:
+// Shared by the local server (photobook-editor/server/pdf.ts: sharp + files) and the web version (a worker:
 // canvas + memory). Each side supplies a `PdfEnv`: how to read font files, how to cut a photo to
 // its printed size, and where the bytes go. Imports nothing from Node: `pdfkit` resolves to its
 // Node build on the server and its browser build in the web bundle.
@@ -90,7 +90,7 @@ class PdfWriter<A extends { asset: PhotoAsset }> {
   private alpha = 1;
 
   constructor(title: string, private readonly assets: Map<string, A>, private readonly env: PdfEnv<A>, private readonly out: PdfOutput, private readonly grade?: ColorGrade) {
-    this.pdf = new PDFDocument({ autoFirstPage: false, compress: true, info: { Title: title, Creator: 'Photobook Studio', Producer: 'Photobook Studio (PDFKit)' } });
+    this.pdf = new PDFDocument({ autoFirstPage: false, compress: true, info: { Title: title, Creator: 'Photobook Editor', Producer: 'Photobook Editor (PDFKit)' } });
     this.done = new Promise((res, rej) => {
       this.pdf.on('data', (chunk: Uint8Array) => out.write(chunk));
       this.pdf.on('end', () => res());

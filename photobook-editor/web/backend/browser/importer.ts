@@ -4,7 +4,7 @@ import { containsFile, folderDisplayName, parseFolder, type Folders, type FoundF
 import type { ProcessedPhoto } from './media.worker';
 import { WorkerPool } from './pool';
 
-// Import jobs in the browser, following src/server/importer.ts: the call returns a job at once,
+// Import jobs in the browser, following photobook-editor/server/importer.ts: the call returns a job at once,
 // the UI polls it, and photos appear as they finish. Decoding and analysis run in a few workers.
 
 export interface BrowserImportJob extends ImportJob {

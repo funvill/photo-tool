@@ -204,6 +204,14 @@ describe('the editor program', () => {
     }
   });
 
+  it('says "Photobook Editor" in everything else a person reads: PDFs, flipbooks, page designs, messages, the Mac launcher', () => {
+    // Kept: the name to move data from, and the header stored in backup files (old backups must still open).
+    const kept = /oldProductName: 'Photobook Studio'|app: 'Photobook Studio'/g;
+    const files = [...['core', 'server', 'shared', 'web', 'electron'].flatMap((d) => filesUnder(`photobook-editor/${d}`)), ...filesUnder('scripts/launcher'), resolve(root, 'scripts/make-launcher.sh')];
+    const hits = files.filter((f) => readFileSync(f, 'utf8').replace(kept, '').includes('Photobook Studio'));
+    expect(hits.map((f) => f.slice(root.length + 1))).toEqual([]);
+  });
+
   it('has no gallery switch and no Open Gallery', () => {
     for (const f of ['photobook-editor/electron/main.ts', 'photobook-editor/electron/preload.ts']) {
       const c = read(f);

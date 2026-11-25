@@ -120,7 +120,7 @@ async function dragCheck(port: number, paths: string[]): Promise<DragCheck> {
   };
 }
 
-const DRAG_FAILED = "Couldn't drag the photos: the gallery did not answer in time. Try again.";
+const DRAG_FAILED = "Couldn't drag the photos: Photo Tool did not answer in time. Try again.";
 
 /**
  * Dragging photos out of the gallery window: the original files, only those the gallery's server has

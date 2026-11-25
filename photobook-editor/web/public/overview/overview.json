@@ -1,6 +1,6 @@
 {
   "version": 3,
-  "name": "Photobook Studio",
+  "name": "Photobook Editor",
   "tagline": "A whole photobook, drafted for you",
   "pitch": "Point it at a folder of photos and it drafts the whole book, then exports PDFs a printer will take as they are.",
   "accent": "#e7a65f",
@@ -27,7 +27,7 @@
   ],
 
   "screens": [
-    { "src": "desktop.png", "alt": "Photobook Studio editing a travel journal: the photo library on the left, a spread of tilted prints on warm paper in the middle, the Layout section's book templates on the right and every spread along the bottom", "caption": "A sample trip, drafted as a travel journal" }
+    { "src": "desktop.png", "alt": "Photobook Editor editing a travel journal: the photo library on the left, a spread of tilted prints on warm paper in the middle, the Layout section's book templates on the right and every spread along the bottom", "caption": "A sample trip, drafted as a travel journal" }
   ],
 
   "facts": {

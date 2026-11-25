@@ -65,8 +65,8 @@ export async function backupProject(store: BrowserStore, projectId: string, orig
 async function readHeader(file: Blob): Promise<{ header: BackupHeader; dataStart: number }> {
   const head = new TextDecoder().decode(await file.slice(0, 64).arrayBuffer());
   const m = head.match(/^photobook-backup (\d+) (\d+)\n/);
-  if (!m) throw new Error('This isn’t a Photobook Studio backup file.');
-  if (Number(m[1]) > VERSION) throw new Error('This backup was made by a newer version of Photobook Studio.');
+  if (!m) throw new Error('This isn’t a Photobook Editor backup file.');
+  if (Number(m[1]) > VERSION) throw new Error('This backup was made by a newer version of Photobook Editor.');
   const start = new TextEncoder().encode(m[0]).byteLength;
   const len = Number(m[2]);
   const header = JSON.parse(new TextDecoder().decode(await file.slice(start, start + len).arrayBuffer())) as BackupHeader;

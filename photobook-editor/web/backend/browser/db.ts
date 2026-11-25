@@ -118,7 +118,7 @@ export function openDatabase(name = 'photobook-studio'): Promise<IDBDatabase> {
     };
     r.onsuccess = () => resolve(r.result);
     r.onerror = () => reject(r.error);
-    r.onblocked = () => reject(new Error('Photobook Studio is open in another tab with an older version. Close the other tabs and reload.'));
+    r.onblocked = () => reject(new Error('Photobook Editor is open in another tab with an older version. Close the other tabs and reload.'));
   });
 }
 

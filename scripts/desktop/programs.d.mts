@@ -3,6 +3,7 @@ export type ProgramName = 'photo-tool' | 'photobook-editor';
 
 export interface ProgramFiles {
   product: string;
+  envPrefix: 'PHOTO_TOOL' | 'PHOTOBOOK';
   main: string;
   serverHost: string;
   preload: string;

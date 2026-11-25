@@ -1,4 +1,4 @@
-/* Shared base styles for Photo Tool and Photobook Editor: dark chrome so photos and pages read as the brightest thing on screen. The editor adds its own rules in src/web/styles.css. */
+/* Shared base styles for Photo Tool and Photobook Editor: dark chrome so photos and pages read as the brightest thing on screen. The editor adds its own rules in photobook-editor/web/styles.css. */
 :root {
   --bg: #161618;
   --stage: #111113;

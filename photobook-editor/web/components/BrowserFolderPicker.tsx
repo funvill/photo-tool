@@ -43,7 +43,7 @@ export function BrowserFolderPicker({ title, action, offerLink, onChoose, onCanc
         {web.canPickDirectories ? (
           <>
             <button className="btn btn-primary" onClick={() => void pickDirectory()}><Icon name="folder" /> Choose a folder…</button>
-            <p className="muted small">Photos stay in their folder; the browser lets Photobook Studio read it. After you restart the browser it asks for permission again.</p>
+            <p className="muted small">Photos stay in their folder; the browser lets Photobook Editor read it. After you restart the browser it asks for permission again.</p>
             <p className="muted small">
               Or copy photos into this browser instead:{' '}
               <button className="link" onClick={() => dirInput.current?.click()}>a folder</button> ·{' '}
