@@ -190,7 +190,28 @@ Buttons: update found → `['Download', 'Release notes', 'Later']`; downloaded �
 - [ ] **Step 3: Implement.** About item: `{ label: `&About ${NAME}`, accelerator: 'F1', click: about }`. The menu accelerator works whenever the window has focus, on Windows and Linux. (Neither page uses F1 today; if one later does, the menu wins.) `aboutBox()` passes `canCheckForUpdates: app.isPackaged && !selfTest` and `runtime: `Electron ${process.versions.electron}, ${process.platform} ${process.arch}``. In `showAbout`, the pressed `CHECK_UPDATES_BUTTON` → `void updates?.checkNow()` (the About box has closed by then; the check shows its own result).
 - [ ] **Step 4: Run** the tests — PASS. Commit `feat: F1 opens About, with version details and Check for updates`.
 
-### Task 7: CI drafts the release
+### Task 7: F2 opens GitHub to leave feedback
+
+**Files:**
+- Modify: `shared/electron/config.ts` (new `feedbackUrl`), `shared/electron/runDesktopApp.ts` (Help menu item)
+- Test: `shared/tests/desktop-config.test.ts`, `shared/tests/desktop-shell.test.ts`
+
+**Interfaces:**
+- Consumes: `githubRepo` (Task 2); the `runtime` string from Task 6.
+- Produces: `feedbackUrl(repo: { owner: string; repo: string }, o: { productName: string; version: string; runtime: string }): string`.
+
+- [ ] **Step 1: Write tests:**
+  - `feedbackUrl({owner:'funvill',repo:'photo-tool'}, {productName:'Photo Tool', version:'0.1.40', runtime:'Electron 45.4.1, win32 x64'})` starts with `https://github.com/funvill/photo-tool/issues/new?`; its `title` param is `[Photo Tool 0.1.40] `; its `body` param is `Program: Photo Tool 0.1.40
+System: Electron 45.4.1, win32 x64
+
+What happened, or what would you like?
+` (built with `URLSearchParams`, so spaces and newlines are encoded). Nothing else goes in the URL: no data folder, no user name, no file paths.
+  - Shell source test: the Help menu has `{ label: 'Send &feedback on GitHub…', accelerator: 'F2' }` whose click calls `shell.openExternal(feedbackUrl(...))`; the item is left out when `githubRepo(program.repository)` is null.
+- [ ] **Step 2: Run** `npx vitest run shared/tests/desktop-config.test.ts shared/tests/desktop-shell.test.ts` — FAIL.
+- [ ] **Step 3: Implement.** Help submenu order: update items (Task 4), separator, `Send feedback on GitHub…` (F2), separator, `About` (F1). Works from source too (no `isPackaged` check). In a self-test the click is never made. It opens the user's own browser (`shell.openExternal`); the window's guard is unaffected. Leaving an issue needs a GitHub account; the docs (Task 9) say so.
+- [ ] **Step 4: Run** — PASS. Commit `feat: F2 opens GitHub to leave feedback`.
+
+### Task 8: CI drafts the release
 
 **Files:**
 - Create: `scripts/release/collect-assets.mjs`
@@ -206,7 +227,7 @@ Buttons: update found → `['Download', 'Release notes', 'Later']`; downloaded �
 - [ ] **Step 4: CI.** Windows and Linux artifact uploads add `dist/installer/${{ matrix.program }}/*.yml`. New job `release`: `needs: [windows, linux]`, `if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'funvill/photo-tool'`, `permissions: contents: write`, steps: checkout; download all `*-x64` artifacts into `in/`; fail unless `${GITHUB_REF_NAME}` == `v$(node -p "require('./package.json').version")`; `node scripts/release/collect-assets.mjs in out`; `gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --draft --title "$TAG" --generate-notes`; `gh release upload "$TAG" out/* --clobber`. Rewrite the header's "nothing is published".
 - [ ] **Step 5: Run** the test — PASS; `npx yaml-lint` not needed: run `node -e "require('js-yaml').load(require('fs').readFileSync('.github/workflows/desktop.yml','utf8'))"` — no error. Commit `ci: a v* tag drafts one release with both programs' installers`.
 
-### Task 8: Docs
+### Task 9: Docs
 
 **Files:**
 - Modify: `docs/electron-plan.md:19-20`, `README.md` (desktop section), and a short "Releasing" note in `docs/` or README: tag `v<version>` → CI drafts → read it → Publish.
@@ -214,17 +235,17 @@ Buttons: update found → `['Download', 'Release notes', 'Later']`; downloaded �
 - [ ] **Step 1:** Write it. Say: what is contacted, when, how to turn it off, `<PREFIX>_NO_UPDATE_CHECK`, `<PREFIX>_UPDATE_FEED` (testing only), SmartScreen warning on unsigned builds, deb asks for the password.
 - [ ] **Step 2:** `npm test` — PASS. Commit `docs: updates and the release step`.
 
-### Task 9: Prove it in the built program (Windows)
+### Task 10: Prove it in the built program (Windows)
 
 No code. Everything in a scratch folder; data via `PHOTO_TOOL_DATA_DIR`, `PHOTO_TOOL_PROFILE_DIR`, `PHOTOINFO_FALLBACK_DIR`.
 
 - [ ] **Step 1:** `npm run dist:photo-tool` at the current version N → install it from `dist/installer/photo-tool/` (per-user).
 - [ ] **Step 2:** Bump to N+1 without committing (`npm version patch --no-git-tag-version`), `npm run dist:photo-tool`, copy `photo-tool.yml` and the installer (under the yml's url name, via `collect-assets.mjs`) into a scratch feed folder; restore the version.
 - [ ] **Step 3:** Serve the feed on `127.0.0.1:<port>` (a 10-line `node:http` static server in the scratchpad). `127.0.0.1` is already excluded from the resolver rules, so no rule change is needed.
-- [ ] **Step 4:** Start the installed Photo Tool with `PHOTO_TOOL_UPDATE_FEED=http://127.0.0.1:<port>/` and the temp data env vars. Check: F1 opens About showing version N and a Check for updates button that runs the check; Help › Check for updates… shows "Photo Tool N+1 is available (you have N)"; Download shows taskbar progress; Restart now closes, installs, restarts; Help › About says N+1; the log shows no request to any other host. Toggle the checkbox, restart, confirm `updates.json` says `"auto": false` and no start check runs (log).
+- [ ] **Step 4:** Start the installed Photo Tool with `PHOTO_TOOL_UPDATE_FEED=http://127.0.0.1:<port>/` and the temp data env vars. Check: F1 opens About showing version N and a Check for updates button that runs the check; F2 opens the new-issue page in the browser with the version filled in; Help › Check for updates… shows "Photo Tool N+1 is available (you have N)"; Download shows taskbar progress; Restart now closes, installs, restarts; Help › About says N+1; the log shows no request to any other host. Toggle the checkbox, restart, confirm `updates.json` says `"auto": false` and no start check runs (log).
 - [ ] **Step 5:** Repeat Step 4's first check with no feed override and no network-blocking: expect "You have the newest version" (no release published yet → 404 → up to date).
 - [ ] **Step 6:** Uninstall the test install. Record results in the PR / hand-over note.
 
 ---
 
-**Self-review notes:** every spec section maps to a task (channels/publish → 1; settings, once-a-day, texts, hosts → 2; dialogs, download, progress, Later → 3; install order, window-all-closed, self-test, env vars, header → 4; descriptions/resolver rules → 5; F1 About with version details and Check for updates → 6; CI draft, repo guard, version check, dotted names → 7; docs → 8; built-program proof → 9). One deviation from the spec, decided here: the .deb fallback (open the release page) happens *before* quitting when `pkexec` is missing, because a failure after quit cannot be shown.
+**Self-review notes:** every spec section maps to a task (channels/publish → 1; settings, once-a-day, texts, hosts → 2; dialogs, download, progress, Later → 3; install order, window-all-closed, self-test, env vars, header → 4; descriptions/resolver rules → 5; F1 About with version details and Check for updates → 6; F2 feedback on GitHub → 7; CI draft, repo guard, version check, dotted names → 8; docs → 9; built-program proof → 10). One deviation from the spec, decided here: the .deb fallback (open the release page) happens *before* quitting when `pkexec` is missing, because a failure after quit cannot be shown.

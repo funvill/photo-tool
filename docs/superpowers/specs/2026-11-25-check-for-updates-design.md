@@ -98,6 +98,9 @@ and lets it run the quit-and-install. `DesktopProgram` gains `updateChannel: str
   version, a line `Version <version> (Electron <x>, <platform> <arch>)`, and a **Check for updates**
   button (only when packaged) that runs the manual check below. The About text no longer says the
   editor never uses the network.
+- **F2 / Help › Send feedback on GitHub…:** opens `https://github.com/funvill/photo-tool/issues/new`
+  in the user's browser, with the title `[<Program> <version>] ` and the program, version and
+  platform filled into the body, nothing else. Leaving feedback needs a GitHub account.
 - **Manual check:** always shows a result: "Photo Tool 0.1.32 is available (you have 0.1.31)",
   "You have the newest version (0.1.31)", or "Could not check for updates: <reason>". From source
   (not packaged) it says updates only work in the installed app.
