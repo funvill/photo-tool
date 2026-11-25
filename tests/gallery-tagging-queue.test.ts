@@ -2,7 +2,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ModelChoice, TagPart } from '../src/core/tagModels';
 import { Catalog, type GalleryPhoto } from '../src/gallery/server/catalog';
 import { downloadModel } from '../src/gallery/server/models/download';
@@ -258,6 +258,33 @@ describe('tagging queue', () => {
     await idle(q);
     expect(q.status().stamp).toBe(before + 2);
   });
+
+  it('a big folder: each photo is looked up in the catalogue about once, not once per photo tagged', async () => {
+    await install(keywordsSmall);
+    const t = testBackend();
+    const q = makeQueue(t.backend);
+    const list = Array.from({ length: 2000 }, (_, i) => photo(`p${i}`, `ck${i}`));
+    for (let i = 0; i < 2000; i += 2) catalog.putTags({ contentKey: `ck${i}`, modelId: keywordsSmall.id, status: 'done', description: null, keywords: [], objects: [], embedding: null, error: null });
+    const keysAsked = { n: 0 };
+    const real = catalog.tagsFor.bind(catalog);
+    const spy = vi.spyOn(catalog, 'tagsFor').mockImplementation((keys, models) => {
+      keysAsked.n += keys.length;
+      return real(keys, models);
+    });
+    let listCalls = 0;
+    q.setSettings(settings({ keywords: keywordsSmall.id }));
+    q.startJob('j1', () => {
+      listCalls++;
+      return list;
+    });
+    for (let i = 0; i < 2000 && q.status().done < 2000; i++) await new Promise((r) => setTimeout(r, 5));
+    await idle(q);
+    spy.mockRestore();
+    expect(t.calls).toHaveLength(1000);
+    expect(q.status()).toMatchObject({ done: 2000, total: 2000 });
+    expect(keysAsked.n).toBeLessThan(2 * 2000);
+    expect(listCalls).toBeGreaterThan(0);
+  }, 30_000);
 
   it('the large describe model is not used when the small one is chosen', async () => {
     await install(describeSmall, describeLarge);

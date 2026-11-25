@@ -96,7 +96,8 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
   // Tagging starts when the open folder's scan is done (not one cancelled because another folder was opened).
   const scanner = new Scanner(catalog, dataDir, {
     onDone: (job) => {
-      if (!job.cancelled && jobIds.at(-1) === job.id) tagging.startJob(job.id, () => job.photos.filter((p) => existsSync(p.path)));
+      // The live list: tag() checks the photo in hand is still on disk, and the items route leaves out deleted ones.
+      if (!job.cancelled && jobIds.at(-1) === job.id) tagging.startJob(job.id, () => job.photos);
     },
   });
   const infoOpts: PhotoInfoOptions = { fallbackDir: opts.photoInfoFallbackDir, ...opts.photoInfoSeams };

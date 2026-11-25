@@ -43,6 +43,10 @@ export class TaggingQueue {
   /** Content keys with a row (done or failed), and the failed ones, per model id. */
   private seen = new Map<string, Set<string>>();
   private failedKeys = new Map<string, Set<string>>();
+  /** Content keys already asked of the catalogue, per model id (with a row or not): asked once. */
+  private looked = new Map<string, Set<string>>();
+  /** Photos before this index in the job's list need nothing more from the current models. */
+  private cursor = 0;
   private stamp = 0;
   private loop: Promise<void> | null = null;
   private stopped = false;
@@ -56,6 +60,7 @@ export class TaggingQueue {
   startJob(jobId: string, photos: () => GalleryPhoto[]): void {
     // The focus the page sent while the scan ran is kept.
     this.job = { id: jobId, photos };
+    this.cursor = 0;
     this.kick();
   }
 
@@ -72,11 +77,13 @@ export class TaggingQueue {
 
   setSettings(s: TaggingSettings): void {
     this.settings = { ...s };
+    this.cursor = 0;
     this.refresh();
   }
 
   /** A photo was added or changed (an edit saved into it): carry on if there is new work. */
   wake(): void {
+    this.cursor = 0;
     this.kick();
   }
 
@@ -148,7 +155,15 @@ export class TaggingQueue {
     for (const m of models) {
       const seen = this.seen.get(m.id) ?? new Set<string>();
       const failed = this.failedKeys.get(m.id) ?? new Set<string>();
-      const unknown = keys.filter((k) => !seen.has(k));
+      const looked = this.looked.get(m.id) ?? new Set<string>();
+      this.looked.set(m.id, looked);
+      const unknown = keys.filter((k) => !looked.has(k));
+      for (const k of unknown) looked.add(k);
+      if (!unknown.length) {
+        this.seen.set(m.id, seen);
+        this.failedKeys.set(m.id, failed);
+        continue;
+      }
       for (const [k, rows] of this.deps.catalog.tagsFor(unknown, [m.id])) {
         seen.add(k);
         if (rows[0]?.status === 'failed') failed.add(k);
@@ -165,7 +180,9 @@ export class TaggingQueue {
       const p = byPath.get(path);
       if (p && todo(p)) return p;
     }
-    return photos.find(todo);
+    // Photos are only appended to (or replaced in place by a refresh, which resets the cursor).
+    while (this.cursor < photos.length && !todo(photos[this.cursor])) this.cursor++;
+    return photos[this.cursor];
   }
 
   private async ensureLoaded(models: ModelChoice[]): Promise<ModelChoice[]> {
@@ -202,7 +219,12 @@ export class TaggingQueue {
 
   private async tag(job: { id: string; photos: () => GalleryPhoto[] }, photo: GalleryPhoto, models: ModelChoice[]): Promise<void> {
     const key = photo.contentKey!;
-    const results: { m: ModelChoice; row: Parameters<Catalog['putTags']>[0] }[] = [];
+    if (!existsSync(photo.path)) {
+      // Deleted since the scan: never picked again in this job.
+      for (const m of models) this.seen.get(m.id)?.add(key);
+      return;
+    }
+    const results:{ m: ModelChoice; row: Parameters<Catalog['putTags']>[0] }[] = [];
     let image: string | null = null;
     try {
       image = await this.deps.imageOf(photo);
