@@ -1,17 +1,17 @@
 // The desktop shell's decisions that need no Electron and are not shared/electron/config.ts's (those
-// are in shared/tests/desktop-config.test.ts): which addresses the window may reach, the temporary
-// `--gallery` switch, Photo Tool's self-test photos, and the packaging.
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+// are in shared/tests/desktop-config.test.ts): which addresses the window may reach, the editor's
+// program, the build scripts and the editor's packaging. Photo Tool's are in
+// photo-tool/tests/photo-tool-shell.test.ts.
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { createRequire } from 'node:module';
-import { GALLERY_APP_ID, GALLERY_PRODUCT_NAME, galleryLaunchCommand, parseMode } from '../electron/config';
-import product from '../electron/product.json';
-import { parseSelfTest, taggingWorkerPath } from '../shared/electron/config';
-import { isAllowedRequest, isAppNavigation, requestHost } from '../shared/electron/netGuard';
+import { hostResolverRules, isAllowedRequest, isAppNavigation, requestHost } from '../shared/electron/netGuard';
 
 const require = createRequire(import.meta.url);
+// Loaded by a computed path: a plain .mjs module with no type declarations.
+const loadPrograms = () => import(/* @vite-ignore */ pathToFileURL(resolve('scripts/desktop/programs.mjs')).href) as Promise<{ PROGRAM_NAMES: string[]; programArg(argv: string[]): string; withoutProgramArg(argv: string[]): string[] }>;
 
 describe('offline filter', () => {
   const app = { ports: new Set([51234]) };
@@ -85,138 +85,73 @@ describe('offline filter', () => {
   });
 });
 
-describe("Photo Tool's self-test photos", () => {
-    it('prepareGalleryPhotos refuses before deleting or copying anything', async () => {
-      const { prepareGalleryPhotos } = await import('../electron/selfTest');
-      const root = mkdtempSync(join(tmpdir(), 'gallery-selftest-'));
-      try {
-        const photos = join(root, 'photos');
-        mkdirSync(photos);
-        writeFileSync(join(photos, 'a.jpg'), 'not really a photo');
-        expect(() => prepareGalleryPhotos(photos, root)).toThrow(/inside --self-test-out/);
-        expect(() => prepareGalleryPhotos(photos, photos)).toThrow(/same folder/);
-        expect(() => prepareGalleryPhotos(photos, join(photos, 'out'))).toThrow(/inside the photos folder/);
-        expect(readdirSync(photos)).toEqual(['a.jpg']);
-        expect(readFileSync(join(photos, 'a.jpg'), 'utf8')).toBe('not really a photo');
-        // Apart, it copies as before.
-        const out = join(root, 'out');
-        const { folder } = prepareGalleryPhotos(photos, out);
-        expect(readdirSync(folder)).toEqual(['a.jpg']);
-      } finally {
-        rmSync(root, { recursive: true, force: true });
-      }
-    });
-});
-
-describe('starting the gallery from the editor', () => {
-  it('runs the installed exe with --gallery on packaged Windows', () => {
-    expect(galleryLaunchCommand({ execPath: 'C:\\Program Files\\Photobook Studio\\Photobook Studio.exe', packaged: true, appPath: 'C:\\Program Files\\Photobook Studio\\resources\\app.asar', env: {} })).toEqual({
-      command: 'C:\\Program Files\\Photobook Studio\\Photobook Studio.exe',
-      args: ['--gallery'],
-    });
-  });
-
-  it('runs electron with the app folder from source', () => {
-    expect(galleryLaunchCommand({ execPath: 'D:\\src\\node_modules\\electron\\dist\\electron.exe', packaged: false, appPath: 'D:\\src', env: {} })).toEqual({
-      command: 'D:\\src\\node_modules\\electron\\dist\\electron.exe',
-      args: ['D:\\src', '--gallery'],
-    });
-  });
-
-  it('runs the AppImage itself, not the binary inside the editor\'s mount', () => {
-    expect(galleryLaunchCommand({ execPath: '/tmp/.mount_PhotobXYZ/photobook-studio', packaged: true, appPath: '/tmp/.mount_PhotobXYZ/resources/app.asar', env: { APPIMAGE: '/home/a/Apps/Photobook-Studio.AppImage' } })).toEqual({
-      command: '/home/a/Apps/Photobook-Studio.AppImage',
-      args: ['--gallery'],
-    });
-  });
-});
-
-describe('gallery mode', () => {
-  it('starts the editor unless --gallery is given', () => {
-    expect(parseMode([])).toEqual({ mode: 'editor', folder: null });
-    expect(parseMode(['app.exe', 'dist/desktop/app'])).toEqual({ mode: 'editor', folder: null });
-  });
-
-  it('--gallery starts the gallery, with the folder after it when there is one', () => {
-    expect(parseMode(['--gallery'])).toEqual({ mode: 'gallery', folder: null });
-    expect(parseMode(['app.exe', '--gallery'])).toEqual({ mode: 'gallery', folder: null });
-    expect(parseMode(['--gallery', 'D:\\Pics'])).toEqual({ mode: 'gallery', folder: 'D:\\Pics' });
-    expect(parseMode(['app.exe', '--gallery', '--no-sandbox'])).toEqual({ mode: 'gallery', folder: null });
-  });
-
-  it('leaves the self-test flags as they were', () => {
-    const argv = ['app.exe', '--self-test', 'photos', '--self-test-out', 'out'];
-    expect(parseMode(argv)).toEqual({ mode: 'editor', folder: null });
-    expect(parseSelfTest(argv)).toEqual({ photos: resolve('photos'), out: resolve('out') });
-    expect(parseMode(['app.exe', '--gallery', 'D:\\Pics', ...argv.slice(1)])).toEqual({ mode: 'gallery', folder: 'D:\\Pics' });
-    expect(parseSelfTest(['app.exe', '--gallery', 'D:\\Pics', ...argv.slice(1)])).toEqual({ photos: resolve('photos'), out: resolve('out') });
-  });
-
-  it('gives the gallery its own taskbar identity, apart from the editor\'s', () => {
-    expect(GALLERY_APP_ID).toBe('app.phototool.desktop');
-    expect(GALLERY_APP_ID).not.toBe(product.appId);
-    expect(readFileSync('electron/main.ts', 'utf8')).toMatch(/appUserModelId: GALLERY_APP_ID/);
-    expect(readFileSync('shared/electron/runDesktopApp.ts', 'utf8')).toMatch(/setAppUserModelId\(program\.appUserModelId\)/);
-  });
-
-  it('runs Photo Tool under its new name and environment prefix, moving its data from the old name', () => {
-    const main = readFileSync('electron/main.ts', 'utf8');
-    expect(GALLERY_PRODUCT_NAME).toBe('Photo Tool');
-    expect(GALLERY_PRODUCT_NAME).not.toBe(product.productName);
-    expect(main).toContain("names: { productName: GALLERY_PRODUCT_NAME, envPrefix: 'PHOTO_TOOL', oldProductName: 'Photobook Gallery' }");
-    expect(main).toContain("names: { productName: 'Photobook Editor', envPrefix: 'PHOTOBOOK', oldProductName: 'Photobook Studio' }");
-    expect(main).not.toContain('PHOTOBOOK_GALLERY_');
-  });
-
-  it('builds the gallery page beside the editor\'s, with the same content security policy except map tiles as images', () => {
-    const csp = (f: string) => /<meta http-equiv="Content-Security-Policy" content="([^"]+)"/.exec(readFileSync(f, 'utf8'))?.[1];
-    const gallery = csp('photo-tool/web/index.html');
-    expect(gallery).toBeTruthy();
-    expect(gallery).toContain("img-src 'self' blob: data: https://tile.openstreetmap.org;");
-    expect(gallery!.replace(' https://tile.openstreetmap.org', '')).toBe(csp('photobook-editor/web/index.html'));
-    // The gallery server's header says the same: the tile server for images, nothing else from outside.
-    const header = /'Content-Security-Policy',\s*"([^"]+)"/.exec(readFileSync('photo-tool/server/app.ts', 'utf8'))?.[1];
-    expect(header).toContain("img-src 'self' blob: data: https://tile.openstreetmap.org;");
-    expect(header!.replace(' https://tile.openstreetmap.org', '')).not.toMatch(/https?:/);
-    expect(readFileSync('photo-tool/vite.config.ts', 'utf8')).toContain('dist/photo-tool/web');
-  });
-
-  it('only the gallery may reach the tile server, and only through the map guard', () => {
+describe('the editor program', () => {
+  it('may reach only its own server and looks up no name', () => {
     const main = readFileSync('electron/main.ts', 'utf8');
     const shell = readFileSync('shared/electron/runDesktopApp.ts', 'utf8');
-    expect(main).toMatch(/requestAllowed: \(url, method, guard\) => galleryRequestAllowed\(/);
     expect(main).toMatch(/requestAllowed: \(url, _method, guard\) => isAllowedRequest\(url, guard\)/);
-    expect(main).toContain('hostResolverRules: hostResolverRules(true)');
-    expect(main).toContain('hostResolverRules: hostResolverRules(false)');
+    expect(main).toContain('hostResolverRules: hostResolverRules()');
+    expect(hostResolverRules()).toBe('MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost');
     expect(shell).toContain('program.requestAllowed(');
     expect(shell).toContain("appendSwitch('host-resolver-rules', program.hostResolverRules)");
     for (const code of [main, shell]) expect(code).not.toContain('MAP * ~NOTFOUND');
   });
 
-  // The built page (dist/photo-tool/web, made by `vite build --config photo-tool/vite.config.ts`; the e2e run and desktop:build make it): Leaflet and
-  // its styles are bundled, so no script, style sheet or font comes from the internet.
-  it.skipIf(!existsSync('dist/photo-tool/web/index.html'))('the built gallery page loads no script or style from the internet', () => {
-    const html = readFileSync('dist/photo-tool/web/index.html', 'utf8');
-    expect(html).not.toMatch(/\b(src|href)=["']?(https?:)?\/\//);
-    const assets = [...html.matchAll(/(?:src|href)="\/?(assets\/[^"]+\.(?:js|css))"/g)].map((m) => m[1]);
-    expect(assets.length).toBeGreaterThan(0);
-    const seen = new Set<string>();
-    const visit = (asset: string) => {
-      if (seen.has(asset)) return;
-      seen.add(asset);
-      const text = readFileSync(join('dist/photo-tool/web', asset), 'utf8');
-      // Style sheets: no @import or url() of a remote file.
-      expect(text, asset).not.toMatch(/@import\s+(url\()?["']?(https?:)?\/\//);
-      expect(text, asset).not.toMatch(/url\(\s*["']?(https?:)?\/\//);
-      // Scripts: no import of a remote module, and no script or style element pointed at one.
-      expect(text, asset).not.toMatch(/\bimport\s*\(?\s*["'`]https?:/);
-      expect(text, asset).not.toMatch(/\bfrom\s*["'`]https?:/);
-      expect(text, asset).not.toMatch(/\.(src|href)\s*=\s*["'`]https?:/);
-      // The only remote address in a template the page fills in is the map tile server's.
-      for (const m of text.matchAll(/["'`](https?:\/\/[^"'`\s]*\{[^"'`\s]*)["'`]/g)) expect(m[1], asset).toMatch(/^https:\/\/tile\.openstreetmap\.org\//);
-      for (const m of text.matchAll(/["'(]\.{0,2}\/?(assets\/[^"')]+\.(?:js|css))["')]/g)) if (existsSync(join('dist/photo-tool/web', m[1]))) visit(m[1]);
-    };
-    assets.forEach(visit);
+  it('runs under its new name, moving its data from the old name, and no longer starts Photo Tool', () => {
+    const main = readFileSync('electron/main.ts', 'utf8');
+    expect(main).toContain("names: { productName: 'Photobook Editor', envPrefix: 'PHOTOBOOK', oldProductName: 'Photobook Studio' }");
+    expect(main).toContain("appUserModelId: 'app.photobookeditor.desktop'");
+    expect(readFileSync('shared/electron/runDesktopApp.ts', 'utf8')).toMatch(/setAppUserModelId\(program\.appUserModelId\)/);
+    for (const f of ['electron/main.ts', 'electron/preload.ts']) {
+      const code = readFileSync(f, 'utf8');
+      for (const gone of [['--', 'gallery'], ['open', 'Gallery'], ['open-', 'gallery'], ['GALLERY_', 'APP_ID']]) expect(code, f).not.toContain(gone.join(''));
+    }
+    expect(existsSync('electron/config.ts')).toBe(false);
+  });
+});
+
+describe('desktop build scripts', () => {
+  it('--program is required and must name one of the two programs', async () => {
+    const { PROGRAM_NAMES, programArg, withoutProgramArg } = await loadPrograms();
+    expect(PROGRAM_NAMES).toEqual(['photo-tool', 'photobook-editor']);
+    expect(programArg(['node', 'build.mjs', '--program', 'photo-tool'])).toBe('photo-tool');
+    expect(programArg(['node', 'build.mjs', '--dev', '--program', 'photobook-editor'])).toBe('photobook-editor');
+    expect(() => programArg(['node', 'build.mjs'])).toThrow(/--program is required/);
+    expect(() => programArg(['node', 'build.mjs', '--program'])).toThrow(/--program is required/);
+    expect(() => programArg(['node', 'build.mjs', '--program', '--dev'])).toThrow(/--program is required/);
+    expect(() => programArg(['node', 'build.mjs', '--program', 'gallery'])).toThrow(/Unknown program "gallery"/);
+    // dev.mjs hands the rest to the app: Photo Tool would otherwise open a folder named after the program.
+    expect(withoutProgramArg(['--program', 'photo-tool', 'D:\\Pics'])).toEqual(['D:\\Pics']);
+  });
+
+  it('every desktop script names its program; the editor keeps its commands until it is packaged apart', () => {
+    const scripts = JSON.parse(readFileSync('package.json', 'utf8')).scripts as Record<string, string>;
+    expect(scripts['desktop:build:photo-tool']).toBe('npm run build:photo-tool && node scripts/desktop/ensure-electron.mjs && node scripts/desktop/build.mjs --program photo-tool');
+    expect(scripts['start:photo-tool']).toBe('electron dist/photo-tool/desktop/app');
+    expect(scripts['dev:desktop:photo-tool']).toBe('node scripts/desktop/dev.mjs --program photo-tool');
+    expect(scripts['dist:photo-tool']).toBe('npm run desktop:build:photo-tool && electron-builder --config photo-tool/electron-builder.config.cjs --publish never');
+    expect(scripts['dist:dir:photo-tool']).toBe('npm run desktop:build:photo-tool && electron-builder --config photo-tool/electron-builder.config.cjs --publish never --dir');
+    expect(scripts['desktop:build']).toContain('build.mjs --program photobook-editor');
+    expect(scripts['dev:desktop']).toContain('dev.mjs --program photobook-editor');
+    expect(scripts['start:desktop']).toBe('electron dist/photobook-editor/desktop/app');
+    // The editor's installer packs what build.mjs makes for it.
+    const path = require.resolve('../electron-builder.config.cjs');
+    delete require.cache[path];
+    const config = require(path);
+    delete require.cache[path];
+    expect(config.directories.app).toBe('dist/photobook-editor/desktop/app');
+  });
+
+  it('build.mjs maps each program to its entry files, externals and tagging worker', () => {
+    const build = readFileSync('scripts/desktop/build.mjs', 'utf8');
+    expect(build).toContain("main: 'photo-tool/electron/main.ts'");
+    expect(build).toContain("main: 'electron/main.ts'");
+    expect(build).toContain("external: ['sharp', '@huggingface/transformers']");
+    expect(build).toContain("external: ['sharp', 'pdfkit', 'fontkit']");
+    expect(build).toContain("taggingWorker: 'photo-tool/server/tagging/worker.ts'");
+    expect(build).toContain('taggingWorker: null');
+    expect(build).not.toContain('gallery.html');
+    expect(readFileSync('scripts/collect-resources.ts', 'utf8')).not.toContain('gallery.html');
   });
 });
 
@@ -227,7 +162,7 @@ describe('desktop packaging', () => {
     const product = JSON.parse(read('electron/product.json'));
     expect(product.productName).toBeTruthy();
     expect(product.appId).toMatch(/^[a-z0-9]+(\.[a-z0-9]+)+$/);
-    for (const f of ['electron-builder.config.cjs', 'electron/main.ts', 'electron/config.ts', 'shared/electron/runDesktopApp.ts', 'shared/electron/config.ts', 'scripts/desktop/build.mjs', 'package.json']) {
+    for (const f of ['electron-builder.config.cjs', 'electron/main.ts', 'shared/electron/runDesktopApp.ts', 'shared/electron/config.ts', 'scripts/desktop/build.mjs', 'package.json']) {
       expect(read(f), f).not.toContain(product.appId);
       // An old name to move data from is not the app's name (product.json may still carry it until T7).
       expect(read(f).replace(/oldProductName: '[^']*'/g, ''), f).not.toContain(`'${product.productName}'`);
@@ -241,11 +176,13 @@ describe('desktop packaging', () => {
     expect(config).toMatch(/publish: null/);
     // sharp and @img (native, with DLLs) are unpacked, with the rest of node_modules.
     expect(config).toMatch(/asarUnpack: \[[^\]]*'node_modules\/\*\*'/);
-    expect(code('electron/main.ts', 'electron/preload.ts', 'electron/server-host.ts', 'electron/gallery-server-host.ts', 'electron/selfTest.ts', 'shared/electron/runDesktopApp.ts', 'shared/electron/serverHost.ts', 'shared/electron/selfTest.ts', 'shared/electron/dataFolders.ts')).not.toMatch(/crashReporter|autoUpdater|electron-updater|update-electron-app/);
+    expect(code('electron/main.ts', 'electron/preload.ts', 'electron/server-host.ts', 'electron/selfTest.ts', 'shared/electron/runDesktopApp.ts', 'shared/electron/serverHost.ts', 'shared/electron/selfTest.ts', 'shared/electron/dataFolders.ts')).not.toMatch(/crashReporter|autoUpdater|electron-updater|update-electron-app/);
     expect(JSON.stringify(JSON.parse(read('package.json')).devDependencies)).not.toMatch(/updater/);
   });
 
+  // Until the editor is packaged apart (Task 7), which drops these shortcuts: they now start the editor.
   it('the Windows installer adds a Photobook Gallery shortcut beside the editor\'s, and removes it on uninstall', () => {
+    const PHOTO_TOOL_APP_ID = 'app.phototool.desktop';
     const nsh = read('electron/installer.nsh');
     const macro = (name: string) => new RegExp(`!macro ${name}\\b([\\s\\S]*?)!macroend`).exec(nsh)?.[1] ?? '';
     const install = macro('customInstall') + macro('addGalleryShortcuts');
@@ -254,31 +191,14 @@ describe('desktop packaging', () => {
       const link = `"${place}\\Photobook Gallery.lnk"`;
       // Same program, started as the gallery, with the app's icon (index 0).
       expect(install).toContain(`CreateShortCut ${link} "$INSTDIR\\\${APP_EXECUTABLE_FILENAME}" "--gallery" "$INSTDIR\\\${APP_EXECUTABLE_FILENAME}" 0`);
-      expect(install).toContain(`WinShell::SetLnkAUMI ${link} "${GALLERY_APP_ID}"`);
+      expect(install).toContain(`WinShell::SetLnkAUMI ${link} "${PHOTO_TOOL_APP_ID}"`);
       expect(uninstall).toContain(`Delete ${link}`);
     }
     expect(macro('customInstall')).toContain('!insertmacro addGalleryShortcuts');
     expect(macro('customUnInstall')).toContain('!insertmacro removeGalleryShortcuts');
-    expect(uninstall).toContain(`WinShell::UninstAppUserModelId "${GALLERY_APP_ID}"`);
+    expect(uninstall).toContain(`WinShell::UninstAppUserModelId "${PHOTO_TOOL_APP_ID}"`);
     // Uninstalling never deletes either program's data.
     expect(nsh).not.toMatch(/\$APPDATA|RMDir \/r/i);
-  });
-
-  it('photo tagging runs from plain files in the installed app: the worker, Transformers.js and onnxruntime are unpacked from app.asar', () => {
-    const path = require.resolve('../electron-builder.config.cjs');
-    delete require.cache[path];
-    const config = require(path);
-    delete require.cache[path];
-    // The worker's requires resolve on the real disk only: Transformers.js, onnxruntime and sharp's own
-    // dependencies (detect-libc, semver) must all be unpacked, so all of node_modules is.
-    for (const p of ['tagging-worker.cjs', 'node_modules/**']) {
-      expect(config.asarUnpack, p).toContain(p);
-    }
-    // The worker thread is started from the unpacked copy; in development there is no app.asar.
-    expect(taggingWorkerPath('C:\\Program Files\\Photobook Studio\\resources\\app.asar')).toBe('C:\\Program Files\\Photobook Studio\\resources\\app.asar.unpacked\\tagging-worker.cjs');
-    expect(taggingWorkerPath('/opt/photobook-studio/resources/app.asar')).toBe('/opt/photobook-studio/resources/app.asar.unpacked/tagging-worker.cjs');
-    expect(taggingWorkerPath('D:\\git\\photobook\\dist\\desktop\\app')).toBe('D:\\git\\photobook\\dist\\desktop\\app\\tagging-worker.cjs');
-    expect(read('electron/gallery-server-host.ts')).toMatch(/workerFile: taggingWorkerPath\(__dirname\)/);
   });
 
   it('the .deb adds a Photobook Gallery launcher to the applications menu', () => {
@@ -307,11 +227,6 @@ describe('desktop packaging', () => {
     const preload = read('electron/preload.ts');
     expect(preload).toMatch(/pathForFile/);
     expect(preload).toContain('webUtils.getPathForFile');
-  });
-
-  it('exposes the gallery edit functions through the preload, each on its own channel', () => {
-    const preload = read('electron/preload.ts');
-    for (const channel of ['get-edit-target', 'set-edit-target', 'save-edit-file', 'save-edit-as', 'unsaved-edits']) expect(preload).toContain(`'gallery:${channel}'`);
   });
 
   it('keeps the page sandboxed', () => {

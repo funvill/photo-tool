@@ -4,8 +4,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { galleryRequestAllowed, hostResolverRules, isMapTileRequest, mapTileRequestHeaders, mapTileUserAgent, OSM_TILE_ORIGIN, readMapConsent, writeMapConsent } from '../electron/mapTiles';
-import { locatedItems, noLocationText, OSM_TILE_URL } from '../photo-tool/core/galleryMap';
+import { galleryRequestAllowed, isMapTileRequest, mapHostResolverRules, mapTileRequestHeaders, mapTileUserAgent, OSM_TILE_ORIGIN, readMapConsent, writeMapConsent } from '../electron/mapTiles';
+import { locatedItems, noLocationText, OSM_TILE_URL } from '../core/galleryMap';
+import { hostResolverRules } from '../../shared/electron/netGuard';
 
 describe('map tile requests', () => {
   it('names the OpenStreetMap tile server', () => {
@@ -72,13 +73,13 @@ describe("the gallery window's request guard", () => {
   });
 
   it('tells the tile server only the program and its version', () => {
-    expect(mapTileUserAgent('0.1.0')).toBe('PhotobookGallery/0.1.0');
+    expect(mapTileUserAgent('0.1.0')).toBe('PhotoTool/0.1.0');
   });
 
   it('sends a tile request with only Accept and the program as User-Agent', () => {
     const chromium = {
       Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/140 Electron/45.4.1 Photobook Gallery/0.1.0',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/140 Electron/45.4.1 Photo Tool/0.1.0',
       'Accept-Language': 'en-CA,en;q=0.9',
       'Accept-Encoding': 'gzip, deflate, br, zstd',
       Referer: 'http://127.0.0.1:51234/',
@@ -93,16 +94,16 @@ describe("the gallery window's request guard", () => {
       'X-Client-Data': 'abc',
       Origin: 'http://127.0.0.1:51234',
     };
-    expect(mapTileRequestHeaders(chromium, '0.1.0')).toEqual({ Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8', 'User-Agent': 'PhotobookGallery/0.1.0' });
+    expect(mapTileRequestHeaders(chromium, '0.1.0')).toEqual({ Accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8', 'User-Agent': 'PhotoTool/0.1.0' });
     // Any spelling of Accept is kept as given; nothing else, even with no Accept at all.
-    expect(mapTileRequestHeaders({ accept: 'image/*', 'sec-ch-ua-arch': 'x86' }, '1.2.3')).toEqual({ accept: 'image/*', 'User-Agent': 'PhotobookGallery/1.2.3' });
-    expect(mapTileRequestHeaders({}, '1.2.3')).toEqual({ 'User-Agent': 'PhotobookGallery/1.2.3' });
+    expect(mapTileRequestHeaders({ accept: 'image/*', 'sec-ch-ua-arch': 'x86' }, '1.2.3')).toEqual({ accept: 'image/*', 'User-Agent': 'PhotoTool/1.2.3' });
+    expect(mapTileRequestHeaders({}, '1.2.3')).toEqual({ 'User-Agent': 'PhotoTool/1.2.3' });
   });
 
   it("looks up no name in the editor; in the gallery only the tile server's", () => {
     const editor = 'MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost';
-    expect(hostResolverRules(false)).toBe(editor);
-    expect(hostResolverRules(true)).toBe(`${editor}, EXCLUDE tile.openstreetmap.org`);
+    expect(hostResolverRules()).toBe(editor);
+    expect(mapHostResolverRules()).toBe(`${editor}, EXCLUDE tile.openstreetmap.org`);
   });
 });
 

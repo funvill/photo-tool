@@ -16,7 +16,6 @@ const api: DesktopApi = {
   pathForFile: (file) => webUtils.getPathForFile(file),
   openFile: (exportFile) => ipcRenderer.invoke('desktop:open-file', String(exportFile)),
   showInFolder: (exportFile) => ipcRenderer.invoke('desktop:show-in-folder', String(exportFile)),
-  openGallery: () => ipcRenderer.invoke('desktop:open-gallery'),
   startDrag: (paths) => ipcRenderer.send('gallery:start-drag', Array.isArray(paths) ? paths.map(String) : []),
   prepareDrag: (paths) => ipcRenderer.send('gallery:prepare-drag', Array.isArray(paths) ? paths.map(String) : []),
   onDragFailed: (cb) => {

@@ -99,7 +99,7 @@ describe('self-test flags', () => {
     expect(parseSelfTest(['app.exe', '--self-test', '--self-test-out', 'out'])).toBeNull();
     expect(parseSelfTest(['app.exe', '--self-test', 'photos', '--self-test-out', 'out'])).toEqual({ photos: resolve('photos'), out: resolve('out') });
     // Other flags around them change nothing.
-    expect(parseSelfTest(['app.exe', '--gallery', 'D:\\Pics', '--self-test', 'photos', '--self-test-out', 'out'])).toEqual({ photos: resolve('photos'), out: resolve('out') });
+    expect(parseSelfTest(['app.exe', '--no-sandbox', 'D:\\Pics', '--self-test', 'photos', '--self-test-out', 'out'])).toEqual({ photos: resolve('photos'), out: resolve('out') });
   });
 
   describe("the photos and output folder must not overlap", () => {

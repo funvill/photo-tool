@@ -1,6 +1,6 @@
 {
   "name": "photobook-studio",
-  "version": "0.1.25",
+  "version": "0.1.26",
   "private": true,
   "type": "module",
   "description": "Local-first photobook editor: import, auto-draft, edit, export print-ready PDF.",
@@ -22,11 +22,16 @@
     "build:pages": "tsc --noEmit && vite build --config photobook-editor/vite.config.ts --mode pages",
     "preview:pages": "vite preview --config photobook-editor/vite.config.ts --mode pages --port 5190 --strictPort",
     "launcher": "bash scripts/make-launcher.sh",
-    "dev:desktop": "node scripts/desktop/dev.mjs",
-    "desktop:build": "npm run build && node scripts/desktop/ensure-electron.mjs && node scripts/desktop/build.mjs",
-    "start:desktop": "electron dist/desktop/app",
+    "dev:desktop": "node scripts/desktop/dev.mjs --program photobook-editor",
+    "desktop:build": "npm run build && node scripts/desktop/ensure-electron.mjs && node scripts/desktop/build.mjs --program photobook-editor",
+    "start:desktop": "electron dist/photobook-editor/desktop/app",
     "dist": "npm run desktop:build && electron-builder --config electron-builder.config.cjs --publish never",
-    "dist:dir": "npm run desktop:build && electron-builder --config electron-builder.config.cjs --publish never --dir"
+    "dist:dir": "npm run desktop:build && electron-builder --config electron-builder.config.cjs --publish never --dir",
+    "dev:desktop:photo-tool": "node scripts/desktop/dev.mjs --program photo-tool",
+    "desktop:build:photo-tool": "npm run build:photo-tool && node scripts/desktop/ensure-electron.mjs && node scripts/desktop/build.mjs --program photo-tool",
+    "start:photo-tool": "electron dist/photo-tool/desktop/app",
+    "dist:photo-tool": "npm run desktop:build:photo-tool && electron-builder --config photo-tool/electron-builder.config.cjs --publish never",
+    "dist:dir:photo-tool": "npm run desktop:build:photo-tool && electron-builder --config photo-tool/electron-builder.config.cjs --publish never --dir"
   },
   "dependencies": {
     "@fontsource/abril-fatface": "^5.3.0",

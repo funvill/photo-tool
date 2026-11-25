@@ -1,11 +1,11 @@
-// The one exception to "the desktop app never uses the network": the gallery's Map tab shows
-// OpenStreetMap tiles, once the user chose "Load maps". Only the gallery window, only GETs of
+// The one exception to "the desktop app never uses the network": Photo Tool's Map tab shows
+// OpenStreetMap tiles, once the user chose "Load maps". Only Photo Tool's window, only GETs of
 // tiles, only while that answer is yes. Pure functions (plus the settings file), so they are
-// unit-tested in tests/gallery-map.test.ts; main.ts wires them in.
+// unit-tested in photo-tool/tests/gallery-map.test.ts; main.ts wires them in.
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { OSM_TILE_ORIGIN } from '../photo-tool/core/galleryMap';
-import { isAllowedRequest, type GuardOptions } from '../shared/electron/netGuard';
+import { OSM_TILE_ORIGIN } from '../core/galleryMap';
+import { hostResolverRules, isAllowedRequest, type GuardOptions } from '../../shared/electron/netGuard';
 
 export { OSM_TILE_ORIGIN };
 
@@ -32,7 +32,7 @@ export function galleryRequestAllowed(url: string, method: string, opts: GuardOp
 
 /** OpenStreetMap's tile policy asks for an agent that names the program; nothing else is sent. */
 export function mapTileUserAgent(version: string): string {
-  return `PhotobookGallery/${version}`;
+  return `PhotoTool/${version}`;
 }
 
 /**
@@ -48,12 +48,11 @@ export function mapTileRequestHeaders(headers: Record<string, string | string[]>
 }
 
 /**
- * Chromium's host-resolver-rules: no name is ever looked up, except (in the gallery only) the tile
- * server's. A tile request still has to pass the guard first, so nothing is looked up before "Load maps".
+ * Photo Tool's host-resolver-rules: no name is ever looked up, except the tile server's. A tile request
+ * still has to pass the guard first, so nothing is looked up before "Load maps".
  */
-export function hostResolverRules(gallery: boolean): string {
-  const rules = 'MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost';
-  return gallery ? `${rules}, EXCLUDE ${TILE_HOST}` : rules;
+export function mapHostResolverRules(): string {
+  return hostResolverRules([TILE_HOST]);
 }
 
 function readSettings(file: string): Record<string, unknown> | null {

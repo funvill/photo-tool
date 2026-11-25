@@ -1,26 +1,29 @@
-// `npm run dev:desktop`: the desktop window onto the Vite dev server (hot reload for the editor),
-// with the API server running inside the app as it does when installed.
+// `npm run dev:desktop` (the editor) and `npm run dev:desktop:photo-tool`: a program's desktop window
+// onto its Vite dev server (hot reload for the page), with its API server running inside the app as it
+// does when installed.
 //
-// Same ports and data folder as `npm run dev` (PHOTOBOOK_WEB_PORT 5173, PHOTOBOOK_PORT 5174,
-// ./data or PHOTOBOOK_DATA_DIR), so run one or the other, not both. Changes under electron/ or
-// photobook-editor/server need this command restarted; changes to the editor reload by themselves.
+//   node scripts/desktop/dev.mjs --program photobook-editor|photo-tool [args for the app]
 //
-// `npm run dev:desktop -- --gallery [folder]` is Photo Tool the same way, on the ports of its own
-// dev server (photo-tool/server/main.ts: PHOTO_TOOL_WEB_PORT 5175, PHOTO_TOOL_PORT 5176) and with
-// its data in ./data/photo-tool (or PHOTO_TOOL_DATA_DIR), so it runs beside the editor's. Both keep
-// stars for read-only folders in ./data/photoinfo-shared (or PHOTOINFO_FALLBACK_DIR). Both programs'
-// data and profile folders are always given (the editor's File > Open Gallery starts Photo Tool with
-// this same environment), so neither ever moves an old data folder under %APPDATA%.
+// Each program uses the ports and data folder of its own `npm run dev:*`, so run one or the other, not
+// both: the editor PHOTOBOOK_WEB_PORT 5173 / PHOTOBOOK_PORT 5174 and ./data/photobook-editor (or
+// PHOTOBOOK_DATA_DIR); Photo Tool PHOTO_TOOL_WEB_PORT 5175 / PHOTO_TOOL_PORT 5176 and ./data/photo-tool
+// (or PHOTO_TOOL_DATA_DIR). Both keep stars for read-only folders in ./data/photoinfo-shared (or
+// PHOTOINFO_FALLBACK_DIR). Both programs' data and profile folders are always given, so neither ever
+// moves an old data folder under %APPDATA%. Changes to a program's electron/ or server/ need this
+// command restarted; changes to its page reload by themselves. Photo Tool opens a folder given after
+// the program name: `npm run dev:desktop:photo-tool -- D:\Pictures`.
 import { execFileSync, spawn } from 'node:child_process';
 import { connect } from 'node:net';
 import { join, resolve } from 'node:path';
 import { ensureElectron } from './ensure-electron.mjs';
+import { programArg, withoutProgramArg } from './programs.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
-const gallery = process.argv.includes('--gallery');
-const prefix = gallery ? 'PHOTO_TOOL' : 'PHOTOBOOK';
-const webPort = Number(process.env[`${prefix}_WEB_PORT`] ?? (gallery ? 5175 : 5173));
-const apiPort = Number(process.env[`${prefix}_PORT`] ?? (gallery ? 5176 : 5174));
+const program = programArg(process.argv);
+const photoTool = program === 'photo-tool';
+const prefix = photoTool ? 'PHOTO_TOOL' : 'PHOTOBOOK';
+const webPort = Number(process.env[`${prefix}_WEB_PORT`] ?? (photoTool ? 5175 : 5173));
+const apiPort = Number(process.env[`${prefix}_PORT`] ?? (photoTool ? 5176 : 5174));
 const env = {
   ...process.env,
   // Vite and the app's server both read these.
@@ -36,9 +39,9 @@ const env = {
 delete env.ELECTRON_RUN_AS_NODE;
 
 const electron = ensureElectron();
-execFileSync(process.execPath, [join(root, 'scripts/desktop/build.mjs'), '--dev'], { cwd: root, stdio: 'inherit' });
+execFileSync(process.execPath, [join(root, 'scripts/desktop/build.mjs'), '--program', program, '--dev'], { cwd: root, stdio: 'inherit' });
 
-const vite = spawn(process.execPath, [join(root, 'node_modules/vite/bin/vite.js'), '--config', join(root, 'photobook-editor/vite.config.ts')], { cwd: root, env, stdio: 'inherit' });
+const vite = spawn(process.execPath, [join(root, 'node_modules/vite/bin/vite.js'), '--config', join(root, program, 'vite.config.ts')], { cwd: root, env, stdio: 'inherit' });
 let app = null;
 const stop = (code) => {
   vite.kill();
@@ -60,5 +63,6 @@ const listening = (port) =>
   });
 for (let i = 0; i < 120 && !(await listening(webPort)); i++) await new Promise((d) => setTimeout(d, 250));
 
-app = spawn(electron, [join(root, 'dist/desktop/dev'), ...process.argv.slice(2)], { cwd: root, env, stdio: 'inherit' });
+// What is left after --program goes to the app (Photo Tool: a folder to open).
+app = spawn(electron, [join(root, 'dist', program, 'desktop', 'dev'), ...withoutProgramArg(process.argv.slice(2))], { cwd: root, env, stdio: 'inherit' });
 app.on('exit', (code) => stop(code ?? 0));

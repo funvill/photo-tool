@@ -8,7 +8,7 @@
 // memory is never given back. Measured with this app on Ubuntu 24.04: importing and exporting
 // 100 photos took the local server to 5.6 GB. Plain Node does not have the problem.
 //
-// The fix, applied to the copy in dist/desktop/app and never to node_modules:
+// The fix, applied to the copy in dist/<program>/desktop/app and never to node_modules:
 //   1. build libsharp-glib-shim.so (sharp-glib-shim.c) next to libvips
 //   2. rename the binding's glib imports g_<name> to q_<name> (same length, so a plain overwrite)
 //   3. make the binding load the shim, which passes q_<name> on to the g_<name> inside libvips

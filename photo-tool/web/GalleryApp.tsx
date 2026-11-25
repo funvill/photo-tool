@@ -28,7 +28,7 @@ const PREVIEW_MIN = 300;
 const HANDLES = 12;
 
 // The gallery window: the start screen (recent folders) until a folder is open, then its photos.
-// A folder can also arrive from outside the page: `--gallery <folder>`, a second launch, File > Open folder.
+// A folder can also arrive from outside the page: a folder given at start, a second launch, File > Open folder.
 export function GalleryApp() {
   const root = useGallery((s) => s.root);
   const tidyOpen = useGallery((s) => s.tidyOpen);

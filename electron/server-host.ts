@@ -1,6 +1,6 @@
 // The editor's local server (photobook-editor/server/app.ts, the same one `npm start` runs) inside an
-// Electron utility process: see shared/electron/serverHost.ts. Photo Tool's (the temporary `--gallery`
-// program) is gallery-server-host.ts, built beside this one.
+// Electron utility process: see shared/electron/serverHost.ts. Photo Tool's is
+// photo-tool/electron/server-host.ts.
 import { join } from 'node:path';
 import { resourceCheck, runServerHost } from '../shared/electron/serverHost';
 

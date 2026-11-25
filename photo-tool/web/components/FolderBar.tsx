@@ -24,21 +24,21 @@ export function FolderBar() {
   const settings = useGallery((s) => s.settingsOpen);
   const root = useGallery((s) => s.root);
   const thumbSize = useGallery((s) => s.thumbSize);
-  // A read-only folder's stars are kept in Photobook Studio's data folder (so the editor still sees them).
+  // A read-only folder's stars are kept in the folder Photo Tool shares with Photobook Editor (so the editor still sees them).
   const elsewhere = useGallery((s) => s.items.some((i) => i.infoSource === 'fallback'));
   return (
     <header className="topbar gallery-bar">
       <div className="row gallery-bar-title">
-        <strong>Photobook Gallery</strong>
+        <strong>Photo Tool</strong>
         <span className="muted gallery-version" title="Version">v{__APP_VERSION__}</span>
         {root && (
-          <span className="muted ellipsis" title={root}>
+          <span className="muted ellipsis gallery-root" title={root}>
             {root}
           </span>
         )}
         {elsewhere && (
-          <span className="badge" title="This folder can't be written to, so stars and notes are kept in Photobook Studio's data folder instead. The editor still sees them.">
-            Read-only folder: stars kept in Photobook Studio
+          <span className="badge" title="This folder can't be written to, so stars and notes are kept in the folder Photo Tool shares with Photobook Editor instead. The editor still sees them.">
+            Read-only folder: stars kept in the shared folder
           </span>
         )}
       </div>

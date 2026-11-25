@@ -47,6 +47,14 @@ export function isAppNavigation(url: string, appOrigin: string): boolean {
   }
 }
 
+/**
+ * Chromium's host-resolver-rules: no name is ever looked up, except the hosts in `lookups` (Photo
+ * Tool's map tile server). The window only ever talks to 127.0.0.1.
+ */
+export function hostResolverRules(lookups: readonly string[] = []): string {
+  return ['MAP * ~NOTFOUND', 'EXCLUDE 127.0.0.1', 'EXCLUDE localhost', ...lookups.map((h) => `EXCLUDE ${h}`)].join(', ');
+}
+
 /** The host a request went to, for the self-test's tally ("127.0.0.1:5174", "data:", "(invalid)"). */
 export function requestHost(url: string): string {
   try {

@@ -1,5 +1,7 @@
 // What the desktop app (Electron) adds to the page as `window.desktop`. It is missing in a plain
 // browser, so every use is feature-detected: `desktop?.pickFolder`. Types only; no code here.
+// Each program's preload implements only its own part (the editor's export functions, Photo Tool's
+// "Gallery window" ones), as a Pick of the keys it must have plus Partial<DesktopApi>.
 
 import type { PhotoEdit } from '../core/photoEdit';
 
@@ -14,8 +16,6 @@ export interface DesktopApi {
   openFile(exportFile: string): Promise<boolean>;
   /** Show an exported file (by its file name) in the system's file manager. False when it is not an export. */
   showInFolder(exportFile: string): Promise<boolean>;
-  /** Editor window: start the gallery program (or bring it forward when it is already running). */
-  openGallery(): Promise<void>;
   /** Gallery window: drag these photo files out of the window, as files, into another program. */
   startDrag(paths: string[]): void;
   /**
@@ -27,7 +27,7 @@ export interface DesktopApi {
   onDragFailed?(cb: (message: string) => void): () => void;
   /**
    * Gallery window: `cb` gets each folder the gallery is asked to open from outside the page
-   * (`--gallery <folder>` at start, or from a second launch). Returns a function that stops listening.
+   * (a folder given on the command line at start, or from a second launch). Returns a function that stops listening.
    */
   onOpenFolder?(cb: (folder: string) => void): () => void;
   /** Gallery window: put text (Copy path) on the clipboard; the page's own clipboard is not allowed in the app. */

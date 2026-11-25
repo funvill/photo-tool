@@ -18,9 +18,9 @@ module.exports = {
   // and the app dies at start ("failed to execvp: /opt/Photobook"). So Linux installs under the
   // package name; what the user sees comes from linux.desktop below and from the app itself.
   productName: linux ? packageName : product.productName,
-  // dist/desktop/app is made by scripts/desktop/build.mjs: three bundles, a small package.json
+  // dist/photobook-editor/desktop/app is made by scripts/desktop/build.mjs --program photobook-editor: the bundles, a small package.json
   // and only the node_modules that have to stay real folders. No source, tests, docs or photos.
-  directories: { app: 'dist/desktop/app', output: 'dist/installer', buildResources: 'dist/desktop' },
+  directories: { app: 'dist/photobook-editor/desktop/app', output: 'dist/installer', buildResources: 'dist/photobook-editor/desktop' },
   // Use the Electron already in node_modules (see scripts/desktop/ensure-electron.mjs).
   electronDist: 'node_modules/electron/dist',
   electronVersion,
@@ -31,11 +31,11 @@ module.exports = {
   // disk only, so every module it reaches must be there: all of node_modules (only the runtime modules build.mjs
   // copies) is unpacked, rather than a list that silently misses one (sharp's detect-libc did).
   asarUnpack: ['node_modules/**', 'tagging-worker.cjs'],
-  // The modules in dist/desktop/app are prebuilt for this platform already.
+  // The modules in the app folder are prebuilt for this platform already.
   npmRebuild: false,
   nodeGypRebuild: false,
   // Fonts, world-atlas and the built editor, read by the server as plain files.
-  extraResources: [{ from: 'dist/desktop/resources', to: 'assets' }],
+  extraResources: [{ from: 'dist/photobook-editor/desktop/resources', to: 'assets' }],
   // The editor is English-only; Chromium's other locale packs are left out.
   electronLanguages: ['en-US'],
   publish: null,
@@ -44,7 +44,7 @@ module.exports = {
     const resources = context.electronPlatformName === 'darwin' ? join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents', 'Resources') : join(context.appOutDir, 'resources');
     rmSync(join(resources, 'default_app.asar'), { force: true });
   },
-  icon: 'dist/desktop/icon.png',
+  icon: 'dist/photobook-editor/desktop/icon.png',
   win: {
     target: [{ target: 'nsis', arch: ['x64'] }],
   },
@@ -79,7 +79,7 @@ module.exports = {
     syncDesktopName: true,
     artifactName: '${name}-${version}-${arch}.${ext}',
     // One PNG per size (made by scripts/desktop/build.mjs); the launcher finds its icon by size.
-    icon: 'dist/desktop/icons',
+    icon: 'dist/photobook-editor/desktop/icons',
   },
   deb: {
     packageCategory: 'graphics',

@@ -1468,7 +1468,7 @@ export const useStackInfo = (): Map<string, StackInfo> => useGallery((s) => sele
 export const useFilteredItems = (): GalleryItem[] => useGallery((s) => selectFiltered(s));
 
 /**
- * Open each folder the desktop app hands the page (`--gallery <folder>`, a second launch, File >
+ * Open each folder the desktop app hands the page (a folder given at start, a second launch, File >
  * Open folder), with the current "Include subfolders" choice, and show a drag that could not start
  * as an error. Returns a function that stops listening.
  */

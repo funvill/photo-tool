@@ -25,8 +25,6 @@ export interface GalleryAppOptions {
   photoInfoFallbackDir: string;
   /** The built gallery to serve at `/` (production). */
   staticDir?: string;
-  /** The page in `staticDir` to send for every address that is not the API. Default `index.html`; the desktop build's shared folder keeps Photo Tool's as `gallery.html`. */
-  staticPage?: string;
   /** Development: where the Vite dev server shows the gallery. */
   devWebUrl?: string;
   /** A packaged app's resource folder (see shared/server/resources.ts). Leave it out when running from source. */
@@ -84,7 +82,7 @@ export interface GalleryInfoReply extends GalleryItem {
 
 /** Scan results kept in memory per server; asking for an older one is a 404. */
 const MAX_JOBS = 4;
-/** The most paths one drag-check looks at (a drag takes at most 500 files, see electron/drag.ts). */
+/** The most paths one drag-check looks at (a drag takes at most 500 files, see photo-tool/electron/drag.ts). */
 const DRAG_MAX = 500;
 /** Rendered edits in `<dataDir>/edits` are removed after this long. */
 const EDIT_FILE_MAX_AGE_MS = 60 * 60 * 1000;
@@ -557,7 +555,7 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
 
   if (opts.staticDir && existsSync(opts.staticDir)) {
     app.use(express.static(opts.staticDir, { index: false }));
-    app.get(/^\/(?!api\/).*/, (_req, res) => res.sendFile(join(opts.staticDir!, opts.staticPage ?? 'index.html')));
+    app.get(/^\/(?!api\/).*/, (_req, res) => res.sendFile(join(opts.staticDir!, 'index.html')));
   } else if (opts.devWebUrl) {
     // Dev mode: this port is only the API; the gallery is served by Vite. Send people there.
     app.get(/^\/(?!api\/).*/, (req, res) => res.redirect(302, opts.devWebUrl + req.originalUrl.slice(1)));

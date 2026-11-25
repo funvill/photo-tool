@@ -1,33 +1,28 @@
-// The gallery program's part of the main process (`--gallery [folder]`): its page, its File menu,
-// handing it folders to open, and starting it from the editor. main.ts runs everything else
-// (the server, hardening, the window) the same way for both programs.
-import { app, clipboard, ClipboardItem, dialog, ipcMain, nativeImage, shell, type BrowserWindow, type IpcMainEvent, type IpcMainInvokeEvent, type MenuItemConstructorOptions, type NativeImage, type WebContents } from 'electron';
-import { spawn } from 'node:child_process';
+// Photo Tool's part of the main process: its File menu, handing its page folders to open, dragging
+// photos out, the right-click file actions, saving edits and the map setting. main.ts wires them into
+// the shared desktop shell (shared/electron/runDesktopApp.ts), which runs the server, the hardening
+// and the window.
+import { clipboard, ClipboardItem, dialog, ipcMain, nativeImage, shell, type BrowserWindow, type IpcMainEvent, type IpcMainInvokeEvent, type MenuItemConstructorOptions, type NativeImage, type WebContents } from 'electron';
 import { statSync } from 'node:fs';
 import { copyFile, rename, rm, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { editFormatFor, type PhotoEdit } from '../shared/core/photoEdit';
-import { galleryLaunchCommand, parseMode } from './config';
+import { editFormatFor, type PhotoEdit } from '../../shared/core/photoEdit';
+import { launchFolder } from '../../shared/electron/config';
 import { dragFiles, dragRequest, preparedDragFor, sameDragList, type DragCheck, type PreparedDrag } from './drag';
 import { copyTextRequest, trashConfirm, trashPhotos, type TrashResult } from './fileActions';
 import { saveAs, saveToFile, shouldQuit, unsavedClosePrompt, type EditSaveAsResult, type EditSaveResult } from './editActions';
 import { readEditTarget, readMapConsent, writeEditTarget, writeMapConsent, type EditTarget } from './mapTiles';
 
-export const GALLERY_DESCRIPTION = 'Look through a folder of photos, star the best ones and drag them into other programs. Uses the network only for map tiles (if you choose Load maps) and to download photo-tagging models you ask for.';
-
-/** The gallery's page on the server (or, in development, the Vite dev server) at `base`. */
-export function galleryPage(base: string): string {
-  return new URL('/gallery.html', base).href;
-}
-
 /** What a second launch hands over (see requestSingleInstanceLock): Chromium may reorder the argv it passes itself. */
 export interface LaunchData {
   argv: string[];
   cwd: string;
+  /** Run as `electron <app folder>`: the app folder is the first argument, not a folder to open. */
+  defaultApp?: boolean;
 }
 
 /**
- * Folders for the page to open: one given at start (`--gallery <folder>`), from a second launch,
+ * Folders for the page to open: one given at start (`Photo Tool <folder>`), from a second launch,
  * or from File > Open folder. Each goes to the page over 'gallery:open-folder' once the page
  * listens (its preload says 'gallery:ready-for-folders'); until then the latest one waits. It waits
  * again once the page stops listening ('gallery:not-ready-for-folders') or reloads.
@@ -60,14 +55,14 @@ export function galleryFolders(o: { window: () => BrowserWindow | null; fromApp:
     watch(w: BrowserWindow) {
       w.webContents.on('did-start-loading', () => (listening = false));
     },
-    /** A second `--gallery <folder>` launch (main.ts has already brought the window forward). */
+    /** A second `Photo Tool <folder>` launch (the shell brings the window forward after this). */
     secondInstance(data: unknown) {
       const d = data as Partial<LaunchData> | null;
       if (!d || !Array.isArray(d.argv)) return;
-      const { folder } = parseMode(d.argv.map(String));
+      const folder = launchFolder(d.argv.map(String), d.defaultApp === true);
       if (folder) open(resolve(typeof d.cwd === 'string' ? d.cwd : process.cwd(), folder));
     },
-    /** The gallery's own File menu items (main.ts adds the data folder and Quit). */
+    /** Photo Tool's own File menu items (the shell adds the data folder and Quit). */
     fileMenu(): MenuItemConstructorOptions[] {
       return [
         {
@@ -551,22 +546,4 @@ export function galleryEditActions(o: { window: () => BrowserWindow | null; from
       return shouldQuit(unsaved.get(w.webContents.id) ?? 0, (n) => dialog.showMessageBoxSync(w, unsavedClosePrompt(n)) === 0);
     },
   };
-}
-
-/**
- * Start the gallery program from the editor: this same executable with `--gallery`, on its own.
- * When the gallery is already running, that copy just brings its window forward and exits.
- */
-export function launchGallery(log: (...a: unknown[]) => void) {
-  const { command, args } = galleryLaunchCommand({ execPath: process.execPath, packaged: app.isPackaged, appPath: app.getAppPath(), env: process.env });
-  const env = { ...process.env };
-  // A development editor's Vite dev server and API port are its own: the gallery must not take them.
-  delete env.PHOTOBOOK_DESKTOP_DEV_URL;
-  delete env.PHOTOBOOK_PORT;
-  delete env.PHOTOBOOK_WEB_PORT;
-  delete env.ELECTRON_RUN_AS_NODE;
-  log('starting the gallery', { command, args });
-  const child = spawn(command, args, { detached: true, stdio: 'ignore', env });
-  child.once('error', (e) => log('could not start the gallery', String(e)));
-  child.unref();
 }

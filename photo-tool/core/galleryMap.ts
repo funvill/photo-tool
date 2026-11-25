@@ -1,7 +1,7 @@
 import type { GalleryItemLike } from './gallerySort';
 
 // The gallery's Map tab, free of any UI: which photos get a marker, and the one address on the
-// internet the gallery may use (only after the user chose "Load maps"; see electron/mapTiles.ts).
+// internet the gallery may use (only after the user chose "Load maps"; see photo-tool/electron/mapTiles.ts).
 
 /** The OpenStreetMap tile server. The gallery window's request guard lets GETs of its tiles through, nothing else. */
 export const OSM_TILE_ORIGIN = 'https://tile.openstreetmap.org';

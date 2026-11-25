@@ -448,13 +448,4 @@ describe('gallery server', () => {
     expect(await res.text()).toBe('<p>gallery</p>');
     expect((await fetch(base + '/api/nope')).status).toBe(404);
   });
-
-  it('serves the staticPage it is told to (the desktop build keeps the page as gallery.html beside the editor index.html)', async () => {
-    const web = join(root, 'web');
-    mkdirSync(web);
-    writeFileSync(join(web, 'index.html'), '<p>editor</p>');
-    writeFileSync(join(web, 'gallery.html'), '<p>gallery</p>');
-    await start({ staticDir: web, staticPage: 'gallery.html' });
-    expect(await (await fetch(base + '/some/route')).text()).toBe('<p>gallery</p>');
-  });
 });

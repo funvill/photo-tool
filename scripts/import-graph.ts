@@ -64,6 +64,38 @@ export function importClosure(entries: string[], root: string): Set<string> {
   return new Set([...seen].map((f) => toPosix(relative(absRoot, f))));
 }
 
+const BARE_PATTERNS = [...CODE_PATTERNS.slice(0, 3), /\brequire\(\s*['"]([^'"]+)['"]\s*\)/g];
+// A style sheet's @import of a package's styles (the fonts: '@fontsource/inter/400.css').
+const CSS_IMPORT = /@import\s+(?:url\(\s*)?['"]([^'"]+)['"]/g;
+
+/** The npm package a bare specifier names ('react-dom/client' → 'react-dom', '@a/b/c' → '@a/b'), or null for a relative path or a Node built-in. */
+function packageOf(spec: string): string | null {
+  if (spec.startsWith('.') || spec.startsWith('/') || spec.startsWith('node:') || /^[a-z]:/i.test(spec)) return null;
+  const parts = spec.split('/');
+  return spec.startsWith('@') ? (parts.length > 1 ? `${parts[0]}/${parts[1]}` : null) : parts[0]!;
+}
+
+/**
+ * The npm packages the code reached from `entries` imports by name (`import 'x'`, `import('x')`,
+ * `require('x')`, a style sheet's `@import 'x/…'`), type-only imports included: what a bundle of
+ * those entries can carry.
+ */
+export function packageImports(entries: string[], root: string): Set<string> {
+  const found = new Set<string>();
+  for (const rel of importClosure(entries, root)) {
+    const css = rel.endsWith('.css');
+    if (!css && !/\.(?:ts|tsx|mts|cts|js|mjs|cjs)$/.test(rel)) continue;
+    const text = readFileSync(resolve(root, rel), 'utf8');
+    for (const pattern of css ? [CSS_IMPORT] : BARE_PATTERNS) {
+      for (const m of text.matchAll(pattern)) {
+        const name = packageOf(m[1].replace(/[?#].*$/, ''));
+        if (name) found.add(name);
+      }
+    }
+  }
+  return found;
+}
+
 function walk(dir: string, out: string[]): void {
   if (!existsSync(dir)) return;
   for (const name of readdirSync(dir)) {

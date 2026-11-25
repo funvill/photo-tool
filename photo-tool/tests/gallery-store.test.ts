@@ -1,6 +1,6 @@
 // The gallery's store, against a fake server: a star the server refuses is shown as an error and not
 // applied, photo info changed by another program is reloaded once, and a folder the desktop app
-// hands over (`--gallery <folder>`, a second launch, File > Open folder) is opened.
+// hands over (a folder given at start, a second launch, File > Open folder) is opened.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GalleryItem } from '../server/app';
 

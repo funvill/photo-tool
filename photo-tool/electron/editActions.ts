@@ -4,7 +4,7 @@
 // touches the original. Only photos of the open folder; a failure is reported, never retried another way.
 import { posix, win32 } from 'node:path';
 import type { MessageBoxOptions } from 'electron';
-import { editFormatFor, type EditFormat, type PhotoEdit } from '../shared/core/photoEdit';
+import { editFormatFor, type EditFormat, type PhotoEdit } from '../../shared/core/photoEdit';
 
 export interface EditSaveResult {
   ok: boolean;

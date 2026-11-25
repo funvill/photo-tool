@@ -7,7 +7,7 @@ import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { dragFiles, dragRequest, MAX_DRAG_FILES, PREPARED_DRAG_MS, preparedDragFor, type PreparedDrag } from '../electron/drag';
-import { createGalleryApp } from '../photo-tool/server/app';
+import { createGalleryApp } from '../server/app';
 
 describe('dragFiles', () => {
   const catalogued = (p: string) => p !== 'C:\\x\\unknown.jpg';

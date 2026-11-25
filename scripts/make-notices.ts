@@ -12,7 +12,8 @@
 //   scripts/notices/<name>.txt        (for a package: its name with "/" written as "+")
 // and it is used from then on. The names this script asks for are printed in its output.
 //
-// What counts as shipped: the production dependencies in package.json, everything they depend
+// What counts as shipped: the run-time modules of the program being built (collect-resources passes
+// them; without them, every production dependency in package.json), everything they depend
 // on, and the optional packages npm installed for this platform (sharp's binaries) or that
 // happen to be installed (optional peers), which is a little more than the build really packs. Plus two things that are not npm dependencies of the
 // app: the Electron runtime, and the libraries compiled into the three binary engines (libvips
@@ -46,7 +47,9 @@ interface Pkg {
 
 // In the production tree but not in the app: pdfjs-dist's optional canvas for Node. The app uses
 // pdfjs only in the browser build of the editor (photobook-editor/web/backend/browser/raster.ts).
-const NOT_SHIPPED = /^@napi-rs\/canvas(-|$)/;
+// Nor onnxruntime-web: Transformers.js carries its own copy of the web runtime inside its Node build, and
+// scripts/desktop/build.mjs leaves the package out (NOT_NEEDED there).
+const NOT_SHIPPED = /^(@napi-rs\/canvas(-|$)|onnxruntime-web$)/;
 
 const RULE = '='.repeat(78);
 const THIN = '-'.repeat(78);
@@ -70,9 +73,20 @@ export function licenceFiles(dir: string): string[] {
     .map((f) => join(dir, f));
 }
 
-export function makeNotices(root = projectRoot() ?? process.cwd()): Notices {
+/**
+ * What one installer carries, for its notices: `modules`, the npm packages the program ships (its
+ * run-time modules: what its bundles import and the packages its resource files come from; each is
+ * listed with everything it depends on), and `productName`, the program's name for the heading.
+ * Left out, every production dependency in package.json and the editor's name (today's single build).
+ */
+export interface NoticesFor {
+  modules?: readonly string[];
+  productName?: string;
+}
+
+export function makeNotices(root = projectRoot() ?? process.cwd(), program: NoticesFor = {}): Notices {
   const pkg = readJson<Pkg>(join(root, 'package.json'));
-  const product = readJson<{ productName: string }>(join(root, 'electron', 'product.json'));
+  const product = { productName: program.productName ?? readJson<{ productName: string }>(join(root, 'electron', 'product.json')).productName };
   const modules = join(root, 'node_modules');
   const extras = join(root, 'scripts', 'notices');
   const missing: string[] = [];
@@ -111,9 +125,10 @@ export function makeNotices(root = projectRoot() ?? process.cwd()): Notices {
     // load it (debug and supports-color).
     for (const [dep, meta] of Object.entries(p.peerDependenciesMeta ?? {})) if (meta?.optional) visit(dep, dir, true);
   };
-  for (const name of Object.keys(pkg.dependencies ?? {})) visit(name, root, false);
+  const shipped = program.modules ?? Object.keys(pkg.dependencies ?? {});
+  for (const name of shipped) visit(name, root, false);
   // Any sharp binary that is installed may be packed (the Linux build can swap in the WebAssembly one).
-  if (existsSync(join(modules, '@img'))) for (const name of readdirSync(join(modules, '@img'))) visit(`@img/${name}`, root, true);
+  if (shipped.includes('sharp') && existsSync(join(modules, '@img'))) for (const name of readdirSync(join(modules, '@img'))) visit(`@img/${name}`, root, true);
 
   const all = [...found].map(([dir, p]) => ({ dir, p })).sort((a, b) => a.p.name.localeCompare(b.p.name) || a.p.version.localeCompare(b.p.version));
   const unique = all.filter((x, i) => i === 0 || x.p.name !== all[i - 1]!.p.name || x.p.version !== all[i - 1]!.p.version);
