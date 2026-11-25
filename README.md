@@ -95,7 +95,7 @@ Drop photos from Explorer or Finder onto a frame (replaces it), onto empty space
 
 ## Photobook Gallery
 
-A second program in the desktop app, for looking through a folder of photos and starring the best ones. It is installed with the editor and runs beside it. It never changes, renames or moves a photo unless you ask: **Delete** sends a photo to the Recycle Bin, and editing (below) can, if you choose to save into the photo file, replace a photo with its edited version after sending the original to the Recycle Bin. It uses the network only for OpenStreetMap map tiles, and only after you choose **Load maps** on the Map tab; the editor never uses the network. Windows and Linux only; there is no web version.
+A second program in the desktop app, for looking through a folder of photos and starring the best ones. It is installed with the editor and runs beside it. It never changes, renames or moves a photo unless you ask: **Delete** sends a photo to the Recycle Bin, and editing (below) can, if you choose to save into the photo file, replace a photo with its edited version after sending the original to the Recycle Bin. It uses the network only for OpenStreetMap map tiles, and only after you choose **Load maps** on the Map tab, and to download photo-tagging models from Hugging Face when you ask for one in Settings (see Photo tagging); the editor never uses the network. Windows and Linux only; there is no web version.
 
 **Starting it.** On Windows the installer adds **Photobook Gallery** to the Start menu and the desktop. On Linux the `.deb` adds it to the applications menu. In the editor, **File → Open Gallery** starts it. From a command line, run the app with `--gallery`, or `--gallery <folder>` to open that folder straight away.
 

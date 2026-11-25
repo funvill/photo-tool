@@ -273,7 +273,12 @@ describe('architecture boundaries', () => {
       // Comments may cite documentation; code may not contain remote URLs.
       const src = readFileSync(f, 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
       const urls = src.match(/https?:\/\/[^\s'"`);]+/g) ?? [];
-      const allowed = (u: string) => /^https?:\/\/(127\.0\.0\.1|localhost)/.test(u) || (tileFiles.has(join(f)) && /^https:\/\/tile\.openstreetmap\.org(\/\{z\}\/\{x\}\/\{y\}\.png)?$/.test(u));
+      // The second: photo-tagging models the person asks for in Settings, downloaded by the gallery server
+      // from Hugging Face, the address written down once (gallery/server/models/download.ts).
+      const allowed = (u: string) =>
+        /^https?:\/\/(127\.0\.0\.1|localhost)/.test(u) ||
+        (tileFiles.has(join(f)) && /^https:\/\/tile\.openstreetmap\.org(\/\{z\}\/\{x\}\/\{y\}\.png)?$/.test(u)) ||
+        (join(f) === join('src/gallery/server/models/download.ts') && u === 'https://huggingface.co/${m.repo}/resolve/${m.revision}/${f.path}');
       expect(urls.filter((u) => !allowed(u)), f).toEqual([]);
     }
   });

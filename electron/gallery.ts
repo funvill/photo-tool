@@ -13,7 +13,7 @@ import { copyTextRequest, trashConfirm, trashPhotos, type TrashResult } from './
 import { saveAs, saveToFile, shouldQuit, unsavedClosePrompt, type EditSaveAsResult, type EditSaveResult } from './editActions';
 import { readEditTarget, readMapConsent, writeEditTarget, writeMapConsent, type EditTarget } from './mapTiles';
 
-export const GALLERY_DESCRIPTION = 'Look through a folder of photos, star the best ones and drag them into other programs. Uses the network only for map tiles, and only if you choose Load maps.';
+export const GALLERY_DESCRIPTION = 'Look through a folder of photos, star the best ones and drag them into other programs. Uses the network only for map tiles (if you choose Load maps) and to download photo-tagging models you ask for.';
 
 /** The gallery's page on the server (or, in development, the Vite dev server) at `base`. */
 export function galleryPage(base: string): string {

@@ -10,8 +10,8 @@ const { IDENTITY_EDIT } = await import('../src/core/photoEdit');
 function item(over: Partial<GalleryItem> = {}): GalleryItem {
   return {
     path: 'D:\\Trip\\a.jpg', folder: 'D:\\Trip', fileName: 'a.jpg', relDir: '', size: 1000, mtimeMs: 1, width: 400, height: 300,
-    format: 'jpeg', capturedAt: null, gpsLat: null, gpsLon: null, camera: null, exif: null, analysis: null, key: 'k1',
-    info: {}, infoSource: 'folder', effectiveDate: null, effectiveLat: null, effectiveLon: null, ...over,
+    format: 'jpeg', capturedAt: null, gpsLat: null, gpsLon: null, camera: null, exif: null, analysis: null, key: 'k1', contentKey: null,
+    info: {}, tags: { state: 'off', description: null, keywords: [], objects: [] }, infoSource: 'folder', effectiveDate: null, effectiveLat: null, effectiveLon: null, ...over,
   };
 }
 

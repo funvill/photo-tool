@@ -15,9 +15,9 @@ function item(i: number, dHash: string): GalleryItem {
   const at = new Date(Date.UTC(2026, 0, 1) + i * 20_000).toISOString().slice(0, 19);
   return {
     path: `D:\\Trip\\p${i}.jpg`, folder: 'D:\\Trip', fileName: `p${i}.jpg`, relDir: '', size: 1000 + i, mtimeMs: 1, width: 4000, height: 3000,
-    format: 'jpeg', capturedAt: at, gpsLat: null, gpsLon: null, camera: null, exif: null, key: `k${i}`,
+    format: 'jpeg', capturedAt: at, gpsLat: null, gpsLon: null, camera: null, exif: null, key: `k${i}`, contentKey: null,
     analysis: { sharpness: 50 + rand() * 100, meanLuma: 0.3 + rand() * 0.4, clippedShadows: 0, clippedHighlights: 0, dHash, saliencyX: 0.5, saliencyY: 0.5 },
-    info: {}, infoSource: 'folder', effectiveDate: at, effectiveLat: null, effectiveLon: null,
+    info: {}, tags: { state: 'off', description: null, keywords: [], objects: [] }, infoSource: 'folder', effectiveDate: at, effectiveLat: null, effectiveLon: null,
   };
 }
 

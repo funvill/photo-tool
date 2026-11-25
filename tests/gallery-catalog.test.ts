@@ -60,7 +60,7 @@ describe('catalog exif column', () => {
   });
 
   it('put and get round-trip exif', () => {
-    const photo = { path: '/p/b.jpg', folder: '/p', fileName: 'b.jpg', relDir: '', size: 1, mtimeMs: 2, width: 3, height: 4, format: 'jpeg', capturedAt: null, gpsLat: null, gpsLon: null, camera: null, analysis: null, key: 'kb' };
+    const photo = { path: '/p/b.jpg', folder: '/p', fileName: 'b.jpg', relDir: '', size: 1, mtimeMs: 2, width: 3, height: 4, format: 'jpeg', capturedAt: null, gpsLat: null, gpsLon: null, camera: null, analysis: null, key: 'kb', contentKey: null };
     catalog.put({ ...photo, exif: { iso: 100, flash: false, exposureBias: 0 } });
     expect(catalog.get('/p/b.jpg')?.exif).toEqual({ iso: 100, flash: false, exposureBias: 0 });
     catalog.put({ ...photo, path: '/p/c.jpg', key: 'kc', exif: null });

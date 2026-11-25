@@ -11,6 +11,10 @@ import { listPlaces, suggestPlaces } from '../../server/places';
 import { setResourceRoot } from '../../server/resources';
 import { Catalog, type GalleryPhoto } from './catalog';
 import { GalleryFolderError, Scanner } from './scanner';
+import type { ModelChoice } from '../../core/tagModels';
+import { modelRoutes } from './models/routes';
+import { readTaggingSettings } from './models/store';
+import type { TaggerBackend } from './tagging/backend';
 
 // The gallery's HTTP API. Bound to 127.0.0.1 by main.ts (or the desktop shell) — never reachable from the network.
 
@@ -25,10 +29,25 @@ export interface GalleryAppOptions {
   resourceRoot?: string;
   /** Replaces how photoinfo.json is written or renamed. A seam for tests (a read-only or busy folder). */
   photoInfoSeams?: Pick<PhotoInfoOptions, 'writeFile' | 'rename'>;
+  /** Seams for photo tagging: model downloads, the model list and what runs the models. For tests and the e2e server. */
+  tagging?: { fetch?: typeof fetch; catalogue?: readonly ModelChoice[]; backend?: TaggerBackend };
 }
+
+/** What the computer found in a photo, from the models chosen in Settings (no embedding, at most 12 keywords). */
+export interface PhotoTags {
+  /** off: no model chosen; waiting: not looked at yet by every chosen model; failed: a chosen model couldn't look at it. */
+  state: 'off' | 'waiting' | 'done' | 'failed';
+  description: string | null;
+  keywords: string[];
+  objects: { label: string; count: number }[];
+}
+
+/** The most keywords a photo shows. */
+export const MAX_KEYWORDS = 12;
 
 export interface GalleryItem extends GalleryPhoto {
   info: PhotoInfo;
+  tags: PhotoTags;
   infoSource: 'folder' | 'fallback' | 'none';
   infoError?: string;
   /** The photo's date with a photoinfo override applied, else the EXIF date. */
@@ -97,9 +116,32 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     return job;
   };
 
+  /** Each photo's tags from the models chosen now, looked up in one go. */
+  const tagsOf = (photos: GalleryPhoto[]): ((p: GalleryPhoto) => PhotoTags) => {
+    const s = readTaggingSettings(dataDir);
+    const chosen = [s.describe, s.keywords].filter((m): m is string => !!m);
+    if (!chosen.length) return () => ({ state: 'off', description: null, keywords: [], objects: [] });
+    const rows = catalog.tagsFor(photos.map((p) => p.contentKey).filter((k): k is string => !!k), chosen);
+    return (p) => {
+      const mine = (p.contentKey && rows.get(p.contentKey)) || [];
+      const of = (id: string | null) => (id ? mine.find((r) => r.modelId === id) : undefined);
+      const d = of(s.describe);
+      const k = of(s.keywords);
+      const got = chosen.map((id) => of(id));
+      const state = got.some((r) => !r) ? 'waiting' : got.some((r) => r!.status === 'failed') ? 'failed' : 'done';
+      return {
+        state,
+        description: d?.status === 'done' ? d.description : null,
+        keywords: k?.status === 'done' ? [...k.keywords].sort((a, b) => b.score - a.score).slice(0, MAX_KEYWORDS).map((w) => w.label) : [],
+        objects: d?.status === 'done' ? d.objects : [],
+      };
+    };
+  };
+
   // Each photo folder is read once per call, not once per photo.
   const itemsFor = (photos: GalleryPhoto[]): GalleryItem[] => {
     const folders = new Map<string, FolderInfo>();
+    const tags = tagsOf(photos);
     return photos.map((p) => {
       const dir = dirname(p.path);
       let folderInfo = folders.get(dir);
@@ -110,6 +152,7 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
       const item: GalleryItem = {
         ...p,
         info,
+        tags: tags(p),
         infoSource: folderInfo.source,
         effectiveDate: typeof info.date === 'string' ? info.date : p.capturedAt,
         effectiveLat: hasLoc ? loc!.lat : p.gpsLat,
@@ -406,6 +449,8 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     }
   }));
 
+  const models = modelRoutes(app, dataDir, { fetch: opts.tagging?.fetch, catalogue: opts.tagging?.catalogue });
+
   app.get('/api/places', (_req, res) => res.json(listPlaces()));
   app.post('/api/places/suggest', wrap((req, res) => {
     const pts = Array.isArray(req.body?.points) ? (req.body.points as unknown[]).filter((p): p is [number, number] => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === 'number' && Number.isFinite(n))) : [];
@@ -429,5 +474,11 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     res.status(status).json({ error: message });
   });
 
-  return { app, close: () => catalog.close() };
+  return {
+    app,
+    close: () => {
+      models.stop();
+      catalog.close();
+    },
+  };
 }

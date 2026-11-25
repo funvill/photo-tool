@@ -1,4 +1,5 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import sharp from 'sharp';
 import { statSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { basename, dirname, extname, isAbsolute, relative, resolve } from 'node:path';
@@ -32,6 +33,15 @@ interface ScannerOptions {
   analyze?: (workPath: string) => Promise<PhotoAnalysis>;
   /** How folders are listed. A seam for tests (a subfolder that can't be read). */
   readdir?: ReadDir;
+}
+
+/**
+ * A photo's content key: sha1 of the raw RGB pixels of its 1600 px thumbnail (the working picture, upright).
+ * A rename, a move or a metadata-only rewrite gives the same thumbnail and so the same key.
+ */
+export async function contentKeyOf(thumbPath: string): Promise<string> {
+  const pixels = await sharp(thumbPath).removeAlpha().raw().toBuffer();
+  return createHash('sha1').update(pixels).digest('hex');
 }
 
 /** The photo's subfolder of `root`, with '/' between names ('' when it is in `root` itself). */
@@ -180,6 +190,14 @@ export class Scanner {
       // A row cached before exif was read: read just that, leaving thumbnails and analysis alone. A file
       // that can't be read just now keeps its row as it was (exif still missing: tried again next time).
       let upgraded = false;
+      if (!photo.contentKey) {
+        try {
+          photo.contentKey = await contentKeyOf(this.catalog.thumbPath(hit.key, 'm'));
+          upgraded = true;
+        } catch {
+          // An unreadable thumbnail: tried again next time.
+        }
+      }
       if (!photo.exif) {
         const meta = await readMetadata(path);
         if (meta.read) {
@@ -202,6 +220,7 @@ export class Scanner {
       path, folder: job.root, fileName: basename(path), relDir, size: st.size, mtimeMs: st.mtimeMs,
       width: dims.width, height: dims.height, format: isHeic ? 'heif' : dims.format, capturedAt: meta.capturedAt, gpsLat: meta.gpsLat,
       gpsLon: meta.gpsLon, camera: meta.camera, exif: meta.exif, analysis, key,
+      contentKey: await contentKeyOf(this.catalog.thumbPath(key, 'm')),
     };
     this.catalog.put(photo);
     return photo;

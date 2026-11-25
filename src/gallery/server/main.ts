@@ -12,8 +12,12 @@ const editorDataDir = resolve(process.env.PHOTOBOOK_DATA_DIR ?? join(root, 'data
 const port = Number(process.env.PHOTOBOOK_GALLERY_PORT ?? 5176);
 const webPort = Number(process.env.PHOTOBOOK_GALLERY_WEB_PORT ?? 5175);
 
+// End-to-end tests only: fake tagging models served from memory, never the network.
+const fake = process.env.PHOTOBOOK_GALLERY_FAKE_TAGGING === '1' ? await import('../../../tests/support/fakeTagging') : null;
+
 const { app, close } = createGalleryApp(dataDir, {
   photoInfoFallbackDir: join(editorDataDir, 'photoinfo'),
+  ...(fake ? { tagging: { fetch: fake.fakeFetch({ chunkDelayMs: 3 }), catalogue: fake.FAKE_CATALOGUE } } : {}),
   ...(production ? { staticDir: webDir() } : { devWebUrl: `http://127.0.0.1:${webPort}/gallery.html` }),
 });
 
