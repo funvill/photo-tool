@@ -1,6 +1,6 @@
 // Folder rules for the program split. Each later task adds a rule here.
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { pathToFileURL } from 'node:url';
@@ -60,17 +60,23 @@ describe('electron/', () => {
   });
 });
 
-describe('src', () => {
-  it('is empty', () => {
-    const files: string[] = [];
-    const walk = (dir: string) => {
-      if (!existsSync(dir)) return;
-      for (const entry of readdirSync(dir, { withFileTypes: true })) {
-        if (entry.isDirectory()) walk(resolve(dir, entry.name));
-        else files.push(resolve(dir, entry.name));
-      }
-    };
-    walk(resolve(root, 'src'));
-    expect(files).toEqual([]);
+describe('src/', () => {
+  it('is gone: every file moved to photo-tool/, photobook-editor/ or shared/', () => {
+    expect(existsSync(resolve(root, 'src'))).toBe(false);
+  });
+});
+
+describe('the final rules', () => {
+  // scripts/ (and the root tests/) have no rule: build and test tooling may import any folder.
+  const rules = [
+    { from: 'shared', mayImport: [] },
+    { from: 'photo-tool', mayImport: ['shared'] },
+    { from: 'photobook-editor', mayImport: ['shared'] },
+  ];
+
+  it('hold together, with each program folder present', async () => {
+    for (const { from } of rules) expect(existsSync(resolve(root, from))).toBe(true);
+    const { crossings } = await loadGraph();
+    expect(crossings(root, rules)).toEqual([]);
   });
 });
