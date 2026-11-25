@@ -85,6 +85,7 @@ export const galleryApi = {
   setTaggingSettings: (s: TaggingSettings) => call<TaggingSettings>('PUT', '/api/gallery/tagging/settings', s),
   taggingStatus: () => call<TaggingStatus>('GET', '/api/gallery/tagging/status'),
   taggingFocus: (job: string, paths: string[]) => call<void>('POST', '/api/gallery/tagging/focus', { job, paths }),
+  search: (job: string, q: string) => call<{ paths: string[] }>('GET', `/api/gallery/search?job=${encodeURIComponent(job)}&q=${encodeURIComponent(q)}`),
 };
 
 /** 's' is 400 px (the grid), 'm' is 1600 px (the hover preview). */

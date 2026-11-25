@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GalleryItem } from '../src/gallery/server/app';
 
-const { useGallery, connectDesktop, guardUnload, selectVisible, selectStackInfo, selectFiltered, selectFacts, selectStackPlace, menuTargets, shownEdit } = await import('../src/gallery/web/store');
+const { useGallery, connectDesktop, guardUnload, selectVisible, selectStackInfo, selectFiltered, selectFacts, selectStackPlace, menuTargets, shownEdit, selectMeaningStart } = await import('../src/gallery/web/store');
 const { IDENTITY_EDIT } = await import('../src/core/photoEdit');
 
 function item(over: Partial<GalleryItem> = {}): GalleryItem {
@@ -1618,5 +1618,65 @@ describe('gallery store: photo tagging', () => {
     const after = calls.filter((c) => c.method === 'POST' && c.url === '/api/gallery/tagging/focus');
     expect(after.length).toBe(before + 1);
     expect(after.at(-1)?.body).toEqual({ job: 'j1', paths: ['D:\\Trip\\a.jpg', 'D:\\Trip\\b.jpg'] });
+  });
+});
+
+describe('gallery store: search by meaning', () => {
+  const on = { state: 'done' as const, description: null, keywords: [], objects: [] };
+  const photo = (n: string, over: Partial<GalleryItem> = {}) => item({ path: `D:/Trip/${n}.jpg`, fileName: `${n}.jpg`, key: `k-${n}`, tags: on, ...over });
+
+  it('meaning matches follow the word matches, without repeats; a stale reply is dropped', async () => {
+    vi.useFakeTimers();
+    const replies = new Map<string, { paths: string[]; delay: number }>([
+      ['harbour', { paths: ['D:/Trip/c.jpg', 'D:/Trip/a.jpg', 'D:/Trip/d.jpg'], delay: 0 }],
+      ['harb', { paths: ['D:/Trip/d.jpg'], delay: 2000 }],
+      ['harbor', { paths: ['D:/Trip/b.jpg'], delay: 0 }],
+    ]);
+    routes['GET /api/gallery/search'] = () => ({ json: {} });
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      calls.push({ method: 'GET', url, body: undefined });
+      const q = new URL(url, 'http://x').searchParams.get('q')!;
+      const r = replies.get(q)!;
+      await new Promise((res) => setTimeout(res, r.delay));
+      return new Response(JSON.stringify({ paths: r.paths }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }));
+    useGallery.setState({ job: 'j1', root: 'D:/Trip', items: [photo('a', { info: { notes: 'harbour walk' } }), photo('b'), photo('c'), photo('d')], filter: {}, stacked: false });
+    const shown = () => selectVisible(useGallery.getState()).map((i) => i.fileName);
+
+    useGallery.getState().setFilter({ text: 'harbour' });
+    expect(shown()).toEqual(['a.jpg']);
+    expect(selectMeaningStart(useGallery.getState())).toBeNull();
+    await vi.advanceTimersByTimeAsync(350);
+    // a matched the words already: not repeated; c and d follow in the order of meaning.
+    expect(shown()).toEqual(['a.jpg', 'c.jpg', 'd.jpg']);
+    expect(selectMeaningStart(useGallery.getState())).toBe(1);
+
+    // "harb" is slow, "harbor" answers first: harb's late reply must not replace it.
+    useGallery.getState().setFilter({ text: 'harb' });
+    await vi.advanceTimersByTimeAsync(350);
+    useGallery.getState().setFilter({ text: 'harbor' });
+    await vi.advanceTimersByTimeAsync(350);
+    expect(shown()).toEqual(['b.jpg']);
+    await vi.advanceTimersByTimeAsync(2500);
+    expect(useGallery.getState().meaning).toEqual({ q: 'harbor', paths: ['D:/Trip/b.jpg'] });
+    expect(shown()).toEqual(['b.jpg']);
+    expect(selectMeaningStart(useGallery.getState())).toBe(0);
+
+    // Cleared: nothing by meaning, and no search for under 3 letters.
+    const asked = calls.filter((c) => c.url.startsWith('/api/gallery/search')).length;
+    useGallery.getState().setFilter({ text: 'ha' });
+    await vi.advanceTimersByTimeAsync(350);
+    expect(calls.filter((c) => c.url.startsWith('/api/gallery/search')).length).toBe(asked);
+    expect(selectMeaningStart(useGallery.getState())).toBeNull();
+    useGallery.getState().clearFilter();
+  });
+
+  it('does not search by meaning while tagging is off', async () => {
+    vi.useFakeTimers();
+    useGallery.setState({ job: 'j1', root: 'D:/Trip', items: [item()], filter: {} });
+    useGallery.getState().setFilter({ text: 'harbour' });
+    await vi.advanceTimersByTimeAsync(350);
+    expect(calls.filter((c) => c.url.startsWith('/api/gallery/search'))).toEqual([]);
+    useGallery.getState().clearFilter();
   });
 });

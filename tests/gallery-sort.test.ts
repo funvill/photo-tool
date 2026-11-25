@@ -155,6 +155,17 @@ describe('filterItems', () => {
     expect(isFilterActive(f)).toBe(true);
     expect(isFilterActive({ tags: [] })).toBe(false);
   });
+  it('text search matches machine description, keywords and objects, not only notes', () => {
+    const described = item({ tags: { description: 'A boat on a calm LAKE.', keywords: [], objects: [] } });
+    const keyworded = item({ tags: { keywords: ['sunset', 'harbour'], objects: [] } });
+    const objected = item({ tags: { keywords: [], objects: [{ label: 'bicycle' }] } });
+    const noted = item({ info: { notes: 'harbour walk' } });
+    const none = item({});
+    const all = [described, keyworded, objected, noted, none];
+    expect(run(all, { text: 'lake' })).toEqual([described]);
+    expect(run(all, { text: 'Harbour' })).toEqual([keyworded, noted]);
+    expect(run(all, { text: 'bicyc' })).toEqual([objected]);
+  });
   it('starred no, location, people', () => {
     const a = item({ info: { star: true } });
     const b = item({ effectiveLat: 10, info: { people: ['Ann'] } });

@@ -141,8 +141,16 @@ async function handle(r: WorkerRequest): Promise<WorkerReply> {
   }
 }
 
-// One request at a time, in order.
+// One request at a time, in order; except a search's words (embedText), which wait only for a keywords model
+// still loading, not for a photo being described (many seconds): the models' runs are async, so it fits in between.
 let chain: Promise<unknown> = Promise.resolve();
+let keywordsReady: Promise<unknown> = Promise.resolve();
 parentPort?.on('message', (r: WorkerRequest) => {
-  chain = chain.then(async () => parentPort!.postMessage(await handle(r)));
+  const reply = async () => parentPort!.postMessage(await handle(r));
+  if (r.op === 'embedText') {
+    void keywordsReady.then(reply);
+    return;
+  }
+  chain = chain.then(reply);
+  if (r.op === 'load' && r.part === 'keywords') keywordsReady = chain;
 });

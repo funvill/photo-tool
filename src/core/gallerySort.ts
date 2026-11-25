@@ -24,7 +24,7 @@ export interface GalleryFilter {
   hidden?: 'show' | 'only';
   /** The subfolder, as GalleryItem.relDir; '' is the top folder. */
   relDir?: string;
-  /** Case-insensitive, over description and notes. */
+  /** Case-insensitive, over description and notes, and what photo tagging found (its description, keywords and objects). */
   text?: string;
   /** Keywords and objects found by photo tagging; a photo must have every one. */
   tags?: TagFilter[];
@@ -67,7 +67,7 @@ export interface GalleryItemLike {
   info: { star?: boolean; description?: unknown; notes?: unknown; people?: unknown; [extra: string]: unknown };
   analysis: PhotoAnalysis | null;
   /** What photo tagging found (only what the filters read). */
-  tags?: { keywords: string[]; objects: { label: string }[] };
+  tags?: { description?: string | null; keywords: string[]; objects: { label: string }[] };
 }
 
 // Perceptual hue ranges in degrees, lower bound inclusive; red wraps through 0.
@@ -227,7 +227,8 @@ export function filterItems<T extends GalleryItemLike>(items: T[], f: GalleryFil
     if (f.hasPeople && !(Array.isArray(i.info.people) && i.info.people.length > 0)) return false;
     if (f.relDir !== undefined && i.relDir !== f.relDir) return false;
     if (text) {
-      const hay = [i.info.description, i.info.notes].filter((v): v is string => typeof v === 'string').join('\n').toLowerCase();
+      const found = i.tags ? [i.tags.description, ...i.tags.keywords, ...i.tags.objects.map((o) => o.label)] : [];
+      const hay = [i.info.description, i.info.notes, ...found].filter((v): v is string => typeof v === 'string').join('\n').toLowerCase();
       if (!hay.includes(text)) return false;
     }
     if (f.tags?.length && !f.tags.every((t) => hasTag(i, t))) return false;

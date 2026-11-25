@@ -93,6 +93,8 @@ export interface GalleryState {
   scoreToast: ScoreToast | null;
   /** Photo tagging of the open folder (null: nothing known yet, or it is tagging another folder). */
   tagging: TaggingStatus | null;
+  /** Photos found by meaning for the search text `q` (best first); shown after the word matches while `q` is the search text. */
+  meaning: { q: string; paths: string[] } | null;
 
   loadRecent(): Promise<void>;
   open(folder: string, recursive: boolean): Promise<void>;
@@ -258,6 +260,10 @@ const TAG_REFRESH_MS = 10_000;
 /** The photos tagging is asked to look at first: the selected one, then this many of the grid's. */
 const FOCUS_COUNT = 200;
 const FOCUS_DEBOUNCE_MS = 500;
+/** Search by meaning is asked this long after the search text last changed. */
+const MEANING_DEBOUNCE_MS = 300;
+/** Search by meaning needs this many letters. */
+const MEANING_MIN_LETTERS = 3;
 
 const clampThumb = (px: number) => Math.min(THUMB_MAX, Math.max(THUMB_MIN, Math.round(Number.isFinite(px) ? px : THUMB_DEFAULT)));
 
@@ -305,6 +311,9 @@ let tagTimer: ReturnType<typeof setTimeout> | null = null;
 let tagSeen: number | null = null;
 let tagRefreshedAt = 0;
 let focusTimer: ReturnType<typeof setTimeout> | null = null;
+let meaningTimer: ReturnType<typeof setTimeout> | null = null;
+// Each search by meaning asked is numbered; only the newest one's reply is used.
+let meaningSeq = 0;
 let lastFocus = '';
 // Info saved by this page while a reload is on its way, numbered, so that older reload cannot undo it.
 let saveSeq = 0;
@@ -447,7 +456,9 @@ function stopTimers() {
   if (stampTimer) clearInterval(stampTimer);
   if (tagTimer) clearTimeout(tagTimer);
   if (focusTimer) clearTimeout(focusTimer);
-  jobTimer = stampTimer = tagTimer = focusTimer = null;
+  if (meaningTimer) clearTimeout(meaningTimer);
+  meaningSeq++;
+  jobTimer = stampTimer = tagTimer = focusTimer = meaningTimer = null;
   lastStamp = null;
   tagSeen = null;
   tagRefreshedAt = 0;
@@ -597,6 +608,32 @@ export const useGallery = create<GalleryState>()((set, get) => {
     tagTimer = setTimeout(() => void watchTagging(gen, job), st?.running ? TAG_POLL_MS : STAMP_POLL_MS);
   };
 
+  /**
+   * The search text changed: 300 ms later, ask which photos match it by meaning (when tagging is on for the folder
+   * and the text has 3 letters). A reply for older text, or another folder, is dropped.
+   */
+  const searchByMeaning = () => {
+    if (meaningTimer) clearTimeout(meaningTimer);
+    meaningTimer = null;
+    const seq = ++meaningSeq;
+    const { job, filter, items } = get();
+    const q = filter.text?.trim() ?? '';
+    if (!job || (q.match(/\p{L}/gu)?.length ?? 0) < MEANING_MIN_LETTERS || !items.some((i) => i.tags.state !== 'off')) {
+      if (get().meaning) set({ meaning: null });
+      return;
+    }
+    const gen = generation;
+    meaningTimer = setTimeout(async () => {
+      meaningTimer = null;
+      try {
+        const { paths } = await galleryApi.search(job, q);
+        if (seq === meaningSeq && current(gen, job)) set({ meaning: { q, paths } });
+      } catch {
+        // Only the extra matches go missing; the word matches are shown.
+      }
+    }, MEANING_DEBOUNCE_MS);
+  };
+
   /** A photo's file name, as the list has it. */
   const nameOf = (path: string) => get().items.find((i) => i.path === path)?.fileName ?? baseName(path);
 
@@ -729,6 +766,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
     savingPaths: [],
     settingsOpen: false,
     tagging: null,
+    meaning: null,
 
     async loadRecent() {
       try {
@@ -874,17 +912,20 @@ export const useGallery = create<GalleryState>()((set, get) => {
 
     setFilter(patch) {
       const before = snapshot();
+      const text = get().filter.text ?? '';
       set((s) => {
         const filter: GalleryFilter = { ...s.filter, ...patch };
         for (const k of Object.keys(filter) as (keyof GalleryFilter)[]) if (filter[k] === undefined) delete filter[k];
         return { filter };
       });
+      if (text !== (get().filter.text ?? '')) searchByMeaning();
       settleSelection(before);
     },
 
     clearFilter() {
       const before = snapshot();
       set({ filter: {} });
+      searchByMeaning();
       settleSelection(before);
     },
 
@@ -964,7 +1005,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
     close() {
       cancelScan();
       stopTimers();
-      set({ job: null, root: null, items: [], openStacks: [], progress: null, ...noSelection, ...noEdits, tidyOpen: false, tagging: null });
+      set({ job: null, root: null, items: [], openStacks: [], progress: null, ...noSelection, ...noEdits, tidyOpen: false, tagging: null, meaning: null });
     },
 
     async requestOpen(folder, recursive) {
@@ -1225,8 +1266,10 @@ const NO_FACTS = new Map<string, GalleryFacts>();
 const NO_STACKS = new Map<string, StackInfo>();
 let factsMemo: { items: GalleryItem[]; facts: Map<string, GalleryFacts>; at: number } | null = null;
 let visibleMemo: {
-  items: GalleryItem[]; sort: GallerySortKey; filter: GalleryFilter; stacked: boolean; openStacks: string[] | undefined;
+  items: GalleryItem[]; sort: GallerySortKey; filter: GalleryFilter; stacked: boolean; openStacks: string[] | undefined; meaning: GalleryState['meaning'] | undefined;
   filtered: GalleryItem[]; visible: GalleryItem[]; stackOf: Map<string, StackInfo>; facts: Map<string, GalleryFacts>; stale: boolean;
+  /** Index in `visible` where the matches by meaning begin (null: none shown). */
+  meaningStart: number | null;
 } | null = null;
 
 const sameAnalysis = (a: GalleryItem['analysis'], b: GalleryItem['analysis']) => a === b || (!!a && !!b && JSON.stringify(a) === JSON.stringify(b));
@@ -1254,7 +1297,7 @@ function sameFactsInput(a: GalleryItem[], b: GalleryItem[]): boolean {
 /** While a folder is still being read, facts are refreshed at most this often. */
 const FACTS_SCAN_THROTTLE_MS = 2000;
 
-type VisibleInput = Pick<GalleryState, 'items' | 'sort' | 'filter'> & { progress?: GalleryState['progress']; stacked?: boolean; openStacks?: string[] };
+type VisibleInput = Pick<GalleryState, 'items' | 'sort' | 'filter'> & { progress?: GalleryState['progress']; stacked?: boolean; openStacks?: string[]; meaning?: GalleryState['meaning'] };
 
 /** The folder's facts (bursts, quality), worked out again only when what they read changed; mid-scan at most every FACTS_SCAN_THROTTLE_MS. */
 function currentFacts(s: Pick<VisibleInput, 'items' | 'progress'>): Map<string, GalleryFacts> {
@@ -1282,16 +1325,39 @@ export function selectScores(s: Pick<VisibleInput, 'items' | 'progress'>): Map<s
 export function selectVisible(s: VisibleInput): GalleryItem[] {
   const stacked = !!s.stacked;
   const m = visibleMemo;
-  if (m && m.items === s.items && m.sort === s.sort && m.filter === s.filter && m.stacked === stacked && m.openStacks === s.openStacks && !(m.stale && !s.progress)) return m.visible;
+  if (m && m.items === s.items && m.sort === s.sort && m.filter === s.filter && m.stacked === stacked && m.openStacks === s.openStacks && m.meaning === s.meaning && !(m.stale && !s.progress)) return m.visible;
   const withFacts = needsFacts(s.sort, s.filter, stacked);
   const facts = withFacts ? currentFacts(s) : NO_FACTS;
   const sorted = sortItems(filterItems(s.items, s.filter, facts), s.sort, facts, s.sort === 'score' ? selectScores(s) : undefined);
   const folded = stacked ? stackItems(sorted, facts, new Set(s.openStacks ?? [])) : null;
-  const visible = folded ? folded.items : sorted;
+  // Then the photos found by meaning for this search text that the words did not find (passing the other filters), unstacked.
+  const extra = meaningExtra(s, sorted, facts);
+  const words = folded ? folded.items : sorted;
+  const visible = extra.length ? [...words, ...extra] : words;
+  const filtered = extra.length ? [...sorted, ...extra] : sorted;
   // Built from stale facts: remembered (the selector must return the same list for the same state), but redone once the scan ends.
   const stale = withFacts && factsMemo?.items !== s.items;
-  visibleMemo = { items: s.items, sort: s.sort, filter: s.filter, stacked, openStacks: s.openStacks, filtered: sorted, visible, stackOf: folded ? folded.stackOf : NO_STACKS, facts, stale };
+  visibleMemo = {
+    items: s.items, sort: s.sort, filter: s.filter, stacked, openStacks: s.openStacks, meaning: s.meaning,
+    filtered, visible, stackOf: folded ? folded.stackOf : NO_STACKS, facts, stale, meaningStart: extra.length ? words.length : null,
+  };
   return visible;
+}
+
+/** The photos found by meaning for the current search text, not among the word matches, that pass the other filters. */
+function meaningExtra(s: VisibleInput, words: GalleryItem[], facts: Map<string, GalleryFacts>): GalleryItem[] {
+  const q = s.filter.text?.trim();
+  if (!s.meaning || !q || s.meaning.q !== q || !s.meaning.paths.length) return [];
+  const have = new Set(words.map((i) => i.path));
+  const byPath = new Map(s.items.map((i) => [i.path, i]));
+  const found = s.meaning.paths.filter((p) => !have.has(p)).map((p) => byPath.get(p)).filter((i): i is GalleryItem => !!i);
+  return filterItems(found, { ...s.filter, text: undefined }, facts);
+}
+
+/** Where the matches by meaning begin in the visible list (null: none shown), for the grid's note row. */
+export function selectMeaningStart(s: VisibleInput): number | null {
+  selectVisible(s);
+  return visibleMemo!.meaningStart;
 }
 
 /** The stacks in the visible list, by photo path (empty when stacking is off): same memo as selectVisible. */

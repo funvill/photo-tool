@@ -39,6 +39,7 @@ export class TaggingQueue {
   private job: { id: string; photos: () => GalleryPhoto[] } | null = null;
   private focusPaths: string[] = [];
   private loaded: Partial<Record<TagPart, string>> = {};
+  private loading = new Map<string, Promise<boolean>>();
   private broken = new Set<TagPart>();
   /** Content keys with a row (done or failed), and the failed ones, per model id. */
   private seen = new Map<string, Set<string>>();
@@ -124,6 +125,16 @@ export class TaggingQueue {
     };
   }
 
+  /**
+   * Words as the chosen keywords model sees them, for search by meaning: null when no working keywords model is
+   * chosen. Loads the model when tagging has not (paused, or nothing to tag yet).
+   */
+  async embedText(text: string): Promise<{ model: ModelChoice; embedding: Float32Array } | null> {
+    const m = this.activeModels().find((x) => x.part === 'keywords');
+    if (!m || this.stopped || !(await this.loadModel(m))) return null;
+    return { model: m, embedding: await this.deps.backend.embedText(text) };
+  }
+
   async stop(): Promise<void> {
     this.stopped = true;
     this.job = null;
@@ -195,20 +206,32 @@ export class TaggingQueue {
 
   private async ensureLoaded(models: ModelChoice[]): Promise<ModelChoice[]> {
     const ok: ModelChoice[] = [];
-    for (const m of models) {
-      if (this.loaded[m.part] !== m.id) {
-        try {
-          await this.deps.backend.load(m.part, m, modelDir(this.deps.dataDir, m.id));
-          this.loaded[m.part] = m.id;
-        } catch {
-          this.broken.add(m.part);
-          delete this.loaded[m.part];
-          continue;
-        }
-      }
-      ok.push(m);
-    }
+    for (const m of models) if (await this.loadModel(m)) ok.push(m);
     return ok;
+  }
+
+  /** Load a model into the backend unless it is loaded (one load at a time per model, shared by its callers). False: it would not load. */
+  private loadModel(m: ModelChoice): Promise<boolean> {
+    if (this.loaded[m.part] === m.id) return Promise.resolve(true);
+    let p = this.loading.get(m.id);
+    if (!p) {
+      p = this.deps.backend
+        .load(m.part, m, modelDir(this.deps.dataDir, m.id))
+        .then(
+          () => {
+            this.loaded[m.part] = m.id;
+            return true;
+          },
+          () => {
+            this.broken.add(m.part);
+            delete this.loaded[m.part];
+            return false;
+          },
+        )
+        .finally(() => this.loading.delete(m.id));
+      this.loading.set(m.id, p);
+    }
+    return p;
   }
 
   private async run(): Promise<void> {

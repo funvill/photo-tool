@@ -68,4 +68,18 @@ describe.skipIf(!MODELS)('real models', () => {
     expect(Math.hypot(...near)).toBeCloseTo(1, 4);
     expect(dot(k.embedding, near)).toBeGreaterThan(dot(k.embedding, far));
   }, 300_000);
+
+  it('real models: a search (embedText) is answered while a photo is being described, not after it', async () => {
+    const florence = findModel('florence2-base-q8')!;
+    const clip = findModel('clip-base-q8')!;
+    await backend.load('describe', florence, join(MODELS!, florence.repo));
+    await backend.load('keywords', clip, join(MODELS!, clip.repo));
+    const order: string[] = [];
+    const describing = backend.describe(join(TRIP, 'day1-05-harbour-pano.jpg')).then(() => order.push('describe'));
+    // Let the description start first.
+    await new Promise((r) => setTimeout(r, 300));
+    const searching = backend.embedText('boats in a harbour').then(() => order.push('embedText'));
+    await Promise.all([describing, searching]);
+    expect(order).toEqual(['embedText', 'describe']);
+  }, 300_000);
 });

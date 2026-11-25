@@ -387,7 +387,7 @@ async function blockTiles(page: Page): Promise<string[]> {
 async function openMap(page: Page, request: APIRequestContext): Promise<{ dir: string; asked: string[] }> {
   const asked = await blockTiles(page);
   const dir = await openTrip(page, request, MAP_SEED);
-  await page.getByLabel('Search descriptions and notes').fill('maptest');
+  await page.getByLabel('Search photos').fill('maptest');
   await expect(page.locator('.gallery-tile')).toHaveCount(2);
   await page.getByRole('button', { name: 'Map', exact: true }).click();
   return { dir, asked };
@@ -491,7 +491,7 @@ test('the map counts the shown photos that have no location', async ({ page, req
     await page.getByRole('button', { name: 'Not now' }).click();
     // Both shown photos have a place: no note.
     await expect(page.getByText(/no location/)).toHaveCount(0);
-    await page.getByLabel('Search descriptions and notes').fill('');
+    await page.getByLabel('Search photos').fill('');
     // The scan (PNG) has no GPS in it.
     await expect(page.getByText(/\d+ photos? (has|have) no location/)).toBeVisible();
   } finally {
@@ -1173,6 +1173,34 @@ test("What's in it says tagging is off, with a way to Settings", async ({ page, 
     await panel.getByRole('link', { name: 'Settings' }).click();
     await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
   } finally {
+    removeTrip(dir);
+  }
+});
+
+test('searching a word not in any keyword still finds photos by meaning, under "Also matching by meaning"', async ({ page, request }) => {
+  expect((await request.post('/api/gallery/models/fake-keywords-small/download')).status()).toBe(202);
+  await expect.poll(async () => (await (await request.get('/api/gallery/models')).json()).downloading, { timeout: 10_000 }).toBeFalsy();
+  expect((await request.put('/api/gallery/tagging/settings', { data: { describe: null, keywords: 'fake-keywords-small', paused: false } })).ok()).toBe(true);
+  const dir = await openTrip(page, request);
+  try {
+    // Wait for tagging to finish (its bar goes away) and the keywords to reach the page.
+    await page.locator('.gallery-tile', { has: page.locator('img[alt="day2-04-lake.jpg"]') }).click();
+    await expect(page.locator('#gallery-section-whatsinit').getByRole('button', { name: 'lake', exact: true })).toBeVisible({ timeout: 20_000 });
+    const tiles = page.locator('.gallery-tile');
+    // A word: the keyword matches, nothing more by meaning.
+    await page.getByLabel('Search photos').fill('lake');
+    await expect(tiles).toHaveCount(1);
+    await expect(page.locator('.gallery-tile img')).toHaveAttribute('alt', 'day2-04-lake.jpg');
+    // "coffee" is in no keyword or note, but means cafe to the fake model: found by meaning, under the note.
+    await page.getByLabel('Search photos').fill('coffee');
+    await expect(page.getByRole('note')).toHaveText('Also matching by meaning');
+    await expect(tiles).toHaveCount(1);
+    await expect(page.locator('.gallery-tile img')).toHaveAttribute('alt', 'day3-01-cafe.jpg');
+    await page.getByLabel('Search photos').fill('');
+    await expect(page.getByRole('note')).toHaveCount(0);
+  } finally {
+    await request.put('/api/gallery/tagging/settings', { data: { describe: null, keywords: null, paused: false } });
+    await request.delete('/api/gallery/models/fake-keywords-small');
     removeTrip(dir);
   }
 });

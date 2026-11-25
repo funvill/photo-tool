@@ -49,6 +49,20 @@ export interface PhotoTags {
 
 /** The most keywords a photo shows. */
 export const MAX_KEYWORDS = 12;
+/** The most photos a search by meaning finds. */
+const SEARCH_MAX = 200;
+
+const cosine = (a: Float32Array, b: Float32Array): number => {
+  let d = 0;
+  let na = 0;
+  let nb = 0;
+  for (let i = 0; i < Math.min(a.length, b.length); i++) {
+    d += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  return na && nb ? d / Math.sqrt(na * nb) : 0;
+};
 
 export interface GalleryItem extends GalleryPhoto {
   info: PhotoInfo;
@@ -482,6 +496,28 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
   });
 
   app.get('/api/gallery/tagging/status', (_req, res) => res.json(tagging.status()));
+
+  // Search by meaning: the folder's photos whose picture is close to the words (cosine with the keywords model's
+  // picture embedding at least its meaningThreshold), best first, at most SEARCH_MAX. Needs 3 letters and a keywords model.
+  app.get('/api/gallery/search', wrap(async (req, res) => {
+    const job = requireJob(q(req, 'job'));
+    const text = q(req, 'q').trim();
+    if ((text.match(/\p{L}/gu)?.length ?? 0) < 3) return void res.json({ paths: [] });
+    const found = await tagging.embedText(text).catch(() => null);
+    const threshold = found?.model.meaningThreshold;
+    if (!found || threshold === undefined) return void res.json({ paths: [] });
+    const photos = job.photos.filter((p) => p.contentKey && existsSync(p.path));
+    const embeddings = catalog.embeddings([...new Set(photos.map((p) => p.contentKey!))], found.model.id);
+    const scored: { path: string; score: number }[] = [];
+    for (const p of photos) {
+      const e = embeddings.get(p.contentKey!);
+      if (!e) continue;
+      const score = cosine(found.embedding, e);
+      if (score >= threshold) scored.push({ path: p.path, score });
+    }
+    scored.sort((a, b) => b.score - a.score);
+    res.json({ paths: scored.slice(0, SEARCH_MAX).map((s) => s.path) });
+  }));
 
   app.post('/api/gallery/tagging/focus', wrap((req, res) => {
     const { job, paths } = req.body ?? {};

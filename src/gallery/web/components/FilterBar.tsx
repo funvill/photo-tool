@@ -103,8 +103,8 @@ export function FilterBar() {
       <input
         type="search"
         className="gallery-search"
-        placeholder="Search descriptions and notes"
-        aria-label="Search descriptions and notes"
+        placeholder="Search descriptions, notes and keywords"
+        aria-label="Search photos"
         value={filter.text ?? ''}
         onChange={(e) => set({ text: e.target.value || undefined })}
       />

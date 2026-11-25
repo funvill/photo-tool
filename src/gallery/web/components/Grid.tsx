@@ -3,7 +3,7 @@ import { dragPaths } from '../../../core/galleryViewer';
 import { desktop } from '../../../web/desktop';
 import { gridWindow } from '../../../web/virtualGrid';
 import { isIdentityEdit } from '../../../core/photoEdit';
-import { selectScores, selectVisible, shownEdit, useGallery, useStackInfo, useVisibleItems } from '../store';
+import { selectMeaningStart, selectScores, selectVisible, shownEdit, useGallery, useStackInfo, useVisibleItems } from '../store';
 import { Tile } from './Tile';
 
 const GAP = 6;
@@ -74,7 +74,13 @@ export function Grid({ onOpen, onContextMenu }: { onOpen: (path: string) => void
   const onDragReady = useCallback((path: string) => desktop?.prepareDrag?.(dragList(path)), []);
   const onDragOut = useCallback((path: string) => desktop?.startDrag?.(dragList(path)), []);
 
-  const w = gridWindow({ count: items.length, width: box.width, tile: thumbSize, gap: GAP, scrollTop, viewport: box.height });
+  // The photos found only by meaning start on a new row, after a row with a note: their slots are moved on by `pad`.
+  const meaningStart = useGallery(selectMeaningStart);
+  const view = { width: box.width, tile: thumbSize, gap: GAP, scrollTop, viewport: box.height };
+  const cols = gridWindow({ ...view, count: items.length }).cols;
+  const pad = meaningStart === null ? 0 : ((cols - (meaningStart % cols)) % cols) + cols;
+  const slotOf = (i: number) => (meaningStart !== null && i >= meaningStart ? i + pad : i);
+  const w = gridWindow({ ...view, count: items.length + pad });
   const stride = w.rowHeight + GAP;
 
   // Up/Down step by a row: the keys (outside the grid) read how many tiles a row holds now.
@@ -88,7 +94,7 @@ export function Grid({ onOpen, onContextMenu }: { onOpen: (path: string) => void
     if (!el) return;
     const i = items.findIndex((item) => item.path === useGallery.getState().selected);
     if (i < 0) return;
-    const top = PAD + Math.floor(i / w.cols) * stride;
+    const top = PAD + Math.floor(slotOf(i) / w.cols) * stride;
     const bottom = top + w.rowHeight + PAD;
     if (top - PAD < el.scrollTop) el.scrollTop = top - PAD;
     else if (bottom > el.scrollTop + el.clientHeight) el.scrollTop = bottom - el.clientHeight;
@@ -105,15 +111,17 @@ export function Grid({ onOpen, onContextMenu }: { onOpen: (path: string) => void
 
   const picked = useMemo(() => new Set(selection), [selection]);
   const tiles = [];
-  for (let i = w.firstIndex; i <= w.lastIndex; i++) {
+  for (let slot = w.firstIndex; slot <= w.lastIndex; slot++) {
+    if (meaningStart !== null && slot >= meaningStart && slot < meaningStart + pad) continue;
+    const i = meaningStart !== null && slot >= meaningStart ? slot - pad : slot;
     const item = items[i];
     const edit = shownEdit({ pendingEdits, editTarget }, item);
     tiles.push(
       <Tile
         key={item.path}
         item={item}
-        x={(i % w.cols) * stride}
-        y={Math.floor(i / w.cols) * stride}
+        x={(slot % w.cols) * stride}
+        y={Math.floor(slot / w.cols) * stride}
         size={w.rowHeight}
         selected={item.path === selected}
         picked={picked.has(item.path)}
@@ -135,7 +143,14 @@ export function Grid({ onOpen, onContextMenu }: { onOpen: (path: string) => void
 
   return (
     <div className="gallery-grid" ref={ref} onScroll={onScroll}>
-      <div className="gallery-grid-inner" style={{ height: w.totalHeight }}>{tiles}</div>
+      <div className="gallery-grid-inner" style={{ height: w.totalHeight }}>
+        {tiles}
+        {meaningStart !== null && (
+          <div className="gallery-grid-note muted" role="note" style={{ top: ((meaningStart + pad) / w.cols - 1) * stride, height: w.rowHeight }}>
+            Also matching by meaning
+          </div>
+        )}
+      </div>
     </div>
   );
 }
