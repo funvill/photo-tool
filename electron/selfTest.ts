@@ -1,120 +1,23 @@
-// The acceptance test built into the app, run only with explicit flags:
+// Each program's own steps of the acceptance test built into the app (the shared harness, the
+// offline checks and result.json are in shared/electron): run only with explicit flags:
 //
-//   "Photobook Studio.exe" --self-test <photo folder> --self-test-out <folder>            the editor
-//   "Photobook Studio.exe" --self-test <photo folder> --self-test-out <folder> --gallery  the gallery
+//   <app> --self-test <photo folder> --self-test-out <folder>            the editor
+//   <app> --self-test <photo folder> --self-test-out <folder> --gallery  Photo Tool
 //
 // The editor's does what a person would: makes a book, imports the folder, drafts it, exports the
 // PDFs, a poster image and the flipbook, and looks at the home page and the editor in the real
-// window. The gallery's opens a copy of the folder (<folder>/photos: the photos given are never
+// window. Photo Tool's opens a copy of the folder (<folder>/photos: the photos given are never
 // written), waits for it to be read, stars one photo in the viewer and checks the star in that
-// copy's photoinfo.json. main.ts adds what it saw (console messages, failed loads, requests the
-// offline filter cancelled, whether the server stopped cleanly) and writes <folder>/result.json,
-// failing either test on the same rules.
-import type { BrowserWindow, Session } from 'electron';
-import { cpSync, existsSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+// copy's photoinfo.json.
+import { cpSync, existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
-import { selfTestOverlap } from './config';
-
-export interface Step {
-  ok: boolean;
-  ms?: number;
-  error?: string;
-  [key: string]: unknown;
-}
-
-export interface SelfTestContext {
-  /** The local server, e.g. http://127.0.0.1:51234 */
-  base: string;
-  photos: string;
-  out: string;
-  win: BrowserWindow;
-  session: Session;
-  log: (...a: unknown[]) => void;
-}
+import { selfTestOverlap } from '../shared/electron/config';
+import { harness, offlineChecks, sleep, type SelfTestContext, type Step } from '../shared/electron/selfTest';
 
 const PAGES = 20;
 const TITLE = 'Self-test book';
 // Blurb's Large Square trims to 11.75 in (see scripts/draft-from-folder.ts).
 const BLURB_LARGE_SQUARE_TRIM_MM = 11.75 * 25.4;
-const sleep = (ms: number) => new Promise((d) => setTimeout(d, ms));
-
-/** What both tests use: named steps, code run in the page, waiting on the page, and screenshots. */
-function harness(ctx: SelfTestContext) {
-  const steps: Record<string, Step> = {};
-  const { win, log } = ctx;
-  const js = <T = any>(code: string): Promise<T> => win.webContents.executeJavaScript(code, true);
-
-  async function step(name: string, fn: () => Promise<Omit<Step, 'ok'> & { ok?: boolean }>) {
-    const t = Date.now();
-    try {
-      const r = await fn();
-      steps[name] = { ...r, ok: r.ok !== false, ms: Date.now() - t };
-    } catch (e) {
-      steps[name] = { ok: false, ms: Date.now() - t, error: String((e as Error)?.stack ?? e) };
-    }
-    log('self-test', name, steps[name]);
-    return steps[name].ok;
-  }
-
-  async function api<T = any>(method: string, path: string, body?: unknown): Promise<T> {
-    const res = await fetch(ctx.base + path, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
-    const json = (await res.json()) as T;
-    if (!res.ok) throw new Error(`${method} ${path} failed (${res.status}): ${JSON.stringify(json)}`);
-    return json;
-  }
-
-  async function waitFor<T>(code: string, good: (v: T) => boolean, timeoutMs: number): Promise<T> {
-    const end = Date.now() + timeoutMs;
-    let v = await js<T>(code);
-    while (!good(v) && Date.now() < end) {
-      await sleep(500);
-      v = await js<T>(code);
-    }
-    return v;
-  }
-
-  async function screenshot(name: string) {
-    let img = await win.webContents.capturePage();
-    if (img.isEmpty()) {
-      win.showInactive();
-      await sleep(1000);
-      img = await win.webContents.capturePage();
-    }
-    const file = join(ctx.out, name);
-    writeFileSync(file, img.toPNG());
-    return { screenshot: file, screenshotBytes: statSync(file).size, screenshotSize: img.getSize() };
-  }
-
-  return { steps, step, js, api, waitFor, screenshot };
-}
-
-type Harness = ReturnType<typeof harness>;
-
-/**
- * Proof that the offline filter is switched on, without touching the network: a request to a port
- * on this computer that is not the app's must be cancelled before it is sent, and the window must
- * not navigate there.
- */
-async function offlineChecks({ step, js }: Harness, ctx: SelfTestContext) {
-  await step('filterControl', async () => {
-    const url = 'http://127.0.0.1:9/self-test-control';
-    try {
-      await ctx.session.fetch(url);
-      return { ok: false, url, outcome: 'the request was sent' };
-    } catch (e) {
-      const outcome = String((e as Error)?.message ?? e);
-      return { ok: /ERR_BLOCKED_BY_CLIENT/.test(outcome), url, outcome };
-    }
-  });
-
-  await step('navigationBlocked', async () => {
-    const before = ctx.win.webContents.getURL();
-    await js(`void (location.href = 'http://127.0.0.1:9/self-test-navigation')`);
-    await sleep(800);
-    const after = ctx.win.webContents.getURL();
-    return { ok: after === before, before, after };
-  });
-}
 
 export async function runSelfTest(ctx: SelfTestContext): Promise<Record<string, Step>> {
   const h = harness(ctx);
@@ -451,5 +354,3 @@ export async function runGallerySelfTest(ctx: SelfTestContext & { source: string
   await offlineChecks(h, ctx);
   return steps;
 }
-
-export const SELF_TEST_CONTROL_URLS = ['http://127.0.0.1:9/self-test-control', 'http://127.0.0.1:9/self-test-navigation'];

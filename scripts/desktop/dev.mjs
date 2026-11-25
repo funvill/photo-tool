@@ -5,10 +5,11 @@
 // ./data or PHOTOBOOK_DATA_DIR), so run one or the other, not both. Changes under electron/ or
 // photobook-editor/server need this command restarted; changes to the editor reload by themselves.
 //
-// `npm run dev:desktop -- --gallery [folder]` is the gallery program the same way, on the ports of
-// the gallery's own dev server (photo-tool/server/main.ts: PHOTOBOOK_GALLERY_WEB_PORT 5175,
-// PHOTOBOOK_GALLERY_PORT 5176) and with its data in ./data/gallery (or PHOTOBOOK_GALLERY_DATA_DIR),
-// so it runs beside the editor's. Its stars for read-only folders go to the editor's data folder.
+// `npm run dev:desktop -- --gallery [folder]` is Photo Tool the same way, on the ports of its own
+// dev server (photo-tool/server/main.ts: PHOTO_TOOL_WEB_PORT 5175, PHOTO_TOOL_PORT 5176) and with
+// its data in ./data/photo-tool (or PHOTO_TOOL_DATA_DIR), so it runs beside the editor's. Both keep
+// stars for read-only folders in ./data/photoinfo-shared (or PHOTOINFO_FALLBACK_DIR). The data
+// folders are always given, so the app never moves an old data folder under %APPDATA%.
 import { execFileSync, spawn } from 'node:child_process';
 import { connect } from 'node:net';
 import { join, resolve } from 'node:path';
@@ -16,16 +17,18 @@ import { ensureElectron } from './ensure-electron.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const gallery = process.argv.includes('--gallery');
-const webPort = Number((gallery ? process.env.PHOTOBOOK_GALLERY_WEB_PORT : process.env.PHOTOBOOK_WEB_PORT) ?? (gallery ? 5175 : 5173));
-const apiPort = Number((gallery ? process.env.PHOTOBOOK_GALLERY_PORT : process.env.PHOTOBOOK_PORT) ?? (gallery ? 5176 : 5174));
+const prefix = gallery ? 'PHOTO_TOOL' : 'PHOTOBOOK';
+const webPort = Number(process.env[`${prefix}_WEB_PORT`] ?? (gallery ? 5175 : 5173));
+const apiPort = Number(process.env[`${prefix}_PORT`] ?? (gallery ? 5176 : 5174));
 const env = {
   ...process.env,
   // Vite and the app's server both read these.
-  PHOTOBOOK_WEB_PORT: String(webPort),
-  PHOTOBOOK_PORT: String(apiPort),
-  PHOTOBOOK_DATA_DIR: resolve(process.env.PHOTOBOOK_DATA_DIR ?? join(root, 'data')),
-  ...(gallery ? { PHOTOBOOK_GALLERY_DATA_DIR: resolve(process.env.PHOTOBOOK_GALLERY_DATA_DIR ?? join(root, 'data', 'gallery')) } : {}),
-  PHOTOBOOK_DESKTOP_DEV_URL: `http://127.0.0.1:${webPort}/`,
+  [`${prefix}_WEB_PORT`]: String(webPort),
+  [`${prefix}_PORT`]: String(apiPort),
+  [`${prefix}_DATA_DIR`]: resolve(process.env[`${prefix}_DATA_DIR`] ?? join(root, 'data', gallery ? 'photo-tool' : 'photobook-editor')),
+  [`${prefix}_PROFILE_DIR`]: resolve(process.env[`${prefix}_PROFILE_DIR`] ?? join(root, 'data', gallery ? 'photo-tool-browser' : 'photobook-editor-browser')),
+  PHOTOINFO_FALLBACK_DIR: resolve(process.env.PHOTOINFO_FALLBACK_DIR ?? join(root, 'data', 'photoinfo-shared')),
+  [`${prefix}_DESKTOP_DEV_URL`]: `http://127.0.0.1:${webPort}/`,
 };
 delete env.ELECTRON_RUN_AS_NODE;
 

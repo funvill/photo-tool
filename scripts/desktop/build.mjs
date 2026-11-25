@@ -1,6 +1,7 @@
 // Build the desktop app's folder, ready to run or to package:
 //
-//   dist/desktop/app/        main.cjs, preload.cjs, server-host.cjs, package.json and only the
+//   dist/desktop/app/        main.cjs, preload.cjs, server-host.cjs (gallery-server-host.cjs for
+//                            --gallery), package.json and only the
 //                            node_modules that cannot be bundled (sharp, pdfkit, fontkit and
 //                            what they need)
 //   dist/desktop/resources/  fonts, world-atlas, the built editor and gallery (web/index.html,
@@ -65,6 +66,8 @@ mkdirSync(appDir, { recursive: true });
 const common = { bundle: true, platform: 'node', format: 'cjs', target: 'node24', sourcemap: false, legalComments: 'none', logLevel: 'warning', absWorkingDir: root };
 await build({ ...common, entryPoints: ['electron/main.ts'], outfile: join(appDir, 'main.cjs'), external: ['electron'] });
 await build({ ...common, entryPoints: ['electron/server-host.ts'], outfile: join(appDir, 'server-host.cjs'), external: ['electron', ...EXTERNAL] });
+// Photo Tool's server, for the same build started with --gallery (until the programs are packaged apart).
+await build({ ...common, entryPoints: ['electron/gallery-server-host.ts'], outfile: join(appDir, 'gallery-server-host.cjs'), external: ['electron', ...EXTERNAL] });
 // The gallery's tagging worker thread (photo-tool/server/tagging/worker.ts), started by its server.
 await build({ ...common, entryPoints: ['photo-tool/server/tagging/worker.ts'], outfile: join(appDir, 'tagging-worker.cjs'), external: ['@huggingface/transformers'] });
 // The preload runs in the sandboxed page process: it may only require 'electron'.

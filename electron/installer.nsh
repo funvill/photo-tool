@@ -15,7 +15,7 @@
 
 ; The same program started with --gallery is Photobook Gallery: it gets its own Start-menu and
 ; desktop shortcuts, with the app's icon (index 0). Each carries the gallery's AppUserModelID
-; (GALLERY_APP_ID in electron/config.ts), the one the gallery's window sets, so Windows keeps
+; (GALLERY_APP_ID in electron/config.ts), the one Photo Tool's window sets, so Windows keeps
 ; the two programs apart on the taskbar. WinShell is the plugin electron-builder's own shortcuts
 ; use. electron-builder creates the editor's shortcuts the same way, under the same shell context
 ; (per user here), so $SMPROGRAMS and $DESKTOP are the ones the editor's shortcuts are in.
@@ -30,18 +30,18 @@
 !macro addGalleryShortcuts
   CreateShortCut "$SMPROGRAMS\Photobook Gallery.lnk" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" "--gallery" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" 0 "" "" "Look through a folder of photos and star the best ones"
   ClearErrors
-  WinShell::SetLnkAUMI "$SMPROGRAMS\Photobook Gallery.lnk" "app.photobookstudio.gallery"
+  WinShell::SetLnkAUMI "$SMPROGRAMS\Photobook Gallery.lnk" "app.phototool.desktop"
   ${ifNot} ${isNoDesktopShortcut}
     CreateShortCut "$DESKTOP\Photobook Gallery.lnk" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" "--gallery" "$INSTDIR\${APP_EXECUTABLE_FILENAME}" 0 "" "" "Look through a folder of photos and star the best ones"
     ClearErrors
-    WinShell::SetLnkAUMI "$DESKTOP\Photobook Gallery.lnk" "app.photobookstudio.gallery"
+    WinShell::SetLnkAUMI "$DESKTOP\Photobook Gallery.lnk" "app.phototool.desktop"
   ${endIf}
   System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
 !macroend
 
 !macro removeGalleryShortcuts
   ${ifNot} ${isKeepShortcuts}
-    WinShell::UninstAppUserModelId "app.photobookstudio.gallery"
+    WinShell::UninstAppUserModelId "app.phototool.desktop"
     WinShell::UninstShortcut "$SMPROGRAMS\Photobook Gallery.lnk"
     Delete "$SMPROGRAMS\Photobook Gallery.lnk"
     WinShell::UninstShortcut "$DESKTOP\Photobook Gallery.lnk"

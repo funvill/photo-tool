@@ -5,7 +5,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { OSM_TILE_ORIGIN } from '../photo-tool/core/galleryMap';
-import { isAllowedRequest, type GuardOptions } from './netGuard';
+import { isAllowedRequest, type GuardOptions } from '../shared/electron/netGuard';
 
 export { OSM_TILE_ORIGIN };
 
