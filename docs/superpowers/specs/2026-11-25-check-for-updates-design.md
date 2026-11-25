@@ -94,6 +94,10 @@ and lets it run the quit-and-install. `DesktopProgram` gains `updateChannel: str
 - **Start check:** only when packaged, not in a self-test, not when
   `<PREFIX>_NO_UPDATE_CHECK` is set, the setting is on, and the last check was ≥ 24 h ago. It runs a
   few seconds after the window shows. A failure is logged, never shown.
+- **F1 / Help › About:** F1 is the About item's shortcut. The About box shows the name and
+  version, a line `Version <version> (Electron <x>, <platform> <arch>)`, and a **Check for updates**
+  button (only when packaged) that runs the manual check below. The About text no longer says the
+  editor never uses the network.
 - **Manual check:** always shows a result: "Photo Tool 0.1.32 is available (you have 0.1.31)",
   "You have the newest version (0.1.31)", or "Could not check for updates: <reason>". From source
   (not packaged) it says updates only work in the installed app.
