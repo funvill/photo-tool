@@ -152,6 +152,17 @@ export class Catalog {
       .run(t.contentKey, t.modelId, t.status, t.description, JSON.stringify(t.keywords), JSON.stringify(t.objects), emb, t.error, Date.now());
   }
 
+  /**
+   * Replace only the description of a model's done row (Regenerate): objects, keywords and embedding stay. False,
+   * with nothing written, when there is no such row or it is a failed one.
+   */
+  setDescription(contentKey: string, modelId: string, description: string): boolean {
+    const r = this.db
+      .prepare("UPDATE tags SET description = ?, made_at = ? WHERE content_key = ? AND model_id = ? AND status = 'done'")
+      .run(description, Date.now(), contentKey, modelId);
+    return Number(r.changes) > 0;
+  }
+
   /** The rows of these models for these pictures, by content key; `embedding` is left out (null) unless asked for. */
   tagsFor(contentKeys: string[], modelIds: string[], withEmbedding = false): Map<string, TagRow[]> {
     const out = new Map<string, TagRow[]>();

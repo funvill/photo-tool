@@ -124,6 +124,11 @@ export interface GalleryState {
   toggleTagFilter(f: TagFilter): void;
   /** Pause or resume photo tagging (kept in Settings). */
   setTaggingPaused(paused: boolean): Promise<void>;
+  /**
+   * Regenerate: ask for a new description of a photo of the open folder and show it. Resolves false, after an
+   * error toast, when it failed (the old text stays); never rejects.
+   */
+  regenerateDescription(path: string): Promise<boolean>;
   setRecursive(recursive: boolean): void;
   setStacked(on: boolean): void;
   toggleStack(id: string): void;
@@ -946,6 +951,21 @@ export const useGallery = create<GalleryState>()((set, get) => {
         if (t) set({ tagging: { ...t, paused, running: t.running && !paused } });
       } catch (e) {
         get().toast('error', message(e));
+      }
+    },
+
+    async regenerateDescription(path) {
+      const job = get().job;
+      if (!job) return false;
+      try {
+        const tags = await galleryApi.regenerateDescription(job, path);
+        // Another folder was opened meanwhile: its photos are not this one.
+        if (get().job !== job) return false;
+        set((s) => ({ items: s.items.map((i) => (i.path === path ? { ...i, tags } : i)) }));
+        return true;
+      } catch (e) {
+        if (get().job === job) get().toast('error', message(e));
+        return false;
       }
     },
 

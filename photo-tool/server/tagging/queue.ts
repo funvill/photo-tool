@@ -35,6 +35,9 @@ export interface TaggingQueueDeps {
   imageOf(photo: GalleryPhoto): Promise<string>;
 }
 
+/** Regenerate can't run: no working descriptions model, or it has not described this photo yet. */
+export class NoDescriptionError extends Error {}
+
 const PARTS: TagPart[] = ['describe', 'keywords'];
 /** Times in a row the backend may lose a part's model before that part counts as not working. */
 const MAX_LOSSES = 3;
@@ -157,6 +160,35 @@ export class TaggingQueue {
       }
     }
     return null;
+  }
+
+  /**
+   * Regenerate: the chosen descriptions model writes a new (sampled) description of a photo it has described,
+   * replacing only that sentence in the catalogue; its objects are kept. Runs whether tagging is paused or not
+   * (loading the model when tagging has not), and waits in the worker's queue behind a photo being tagged.
+   * Throws NoDescriptionError when there is no working descriptions model or no description of it to replace.
+   */
+  async regenerate(photo: GalleryPhoto): Promise<string> {
+    const m = this.activeModels().find((x) => x.part === 'describe');
+    if (!m) throw new NoDescriptionError('There is no working descriptions model. Choose one in Settings.');
+    const key = photo.contentKey;
+    const own = key ? this.deps.catalog.tagsFor([key], [m.id]).get(key)?.[0] : undefined;
+    if (!key || own?.status !== 'done') throw new NoDescriptionError(`${m.label} has not described this photo yet.`);
+    const image = await this.deps.imageOf(photo);
+    for (let tries = 0; ; tries++) {
+      if (this.stopped) throw new Error('Tagging stopped.');
+      if (!(await this.loadModel(m))) throw new NoDescriptionError(`${m.label} would not load. See Settings.`);
+      try {
+        const text = await this.deps.backend.caption(image);
+        if (!this.deps.catalog.setDescription(key, m.id, text)) throw new NoDescriptionError(`${m.label} has not described this photo yet.`);
+        this.stamp++;
+        return text;
+      } catch (e) {
+        // The worker restarted: load the model again and ask once more.
+        if (!(e instanceof BackendLostError) || tries >= 1) throw e;
+        if (this.loaded.describe === m.id) delete this.loaded.describe;
+      }
+    }
   }
 
   async stop(): Promise<void> {

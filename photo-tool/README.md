@@ -70,7 +70,7 @@ Run from source in a plain browser (`npm run dev:photo-tool`), Photo Tool can ed
 
 - **Photo**: date, size, megapixels, shape, format and folder.
 - **Camera**: camera, lens, focal length, aperture, shutter speed, ISO, exposure compensation and flash, when the file has them.
-- **What's in it**: what photo tagging found (see Photo tagging below): a sentence about the photo, its keywords and the objects in it. Click a keyword or an object to show only the photos that have it.
+- **What's in it**: what photo tagging found (see Photo tagging below): a sentence about the photo, its keywords and the objects in it. Click a keyword or an object to show only the photos that have it. **Regenerate**, under the sentence, asks the chosen descriptions model to describe the photo again in other words; the new sentence replaces the old one in Photo Tool's own catalogue (nothing is written to the photo's folder), and the keywords and objects stay as they are. It works while tagging is paused.
 - **Histogram**: red, green, blue and brightness, with the share of clipped shadows and highlights.
 - **Place**, **People**, **Date and time**, and **Description and notes**: the fields you can type. Each is saved when you leave the field.
 

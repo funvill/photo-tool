@@ -37,7 +37,23 @@ function Chip({ f, text }: { f: TagFilter; text: string }) {
 export function WhatsInIt({ item }: { item: GalleryItem }) {
   const notWorking = useGallery((s) => s.tagging?.notWorking.length ?? 0) > 0;
   const model = useDescribeModel();
-  const { state, description, keywords, objects } = item.tags;
+  // Photos being described again, by path: the panel is reused when the selection moves on.
+  const [writing, setWriting] = useState<ReadonlySet<string>>(new Set());
+  const { state, description, keywords, objects, canRegenerate } = item.tags;
+  const busy = writing.has(item.path);
+  const regenerate = async () => {
+    const path = item.path;
+    setWriting((w) => new Set(w).add(path));
+    try {
+      await useGallery.getState().regenerateDescription(path);
+    } finally {
+      setWriting((w) => {
+        const next = new Set(w);
+        next.delete(path);
+        return next;
+      });
+    }
+  };
   if (state === 'off') {
     return (
       <p className="muted small">
@@ -64,6 +80,19 @@ export function WhatsInIt({ item }: { item: GalleryItem }) {
         <p className="gallery-whatsinit-description" title={model ? `Written by ${model}` : undefined}>
           {description}
         </p>
+      )}
+      {description && canRegenerate && (
+        <button
+          type="button"
+          className="btn btn-small gallery-whatsinit-regenerate"
+          disabled={busy}
+          aria-busy={busy}
+          aria-label={busy ? undefined : 'Regenerate the description'}
+          title={busy ? undefined : `Ask ${model || 'the descriptions model'} to describe this photo again`}
+          onClick={() => void regenerate()}
+        >
+          {busy ? 'Writing a new description…' : 'Regenerate'}
+        </button>
       )}
       {keywords.length > 0 && (
         <div className="gallery-chip-row" role="group" aria-label="Keywords">

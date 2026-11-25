@@ -1204,3 +1204,59 @@ test('searching a word not in any keyword still finds photos by meaning, under "
     removeTrip(dir);
   }
 });
+
+test.describe("#2 Regenerate the description in What's in it", () => {
+  test('Regenerate writes a new description, busy while it runs; the new one is still there after a reload', async ({ page, request }) => {
+    expect((await request.post('/api/gallery/models/fake-describe-small/download')).status()).toBe(202);
+    await expect.poll(async () => (await (await request.get('/api/gallery/models')).json()).downloading, { timeout: 10_000 }).toBeFalsy();
+    expect((await request.put('/api/gallery/tagging/settings', { data: { describe: 'fake-describe-small', keywords: null, paused: false } })).ok()).toBe(true);
+    const dir = await openTrip(page, request);
+    const street = () => page.locator('.gallery-tile', { has: page.locator('img[alt="day1-02-street.jpg"]') }).click();
+    const panel = page.locator('#gallery-section-whatsinit');
+    const description = panel.locator('.gallery-whatsinit-description');
+    try {
+      await street();
+      // The fake model reads the file name: "street".
+      await expect(description).toHaveText('A picture of street.', { timeout: 20_000 });
+      await expect(page.getByRole('status', { name: 'Photo tagging' })).toHaveCount(0, { timeout: 20_000 });
+      const button = panel.getByRole('button', { name: 'Regenerate the description' });
+      await expect(button).toHaveText('Regenerate');
+
+      // Held until the busy state has been seen.
+      let release: () => void = () => {};
+      const held = new Promise<void>((r) => (release = r));
+      await page.route('**/api/gallery/tagging/regenerate', async (route) => {
+        await held;
+        await route.continue();
+      });
+      await button.click();
+      const busy = panel.getByRole('button', { name: 'Writing a new description…' });
+      await expect(busy).toBeDisabled();
+      await expect(description).toHaveText('A picture of street.'); // the old text stays meanwhile
+      release();
+      await expect(description).toHaveText(/^Another look at street \(\d+\)\.$/);
+      const first = await description.textContent();
+      await expect(button).toBeEnabled();
+
+      // Again: another wording.
+      await button.click();
+      await expect(description).not.toHaveText(first!);
+      await expect(description).toHaveText(/^Another look at street \(\d+\)\.$/);
+      const second = await description.textContent();
+      // Objects are kept.
+      await expect(panel.getByRole('group', { name: 'Objects' }).getByRole('button', { name: 'street ×2' })).toBeVisible();
+
+      // Kept in the catalogue: after a reload and opening the folder again, the new text is there.
+      await page.unroute('**/api/gallery/tagging/regenerate');
+      await page.reload();
+      await page.getByRole('button', { name: dir }).click();
+      await expect(page.locator('.gallery-tile').first()).toBeVisible({ timeout: 60_000 });
+      await street();
+      await expect(description).toHaveText(second!);
+    } finally {
+      await request.put('/api/gallery/tagging/settings', { data: { describe: null, keywords: null, paused: false } });
+      await request.delete('/api/gallery/models/fake-describe-small');
+      removeTrip(dir);
+    }
+  });
+});

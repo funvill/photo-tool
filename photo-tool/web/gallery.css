@@ -258,6 +258,7 @@
 .gallery-tagging-progress .btn { margin-left: auto; }
 .gallery-whatsinit { display: flex; flex-direction: column; gap: 8px; }
 .gallery-whatsinit-description { margin: 0; line-height: 1.4; }
+.gallery-whatsinit-regenerate { align-self: flex-start; }
 .gallery-chip-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .gallery-chip-row > .muted { width: 100%; }
 .gallery-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid var(--line-soft); border-radius: 999px; background: var(--panel-3); color: inherit; font: inherit; font-size: 12px; cursor: pointer; }

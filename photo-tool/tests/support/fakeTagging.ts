@@ -103,10 +103,18 @@ const embed = (words: string[]): Float32Array => {
   return v.map((x) => x / n);
 };
 
-/** A tagging backend for tests: describes and keywords a photo from its file name (give it the photo's own path). */
+/**
+ * A tagging backend for tests: describes and keywords a photo from its file name (give it the photo's own path).
+ * `caption` (Regenerate) counts its calls, so every call gives new text.
+ */
 export function fakeBackend(o: { delayMs?: number } = {}): import('../../server/tagging/backend').TaggerBackend {
   const wait = () => new Promise((r) => setTimeout(r, o.delayMs ?? 0));
+  let captions = 0;
   return {
+    async caption(path) {
+      await wait();
+      return `Another look at ${wordsOf(path).join(' and ') || 'something'} (${++captions}).`;
+    },
     async load() {},
     async describe(path) {
       await wait();

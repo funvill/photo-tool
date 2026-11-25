@@ -22,6 +22,8 @@ export interface TaggerBackend {
   /** Throws ModelLoadError when the model's folder is incomplete or will not load. */
   load(part: TagPart, model: ModelChoice, dir: string): Promise<void>;
   describe(imagePath: string): Promise<DescribeResult>;
+  /** A new description only (Regenerate): sampled, so each call may word it differently. */
+  caption(imagePath: string): Promise<string>;
   keywords(imagePath: string): Promise<KeywordResult>;
   embedText(text: string): Promise<Float32Array>;
   close(): Promise<void>;
@@ -90,6 +92,7 @@ export function workerBackend(threads: number, workerFile: string): TaggerBacken
       await call({ op: 'load', part, dir, dtype: model.dtype, threads, keywordThreshold: model.keywordThreshold ?? 0, vocabulary: [...VOCABULARY] });
     },
     describe: (path) => call<DescribeResult>({ op: 'describe', path }),
+    caption: (path) => call<string>({ op: 'caption', path }),
     keywords: (path) => call<KeywordResult>({ op: 'keywords', path }),
     embedText: (text) => call<Float32Array>({ op: 'embedText', text }),
     async close() {
