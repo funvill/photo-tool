@@ -115,7 +115,7 @@ Built 2026-11-23 on branch `gallery` (eight tasks, branched from `main` at `27b3
 23. **Closing with unsaved edits:** closing the window shows "Close without saving" or "Keep editing"; opening another folder asks too.
 24. **A transparent PNG edited in info mode, then imported:** expect the transparency to be lost in the editor (known limitation above).
 
-**Photo score, nudges and undo (branch `gallery-score`, built 2026-11-24, branched from `main`; not pushed).** Design: `docs/superpowers/specs/2026-11-24-gallery-photo-score-design.md`. Adds the version in the top bar (bumped once per commit), a photo score per photo (details panel with a hover breakdown, and a badge on each tile; `src/core/photoScore.ts`), Up/Down to nudge it (`scoreAdjust` in photoinfo.json, a green or red toast on the preview), Left/Right only to move, and Ctrl+Z undo (the last 100 changes). The preview and its row now clip what they hold. The scroll bar Steven saw on a portrait photo in a full-screen wide window could not be reproduced in Chrome; only the details panel scrolls there, when it is taller than the window.
+**Photo score, nudges and undo (branch `gallery-score`, built 2026-11-24, branched from `main`; pushed to `origin`, github.com/funvill/photo-tool, as a backup).** Design: `docs/superpowers/specs/2026-11-24-gallery-photo-score-design.md`. Adds the version in the top bar (bumped once per commit), a photo score per photo (details panel with a hover breakdown, and a badge on each tile; `src/core/photoScore.ts`), Up/Down to nudge it (`scoreAdjust` in photoinfo.json, a green or red toast on the preview), Left/Right only to move, and Ctrl+Z undo (the last 100 changes). The preview and its row now clip what they hold. The scroll bar Steven saw on a portrait photo in a full-screen wide window could not be reproduced in Chrome; only the details panel scrolls there, when it is taller than the window.
 
 **Checks only a person can do for the score (none done yet):**
 
@@ -123,6 +123,17 @@ Built 2026-11-23 on branch `gallery` (eight tasks, branched from `main` at `27b3
 26. **Does the score rank well?** In a real folder, sort through by score once it can be sorted; check the sharpest, best-exposed shots score high and the blurry or blown ones low, and that the hover breakdown makes sense.
 27. **Nudging fast:** hold or tap Up and Down quickly; the toast keeps up, the score lands on the right number, and photoinfo.json has the same `scoreAdjust` after a reload.
 28. **Ctrl+Z:** undo a run of hides, stars and nudges; each comes back in reverse order, with a toast; Ctrl+Z while typing in the description only undoes the typing.
+
+**Photo tagging (same branch, `gallery-score`, built 2026-11-24).** Design: `docs/superpowers/specs/2026-11-24-gallery-tagging-and-faces-design.md`; plan: `docs/superpowers/plans/2026-11-24-gallery-tagging.md`; measurements: `docs/superpowers/notes/2026-11-24-tagging-measurements.md`. Settings → Photo tagging downloads Florence-2 (descriptions and objects) and CLIP (keywords and search by meaning) from Hugging Face on request, pinned to a commit and checked by SHA-256 (`src/core/tagModels.ts`, `src/gallery/server/models/`). They run on the CPU in a worker thread with Transformers.js and onnxruntime-node (`src/gallery/server/tagging/`). The gallery tags the open folder in the background, keeps the results by content key in its catalogue, and shows them in **What's in it**, as chip filters and in search (words, then "Also matching by meaning"). Faces are a separate, later plan. What the tests cover: fake models served from memory for the unit and e2e tests (no network); the real models were run in Node from source and from the built `tagging-worker.cjs` on the generated fixtures, and one real download (CLIP base) went through the app's own downloader. Not yet run: tagging inside the packaged Electron app.
+
+**Checks only a person can do for tagging (none done yet):**
+
+29. **Each download for real:** on this PC, download each of the four choices from Settings. The size matches what Settings says, the progress bar moves, Cancel stops it and a second Download carries on from where it stopped. Note the time each takes.
+30. **The installed app tags:** build the Windows installer (`npm run dist`), install it, choose both smaller models and open a folder. The bar shows "Tagging … of …" and What's in it fills in. This is the first run of the worker, Transformers.js and the onnxruntime binaries from `app.asar.unpacked` under Electron; if it fails, Settings shows **Not working** and the log says why.
+31. **Overnight on a real folder:** a folder of a few thousand photos with both smaller models. The next morning it is done; Pause holds and Resume carries on; closing the gallery and opening the folder again starts where it left off, without looking at a photo twice; the PC stays usable meanwhile (tagging uses half the cores).
+32. **Is it any good on real photos?** Read the descriptions, keywords and objects of a few dozen real photos (people, food, buildings, landscapes, documents). The keyword cut-off (0.05) and the search-by-meaning cut-offs (cosine 0.27 for CLIP base, 0.24 for large) were set on generated pictures, not real ones: note searches that find too much or too little. The cut-offs are in `src/core/tagModels.ts`.
+33. **Search by meaning finds what you expect:** search for things you know are in the folder by a word no keyword uses ("seaside" for harbour photos, "dinner" for food). Check what shows under "Also matching by meaning", and that the grid stays quick while typing.
+34. **Remove frees the space:** after Remove, the model's folder under `%APPDATA%\Photobook Gallery\data\models` is gone, the part is Off, and What's in it says "Tagging is off".
 
 ## Linux
 
@@ -182,6 +193,7 @@ The generated notices file covers 135 packages. Before giving the app to anyone:
 - **On Linux the build modifies sharp's Apache-2.0 binding** (the shim). The notices say so when generated on Linux.
 - **HEVC patents:** see decision 1 below.
 - **Fonts:** 19 are OFL 1.1 and one is Apache 2.0. None restricts redistribution with software.
+- **Photo tagging (branch `gallery-score`):** `@huggingface/transformers` (Apache-2.0) ships with `onnxruntime-node` and `onnxruntime-common` (MIT), and its Node build has `onnxruntime-web`'s code (MIT, which uses `guid-typescript`, ISC) inlined, though the separate `onnxruntime-web` package is left out of the app. These licence texts are not yet in the notices: check the generated file and add `scripts/notices/<name>.txt` for any it reports as missing. The models themselves are downloaded by the user, not shipped: Florence-2 (base and large) and CLIP base declare MIT on Hugging Face; CLIP large declares no licence there (see decision 7).
 
 ## Next steps, in order
 
@@ -204,6 +216,7 @@ The generated notices file covers 135 packages. Before giving the app to anyone:
 4. **Who the users are** (family, colleagues, the public), which sets how much polish and help text is needed.
 5. **Which Linux distributions** have to work.
 6. **Keep or delete `spike/`.** 972 MB, ignored by git. Its findings are in `spike/electron/RESULTS.md` and summarised in the plan.
+7. **The larger keywords model's licence.** `Xenova/clip-vit-large-patch14` (and OpenAI's own Hugging Face page for CLIP large) declare no licence. OpenAI released CLIP's code and weights on GitHub under MIT, and Settings shows "MIT" on that basis. Either keep it on that basis, or swap the larger keywords choice for SigLIP 2 (`onnx-community/siglip2-large-patch16-384-ONNX`, Apache-2.0), which needs a small change to the worker and a new measurement download.
 
 ## Things that will bite
 

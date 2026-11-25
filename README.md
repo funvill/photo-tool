@@ -161,6 +161,7 @@ In a plain browser the gallery can edit and save to the info file, but Save as a
 
 - **Photo**: date, size, megapixels, shape, format and folder.
 - **Camera**: camera, lens, focal length, aperture, shutter speed, ISO, exposure compensation and flash, when the file has them.
+- **What's in it**: what photo tagging found (see Photo tagging below): a sentence about the photo, its keywords and the objects in it. Click a keyword or an object to show only the photos that have it.
 - **Histogram**: red, green, blue and brightness, with the share of clipped shadows and highlights.
 - **Place**, **People**, **Date and time**, and **Description and notes**: the fields you can type. Each is saved when you leave the field.
 
@@ -185,9 +186,19 @@ In a plain browser the gallery can edit and save to the info file, but Save as a
 - **Hidden**: leave out, show or only;
 - **Has location** and **Has people**;
 - one subfolder;
-- a search of descriptions and notes.
+- keywords and objects picked in **What's in it** (each shows in the bar with a **×** to take it away);
+- **Search photos**: words in the descriptions and notes, and in what photo tagging found. With keywords on (see Photo tagging), the photos that match the words *by meaning* follow, under "Also matching by meaning": "coffee" also finds a photo tagged "cafe".
 
 **Clear** turns every filter off.
+
+**Photo tagging.** The gallery can look at each photo and write down what is in it, on this computer. It is off until you turn it on in **Settings → Photo tagging**, which has two parts, each **Off** or one of two models:
+
+- **Descriptions and objects** (Florence-2): a sentence about the photo, and the things in it with a count ("person ×3"). The smaller model is 277 MB and takes about 6 s a photo; the larger is 832 MB and about 20 s.
+- **Keywords and search by meaning** (CLIP): up to 12 keywords for each photo, and the search by meaning described above. The smaller model is 156 MB and takes well under a second a photo; the larger is 434 MB and about half a second.
+
+A model is downloaded from Hugging Face only when you click **Download** and say yes to the size it shows. The files are pinned to one version and checked against their known fingerprints before use; a download can be cancelled, and continues where it stopped. **Remove** deletes a model's files. They are kept in the gallery's data folder, under `models`. Once downloaded, the models run on this computer, on its processor; the photos never leave it, and nothing else is sent anywhere. All four models are MIT licensed.
+
+Once a folder is read, its photos are tagged one at a time in the background: the selected photo first, then the ones on screen, then the rest. The bar shows "Tagging 120 of 2,140" with **Pause** and **Resume**. With the smaller models, a folder of 2,000 photos takes about 3½ hours, so a big folder is best left overnight. What was found is kept with the thumbnails, by the photo's content, so a photo is looked at once even if it is renamed or opened from another folder, and closing the gallery loses nothing. Choosing another model for a part looks at every photo again with it. A model that is damaged or won't load shows **Not working · Download again** in Settings.
 
 **Where the info is kept.** Stars and everything you type go into `photoinfo.json` in the same folder as the photo, the same file the editor reads (see Stars and photoinfo.json above). A star set in the gallery shows up in the editor within about 3 seconds, and the other way round. If the folder is read-only, the info goes into the editor's data folder instead, under `photoinfo/` (`%APPDATA%\Photobook Studio\data\photoinfo` on Windows). The gallery shows "Read-only folder: stars kept in Photobook Studio" when that happens, and the editor still sees the stars. **Tidy photo info…** removes info kept for photos that are no longer in the folder. The gallery's own thumbnails and recent folders are in `%APPDATA%\Photobook Gallery\data` (`~/.config/Photobook Gallery/data` on Linux); **File → Open the data folder** shows it.
 
