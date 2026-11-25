@@ -7,7 +7,7 @@ import { api } from '../api';
 import { useEditor } from '../store';
 import { ColorInput } from './ColorInput';
 import { TypeSection } from './TypePanel';
-import { Icon } from './Icon';
+import { Icon } from '../../../shared/web/components/Icon';
 import { NumField } from './Inspector';
 
 export function BookPanel() {

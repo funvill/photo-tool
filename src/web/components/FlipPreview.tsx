@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { COVER_INDEX, coverDims, geometryFor, spreadPagesLabel, type BookDocument } from '../../core';
 import { useEditor } from '../store';
-import { Icon } from './Icon';
+import { Icon } from '../../../shared/web/components/Icon';
 import { SpreadView } from './SpreadView';
 
 // Flip-through preview: the book as a reader sees it — closed front cover, each spread with real

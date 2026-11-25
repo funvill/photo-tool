@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { COVER_INDEX, geometryFor, spreadPagesLabel, type Spread } from '../../core';
 import { useEditor } from '../store';
-import { Icon } from './Icon';
+import { Icon } from '../../../shared/web/components/Icon';
 import { SpreadView } from './SpreadView';
 
 /** The whole book at a glance — the place to judge pacing and rhythm. Click a spread to edit it. */

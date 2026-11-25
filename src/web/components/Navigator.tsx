@@ -1,7 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { COVER_INDEX, geometryFor, insertSpreadAfter, moveSpread, spreadPagesLabel, type BookSettings, type BookStyle, type PhotoAsset, type Spread } from '../../core';
 import { useEditor } from '../store';
-import { Icon } from './Icon';
+import { Icon } from '../../../shared/web/components/Icon';
 import { SpreadView } from './SpreadView';
 
 const THUMB_H = 64;

@@ -35,7 +35,7 @@ function checkResources(root: string, kind: StartMessage['kind']) {
   const page = join(root, 'web', kind === 'gallery' ? 'gallery.html' : 'index.html');
   if (!existsSync(page)) missing.push(page);
   if (!existsSync(join(root, 'world-atlas', 'countries-10m.json'))) missing.push(join(root, 'world-atlas', 'countries-10m.json'));
-  // The HEIC decoder and the PDF renderer (see src/server/resources.ts).
+  // The HEIC decoder and the PDF renderer (see shared/server/resources.ts).
   for (const f of [join(root, 'libheif', 'libheif-bundle.js'), join(root, 'pdfium', 'index.cjs'), join(root, 'pdfium', 'pdfium.wasm')]) if (!existsSync(f)) missing.push(f);
   const fonts = join(root, 'fonts');
   if (!existsSync(fonts) || !readdirSync(fonts).some((f) => f.endsWith('.woff'))) missing.push(join(fonts, '*.woff'));

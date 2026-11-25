@@ -7,7 +7,7 @@ import { retrySave, selectedElement, selectedIds, useEditor } from '../store';
 import { Canvas } from './Canvas';
 import { ExportDialog } from './ExportDialog';
 import { FlipPreview } from './FlipPreview';
-import { Icon } from './Icon';
+import { Icon } from '../../../shared/web/components/Icon';
 import { Inspector } from './Inspector';
 import { Library } from './Library';
 import { Navigator } from './Navigator';

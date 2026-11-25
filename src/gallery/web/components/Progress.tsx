@@ -1,4 +1,4 @@
-import { estimateRemaining, formatRemaining } from '../../../web/eta';
+import { estimateRemaining, formatRemaining } from '../../../../shared/web/eta';
 import { useGallery } from '../store';
 
 /** While a folder is being read: how far along it is, and roughly how long is left. */

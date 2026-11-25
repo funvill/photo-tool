@@ -1,9 +1,9 @@
 import { useEffect, useState, type MouseEvent } from 'react';
-import { editKey, editPlan, isIdentityEdit, type PhotoEdit } from '../../../core/photoEdit';
+import { editKey, editPlan, isIdentityEdit, type PhotoEdit } from '../../../../shared/core/photoEdit';
 import { fullUrl, thumbUrl, type GalleryItem } from '../api';
 import { useShallow } from 'zustand/react/shallow';
 import { editActions, selectStackPlace, shownEdit, useFilteredItems, useGallery } from '../store';
-import { Icon } from '../../../web/components/Icon';
+import { Icon } from '../../../../shared/web/components/Icon';
 import { EditPane } from './EditPane';
 import { EditedImage } from './EditedImage';
 import { MiniMap } from './MiniMap';

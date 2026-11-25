@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { CommandError, expandGroups, findSurface, reconcileCover, refreshContents, type BookDocument, type DraftReport, type PhotoAsset, type UpdateReport } from '../core';
 import { api, ApiError, type ImportJob, type LinkedFolder } from './api';
-import { desktop } from './desktop';
+import { desktop } from '../../shared/web/desktop';
 import { splitDropResult } from './dropResult';
 
 // Editor state. The document is immutable; every committed edit pushes the previous document onto

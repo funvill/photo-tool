@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { api, isBrowserBackend, shelfPreviewUrl, type LinkedFolder, type ShelfFolder, type ShelfListing } from '../api';
 import { useEditor } from '../store';
 import { FolderPicker } from './FolderPicker';
-import { Icon } from './Icon';
+import { Icon } from '../../../shared/web/components/Icon';
 
 const OPEN_KEY = 'photobook:shelfOpen';
 

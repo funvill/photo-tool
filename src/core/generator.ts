@@ -3,11 +3,11 @@ import { pageContentRect, pageNumberOf, spreadsForPageCount, type PageSide } fro
 import { layoutCollage } from './collage';
 import {
   aspectOf, chronological, dateRangeOf, dayKey, formatDay, groupSimilar, scorePhotos, segmentMoments, type PhotoScore,
-} from './curation';
+} from '../../shared/core/curation';
 import { chooseTemplate, coverDpi, keepSubjectOutOfGutter, layoutPage, placeSubjectOffSpine, templateOrThrow } from './layout';
 import { mulberry32, newId, type Rng } from './random';
 import { stylePreset, styleFromPreset, type StylePreset } from './styles';
-import { clamp } from './units';
+import { clamp } from '../../shared/core/units';
 import { pageTemplatesFor } from './templates';
 import { withFingerprints } from './draftState';
 import { chooseCoverPhotos, makeCover, reconcileCover } from './cover';

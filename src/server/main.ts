@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createApp } from './app';
-import { projectRoot, webDir } from './resources';
+import { projectRoot, webDir } from '../../shared/server/resources';
 
 // `--production` is the same as NODE_ENV=production, for shells that can't set a variable inline (Windows).
 const production = process.env.NODE_ENV === 'production' || process.argv.includes('--production');

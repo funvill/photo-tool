@@ -4,7 +4,7 @@ import {
   updateDraft, type GenerationSettings, type PhotoAsset, type UpdateReport,
 } from '../../core';
 import { useEditor } from '../store';
-import { Icon } from './Icon';
+import { Icon } from '../../../shared/web/components/Icon';
 import { BookTemplatesSection } from './BookTemplates';
 import { pageLimitWarning, pagesForStarred } from './draftPages';
 import { UpdateSummary } from './UpdateSummary';

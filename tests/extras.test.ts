@@ -10,7 +10,7 @@ import {
   type CalendarElement, type ImageElement,
 } from '../src/core';
 import { exportPosterPdf } from '../src/server/pdf';
-import { listPlaces, placeOutline, suggestPlaces } from '../src/server/places';
+import { listPlaces, placeOutline, suggestPlaces } from '../shared/server/places';
 import { fakeAsset, resetFakeAssets } from './helpers';
 
 beforeEach(() => resetFakeAssets());

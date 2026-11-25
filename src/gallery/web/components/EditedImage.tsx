@@ -1,5 +1,5 @@
 import { useState, type CSSProperties } from 'react';
-import { editCss, type PhotoEdit } from '../../../core/photoEdit';
+import { editCss, type PhotoEdit } from '../../../../shared/core/photoEdit';
 import type { Size } from '../../../core/previewZoom';
 
 export interface EditedImageProps {

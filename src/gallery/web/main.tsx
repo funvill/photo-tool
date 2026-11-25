@@ -1,8 +1,8 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-// The editor's bundled fonts and styles: served by this app, never fetched from the internet.
-import '../../web/fonts.css';
-import '../../web/styles.css';
+// The bundled fonts and the shared base styles: served by this app, never fetched from the internet.
+import '../../../shared/web/fonts.css';
+import '../../../shared/web/base.css';
 import './gallery.css';
 import { GalleryApp } from './GalleryApp';
 

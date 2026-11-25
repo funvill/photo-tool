@@ -1,6 +1,6 @@
 // The gallery viewer's keys, and how clicks build the grid's selection (which a drag then takes along).
 import { describe, expect, it } from 'vitest';
-import { clickSelect, dragPaths, flagTargets, gridStep, nextAfterRemoval, viewerNeighbours, viewerStep } from '../src/core';
+import { clickSelect, dragPaths, flagTargets, gridStep, nextAfterRemoval, viewerNeighbours, viewerStep } from '../src/core/galleryViewer';
 
 describe('viewerStep', () => {
   it('moves with the arrow keys and stops at the ends', () => {

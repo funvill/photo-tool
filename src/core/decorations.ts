@@ -5,7 +5,7 @@ import { quickStyleFields, quickStyle, estimateTextHeightMm } from './quickStyle
 import { shapeDef } from './shapes';
 import { findSurface } from './surface';
 import { newId } from './random';
-import { MM_PER_PT } from './units';
+import { MM_PER_PT } from '../../shared/core/units';
 
 // Adding design elements (shapes, banners, lines, icons) to a page or poster.
 

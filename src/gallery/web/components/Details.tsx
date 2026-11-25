@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { aspectRatio, formatAperture, formatBias, formatFocal, formatShutter, megapixels } from '../../../core/photoFacts';
+import { aspectRatio, formatAperture, formatBias, formatFocal, formatShutter, megapixels } from '../../../../shared/core/photoFacts';
 import { fromDateTimeLocal, normalisePeople, toDateTimeLocal } from '../../../core/galleryEdit';
-import { Icon } from '../../../web/components/Icon';
-import { formatSize, formatTaken } from '../../../web/components/HoverPreview';
+import { Icon } from '../../../../shared/web/components/Icon';
+import { formatSize, formatTaken } from '../../../../shared/web/components/HoverPreview';
 import { galleryApi, type GalleryItem } from '../api';
 import { useGallery } from '../store';
 import { Histogram } from './Histogram';

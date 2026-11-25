@@ -1,6 +1,6 @@
-import { cleanupSuggestions, type PhotoFlags } from './cleanup';
-import type { PhotoAnalysis } from './photoAnalysis';
-import type { PhotoAsset } from './photoAsset';
+import { cleanupSuggestions, type PhotoFlags } from '../../shared/core/cleanup';
+import type { PhotoAnalysis } from '../../shared/core/photoAnalysis';
+import type { PhotoAsset } from '../../shared/core/photoAsset';
 import { colourVariety } from './photoScore';
 
 // The gallery's sorts and filters, free of any UI or server. The "facts" of a folder (interesting

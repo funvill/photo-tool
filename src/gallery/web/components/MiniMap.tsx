@@ -1,7 +1,7 @@
 import type { PointerEvent } from 'react';
 import { thumbUrl } from '../api';
 import type { Size } from '../../../core/previewZoom';
-import type { CropRect, PhotoEdit } from '../../../core/photoEdit';
+import type { CropRect, PhotoEdit } from '../../../../shared/core/photoEdit';
 import { EditedImage } from './EditedImage';
 
 /** The long side of the mini map, in pixels. */

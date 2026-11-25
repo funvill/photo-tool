@@ -1,4 +1,4 @@
-import type { DesktopApi } from '../../shared/desktopApi';
+import type { DesktopApi } from '../../../shared/desktop/desktopApi';
 
 // Settings' "When I save an edit": change only the photo's info file ('info', the default) or the photo
 // file itself ('file'). In the desktop app the main process keeps it in the gallery's settings file; in a

@@ -5,7 +5,7 @@
 //                            what they need)
 //   dist/desktop/resources/  fonts, world-atlas, the built editor and gallery (web/index.html,
 //                            web/gallery.html) and the icon (the server's resource root, see
-//                            src/server/resources.ts)
+//                            shared/server/resources.ts)
 //   dist/desktop/icon.png    the installer's icon
 //   dist/desktop/icons/      the same icon in the sizes a Linux desktop looks for
 //

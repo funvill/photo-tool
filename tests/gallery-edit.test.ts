@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fromDateTimeLocal, locationToSave, normalisePeople, parseLocation, toDateTimeLocal } from '../src/core';
+import { fromDateTimeLocal, locationToSave, normalisePeople, parseLocation, toDateTimeLocal } from '../src/core/galleryEdit';
 
 describe('gallery edit rules', () => {
   it('normalises people: trimmed, no repeats ignoring case, no empties', () => {

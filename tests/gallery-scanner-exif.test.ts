@@ -7,8 +7,8 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const unreadable = vi.hoisted(() => ({ on: false }));
-vi.mock('../src/server/media', async (importOriginal) => {
-  const media = await importOriginal<typeof import('../src/server/media')>();
+vi.mock('../shared/server/media', async (importOriginal) => {
+  const media = await importOriginal<typeof import('../shared/server/media')>();
   return {
     ...media,
     readMetadata: async (path: string) =>

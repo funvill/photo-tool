@@ -5,7 +5,7 @@ import { canEncodeWebp, decode, fitted, pixels, resized } from './canvas';
 import { serve } from './rpc';
 
 // Import work for one photo, off the main thread: hash, EXIF, decode, thumbnails and analysis —
-// the browser's version of src/server/media.ts.
+// the browser's version of shared/server/media.ts.
 
 export const THUMB_SIZES = { s: 400, m: 1600 } as const;
 const ALPHA_FORMATS = new Set(['png', 'webp']);

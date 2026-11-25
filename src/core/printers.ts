@@ -1,5 +1,5 @@
 import type { BindingId, BleedMode, BookDocument, BookSettings, PrinterId } from './model';
-import { inchToMm } from './units';
+import { inchToMm } from '../../shared/core/units';
 
 // Printer presets. Every number below is either taken from the printer's published documentation
 // (source noted) or explicitly marked as an estimate the user should replace with the value from

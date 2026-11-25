@@ -2,8 +2,8 @@ import { useEffect, useReducer, useState } from 'react';
 import { POSTER_SIZES, PRINTERS, SIZE_PRESETS, STYLE_PRESETS, printer, type BindingId, type PrinterId } from '../../core';
 import { api, isBrowserBackend, type ProjectSummary } from '../api';
 import { DEMO_PIECES, DEMO_TITLES, demoBuilding, demoPieceOf, onDemoChange, type DemoPiece } from '../demo/status';
-import { Icon } from './Icon';
-import { Modal } from './Modal';
+import { Icon } from '../../../shared/web/components/Icon';
+import { Modal } from '../../../shared/web/components/Modal';
 import { WebNotes, downloadBackup } from './WebNotes';
 
 type Deleted = { id: string; title: string; deletedAt: string; product: 'book' | 'poster' };

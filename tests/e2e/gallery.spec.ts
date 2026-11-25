@@ -4,7 +4,7 @@ import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, renameSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
-import { isSupported } from '../../src/server/media';
+import { isSupported } from '../../shared/server/media';
 
 const FIXTURES = join(process.cwd(), 'fixtures', 'generated', 'trip');
 

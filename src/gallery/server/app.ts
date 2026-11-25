@@ -3,12 +3,12 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { basename, dirname, extname, join, resolve } from 'node:path';
 import sharp from 'sharp';
-import { folderStamp, forgetPhotos, infoFor, PhotoInfoWriteError, readFolderInfo, updatePhotoInfo, type FolderInfo, type PhotoInfo, type PhotoInfoOptions } from '../../photoinfo';
-import { isIdentityEdit, parseEdit } from '../../core/photoEdit';
-import { hashFile, workingFile } from '../../server/media';
-import { editFormatFor, renderEdited } from '../../server/photoEditRender';
-import { listPlaces, suggestPlaces } from '../../server/places';
-import { setResourceRoot } from '../../server/resources';
+import { folderStamp, forgetPhotos, infoFor, PhotoInfoWriteError, readFolderInfo, updatePhotoInfo, type FolderInfo, type PhotoInfo, type PhotoInfoOptions } from '../../../shared/photoinfo';
+import { isIdentityEdit, parseEdit } from '../../../shared/core/photoEdit';
+import { hashFile, workingFile } from '../../../shared/server/media';
+import { editFormatFor, renderEdited } from '../../../shared/server/photoEditRender';
+import { listPlaces, suggestPlaces } from '../../../shared/server/places';
+import { setResourceRoot } from '../../../shared/server/resources';
 import { Catalog, type GalleryPhoto } from './catalog';
 import { GalleryFolderError, Scanner } from './scanner';
 import { MODEL_CATALOGUE, type ModelChoice } from '../../core/tagModels';
@@ -27,7 +27,7 @@ export interface GalleryAppOptions {
   staticDir?: string;
   /** Development: where the Vite dev server shows the gallery. */
   devWebUrl?: string;
-  /** A packaged app's resource folder (see src/server/resources.ts). Leave it out when running from source. */
+  /** A packaged app's resource folder (see shared/server/resources.ts). Leave it out when running from source. */
   resourceRoot?: string;
   /** Replaces how photoinfo.json is written or renamed. A seam for tests (a read-only or busy folder). */
   photoInfoSeams?: Pick<PhotoInfoOptions, 'writeFile' | 'rename'>;

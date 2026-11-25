@@ -5,9 +5,9 @@ import { join } from 'node:path';
 import exifr from 'exifr';
 import sharp from 'sharp';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { editPlan, type PhotoEdit } from '../src/core';
-import { orientedSize } from '../src/server/media';
-import { editFormatFor, renderEdited } from '../src/server/photoEditRender';
+import { editPlan, type PhotoEdit } from '../core/photoEdit';
+import { orientedSize } from '../server/media';
+import { editFormatFor, renderEdited } from '../server/photoEditRender';
 
 const dir = mkdtempSync(join(tmpdir(), 'pb-edit-render-'));
 const id = (over: Partial<PhotoEdit> = {}): PhotoEdit => ({ rotate: 0, straighten: 0, crop: { x: 0, y: 0, w: 1, h: 1 }, ...over });

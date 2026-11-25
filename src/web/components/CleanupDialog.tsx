@@ -2,8 +2,8 @@ import { useMemo, useState } from 'react';
 import { cleanupSuggestions, type PhotoAsset } from '../../core';
 import { thumbUrl } from '../api';
 import { useEditor } from '../store';
-import { Icon } from './Icon';
-import { Modal } from './Modal';
+import { Icon } from '../../../shared/web/components/Icon';
+import { Modal } from '../../../shared/web/components/Modal';
 
 // Library clean-up: near-identical shots side by side with a suggested keeper, plus blurry or badly
 // exposed photos and exact duplicates. Click a photo to keep or hide it; nothing changes until you

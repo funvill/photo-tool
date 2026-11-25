@@ -10,9 +10,9 @@ import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 import { fontFilePath } from '../src/core';
 import { createApp } from '../src/server/app';
-import { decodeHeic, embedIccProfile, heicToJpeg } from '../src/server/heic';
+import { decodeHeic, embedIccProfile, heicToJpeg } from '../shared/server/heic';
 import { rasterPdf } from '../src/server/pdfRaster';
-import { fontFile } from '../src/server/resources';
+import { fontFile } from '../shared/server/resources';
 
 const FIXTURES = join(process.cwd(), 'fixtures', 'generated', 'trip');
 const HEIC = join(FIXTURES, 'day2-06-heic-sunset.heic');

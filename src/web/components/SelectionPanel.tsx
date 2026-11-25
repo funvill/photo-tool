@@ -5,7 +5,7 @@ import {
 import { duplicate, group, remove, reorder, toggleLock, ungroup } from '../elementActions';
 import { useShallow } from 'zustand/react/shallow';
 import { selectedIds, useEditor } from '../store';
-import { Icon } from './Icon';
+import { Icon } from '../../../shared/web/components/Icon';
 import { OpacitySlider } from './DesignPanel';
 
 // Several things selected: align, distribute, group. And the Layers list for the current page.

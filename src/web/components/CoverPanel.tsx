@@ -5,7 +5,7 @@ import {
 import { useEffect, useState } from 'react';
 import { useEditor } from '../store';
 import { ColorInput } from './ColorInput';
-import { Icon } from './Icon';
+import { Icon } from '../../../shared/web/components/Icon';
 import { NumField } from './Inspector';
 
 const SOURCE_LABEL = {

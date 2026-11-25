@@ -1,5 +1,5 @@
-import { Modal } from '../../../web/components/Modal';
-import { desktop } from '../../../web/desktop';
+import { Modal } from '../../../../shared/web/components/Modal';
+import { desktop } from '../../../../shared/web/desktop';
 import { useGallery } from '../store';
 import { TaggingSettings } from './TaggingSettings';
 

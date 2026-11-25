@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, type StorageInfo } from '../api';
-import { Icon } from './Icon';
+import { Icon } from '../../../shared/web/components/Icon';
 
 const OPEN_KEY = 'photobook:webNotesOpen';
 const mb = (n: number) => (n >= 1e9 ? `${(n / 1e9).toFixed(1)} GB` : `${Math.max(0, Math.round(n / 1e6))} MB`);

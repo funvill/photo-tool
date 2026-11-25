@@ -5,7 +5,7 @@ import 'leaflet/dist/leaflet.css';
 import 'leaflet.markercluster/dist/MarkerCluster.css';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { locatedItems, noLocationText, OSM_ATTRIBUTION, OSM_TILE_URL } from '../../../core/galleryMap';
-import { desktop } from '../../../web/desktop';
+import { desktop } from '../../../../shared/web/desktop';
 import { thumbUrl, type GalleryItem } from '../api';
 import { loadMapConsent, saveMapConsent } from '../mapConsent';
 import { useFilteredItems, useGallery } from '../store';

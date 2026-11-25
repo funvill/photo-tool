@@ -1,7 +1,7 @@
 import type { Dirent } from 'node:fs';
 import { readdir as fsReaddir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { isSupported } from '../../server/media';
+import { isSupported } from '../../../shared/server/media';
 
 // The gallery's own folder walk. Same rules as the editor's scanFolder (supported formats only,
 // dotfiles skipped, numeric file-name order), but a subfolder that can't be read is reported and

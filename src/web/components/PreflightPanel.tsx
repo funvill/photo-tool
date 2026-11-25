@@ -1,7 +1,7 @@
 import { useDeferredValue, useMemo } from 'react';
 import { preflight, surfaceAt, type PreflightIssue } from '../../core';
 import { useEditor } from '../store';
-import { Icon } from './Icon';
+import { Icon } from '../../../shared/web/components/Icon';
 
 /**
  * Preflight is cheap but not free. It runs on the committed document only — mid-drag frames reuse

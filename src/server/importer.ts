@@ -3,11 +3,11 @@ import { readdir, rm } from 'node:fs/promises';
 import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { editKey, isIdentityEdit, parseEdit, type PhotoEdit } from '../core';
-import { infoFor, readFolderInfo, type FolderInfo, type PhotoInfoOptions } from '../photoinfo';
+import { infoFor, readFolderInfo, type FolderInfo, type PhotoInfoOptions } from '../../shared/photoinfo';
 import type { Store } from './db';
 import { expandHome } from './folders';
-import { renderEdited } from './photoEditRender';
-import { analyze, existingThumb, fileStat, hashFile, isSupported, makeThumbnails, orientedSize, readMetadata, workingFile } from './media';
+import { renderEdited } from '../../shared/server/photoEditRender';
+import { analyze, existingThumb, fileStat, hashFile, isSupported, makeThumbnails, orientedSize, readMetadata, workingFile } from '../../shared/server/media';
 
 // Background import jobs. The HTTP request returns immediately with a job id; the UI polls progress
 // and sees photos appear as they finish. A bounded worker pool keeps memory flat for large folders.

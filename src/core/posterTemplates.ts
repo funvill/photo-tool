@@ -1,15 +1,15 @@
 import type { BookDocument, CollageSettings, Element, Gradient, PhotoAsset, Rect, ShapeElement, TextElement } from './model';
-import { dateRangeOf } from './curation';
+import { dateRangeOf } from '../../shared/core/curation';
 import { gradeFromPreset } from './grade';
 import { makeImageElement, makeShapeElement, makeTextElement } from './layout';
 import { MONTHS, makeCalendar, photoDays } from './calendar';
-import { scorePhotos } from './curation';
+import { scorePhotos } from '../../shared/core/curation';
 import { curatePool, type CuratedPool } from './generator';
 import { generatePoster, type PosterReport } from './poster';
 import { estimateTextHeightMm, quickStyle, quickStyleFields } from './quickStyles';
 import { shapeDef } from './shapes';
 import { pageScale } from './typography';
-import { MM_PER_PT } from './units';
+import { MM_PER_PT } from '../../shared/core/units';
 import { newId } from './random';
 
 // Poster templates: a finished design — background, type, banners and icons — with an area for the

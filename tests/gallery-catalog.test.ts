@@ -8,7 +8,7 @@ import { Catalog } from '../src/gallery/server/catalog';
 import { GalleryFolderError, Scanner } from '../src/gallery/server/scanner';
 import { listPhotos, type ReadDir } from '../src/gallery/server/walk';
 import { scanFolder } from '../src/server/importer';
-import { analyze, readMetadata } from '../src/server/media';
+import { analyze, readMetadata } from '../shared/server/media';
 
 const TRIP = join(process.cwd(), 'fixtures', 'generated', 'trip');
 

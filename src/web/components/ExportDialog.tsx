@@ -1,10 +1,10 @@
 import { useState } from 'react';
 import { binding, coverGeometry, issueCounts, printablePages, printer, updateSettings, type BleedMode } from '../../core';
 import { api, downloadUrl, isBrowserBackend, type ExportResponse, type FileVerification, type FlipbookResponse, type ImageExportResponse } from '../api';
-import { desktop } from '../desktop';
+import { desktop } from '../../../shared/web/desktop';
 import { useEditor } from '../store';
-import { Icon } from './Icon';
-import { Modal } from './Modal';
+import { Icon } from '../../../shared/web/components/Icon';
+import { Modal } from '../../../shared/web/components/Modal';
 import { usePreflight } from './PreflightPanel';
 
 const inch = (mm: number) => (mm / 25.4).toFixed(3).replace(/\.?0+$/, '');

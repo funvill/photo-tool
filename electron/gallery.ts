@@ -6,7 +6,7 @@ import { spawn } from 'node:child_process';
 import { statSync } from 'node:fs';
 import { copyFile, rename, rm, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import { editFormatFor, type PhotoEdit } from '../src/core/photoEdit';
+import { editFormatFor, type PhotoEdit } from '../shared/core/photoEdit';
 import { galleryLaunchCommand, parseMode } from './config';
 import { dragFiles, dragRequest, preparedDragFor, sameDragList, type DragCheck, type PreparedDrag } from './drag';
 import { copyTextRequest, trashConfirm, trashPhotos, type TrashResult } from './fileActions';

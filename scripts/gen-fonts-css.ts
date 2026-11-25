@@ -1,4 +1,4 @@
-// Regenerate src/web/fonts.css from FONT_FAMILIES (tests/fonts.test.ts fails if they drift apart).
+// Regenerate shared/web/fonts.css from FONT_FAMILIES (tests/fonts.test.ts fails if they drift apart).
 //   npx tsx scripts/gen-fonts-css.ts
 import { writeFileSync } from 'node:fs';
 import { FONT_FAMILIES } from '../src/core/fonts';
@@ -9,5 +9,5 @@ const lines = [
   ...FONT_FAMILIES.flatMap((f) => f.weights.flatMap((w) => [`@import '@fontsource/${f.pkg}/${w}.css';`, ...(f.italic ? [`@import '@fontsource/${f.pkg}/${w}-italic.css';`] : [])])),
   '',
 ];
-writeFileSync('src/web/fonts.css', lines.join('\n'));
+writeFileSync('shared/web/fonts.css', lines.join('\n'));
 console.log(`fonts.css: ${FONT_FAMILIES.length} families`);

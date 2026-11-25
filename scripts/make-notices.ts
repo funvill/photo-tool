@@ -20,7 +20,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { projectRoot } from '../src/server/resources';
+import { projectRoot } from '../shared/server/resources';
 
 export interface Notices {
   text: string;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { estimateRemaining, formatRemaining } from '../src/web/eta';
+import { estimateRemaining, formatRemaining } from '../web/eta';
 
 describe('estimateRemaining', () => {
   it('is null before 5 photos', () => expect(estimateRemaining(4, 400, 0, 60_000)).toBeNull());

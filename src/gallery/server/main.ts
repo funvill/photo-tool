@@ -1,5 +1,5 @@
 import { join, resolve } from 'node:path';
-import { projectRoot, webDir } from '../../server/resources';
+import { projectRoot, webDir } from '../../../shared/server/resources';
 import { createGalleryApp } from './app';
 import { taggingWorkerSource } from './tagging/workerSource';
 

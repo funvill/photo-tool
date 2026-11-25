@@ -1,4 +1,4 @@
-import { Modal } from '../../../web/components/Modal';
+import { Modal } from '../../../../shared/web/components/Modal';
 import { useGallery } from '../store';
 
 /** "You have unsaved edits to N photos. Open another folder without saving?" Cancel keeps the folder open. */

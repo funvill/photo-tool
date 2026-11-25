@@ -14,7 +14,7 @@ import {
   readFolderInfo,
   updatePhotoInfo,
   type PhotoInfoOptions,
-} from '../src/photoinfo';
+} from '../shared/photoinfo';
 import { PhotoInfoIndex } from '../src/server/photoInfoIndex';
 import { fakeAsset } from './helpers';
 

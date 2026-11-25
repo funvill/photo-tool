@@ -25,7 +25,7 @@ describe('bundled fonts', () => {
   });
 
   it('the editor stylesheet loads exactly the fonts the exporter embeds', () => {
-    const css = readFileSync('src/web/fonts.css', 'utf8');
+    const css = readFileSync('shared/web/fonts.css', 'utf8');
     const imported = [...css.matchAll(/@import '@fontsource\/([\w-]+)\/(\d+(?:-italic)?)\.css'/g)].map((m) => `${m[1]}/${m[2]}`).sort();
     const expected = FONT_FAMILIES.flatMap((f) => f.weights.flatMap((w) => [`${f.pkg}/${w}`, ...(f.italic ? [`${f.pkg}/${w}-italic`] : [])])).sort();
     expect(imported, 'run: npx tsx scripts/gen-fonts-css.ts').toEqual(expected);

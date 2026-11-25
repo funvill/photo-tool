@@ -1,4 +1,4 @@
-import type { CropRect } from './photoEdit';
+import type { CropRect } from '../../shared/core/photoEdit';
 
 // The maths of the gallery's preview: the picture fitted to the pane, zoomed with the wheel, panned by
 // dragging. Pure, so it is tested without a browser. All sizes are pixels except where a fraction is said.

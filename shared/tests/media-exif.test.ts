@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
-import { exifFromTags, readMetadata } from '../src/server/media';
+import { exifFromTags, readMetadata } from '../server/media';
 
 describe('exifFromTags', () => {
   it('reads a full tag set', () => {

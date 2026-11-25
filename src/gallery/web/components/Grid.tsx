@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { dragPaths } from '../../../core/galleryViewer';
-import { desktop } from '../../../web/desktop';
+import { desktop } from '../../../../shared/web/desktop';
 import { gridWindow } from '../../../web/virtualGrid';
-import { isIdentityEdit } from '../../../core/photoEdit';
+import { isIdentityEdit } from '../../../../shared/core/photoEdit';
 import { selectMeaningStart, selectScores, selectVisible, shownEdit, useGallery, useStackInfo, useVisibleItems } from '../store';
 import { Tile } from './Tile';
 

@@ -14,7 +14,7 @@ import {
 } from '../src/core';
 import { createApp } from '../src/server/app';
 import { Store } from '../src/server/db';
-import { hasTransparency, makeThumbnails } from '../src/server/media';
+import { hasTransparency, makeThumbnails } from '../shared/server/media';
 import { fakeAsset, resetFakeAssets } from './helpers';
 
 const imgs = (doc: BookDocument) => doc.spreads[0].elements.filter((e): e is ImageElement => e.type === 'image');

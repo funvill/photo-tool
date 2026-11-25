@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { viewerNeighbours, viewerStep } from '../../../core/galleryViewer';
-import { Icon } from '../../../web/components/Icon';
-import { formatSize, formatTaken } from '../../../web/components/HoverPreview';
+import { Icon } from '../../../../shared/web/components/Icon';
+import { formatSize, formatTaken } from '../../../../shared/web/components/HoverPreview';
 import { thumbUrl, type GalleryItem } from '../api';
 import { selectVisible, useGallery, useVisibleItems } from '../store';
 

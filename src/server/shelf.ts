@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import sharp from 'sharp';
-import { heicImage } from './heic';
+import { heicImage } from '../../shared/server/heic';
 import { isInside, resolveFolder, scanFolder } from './importer';
 import type { Store } from './db';
 

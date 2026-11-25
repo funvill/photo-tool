@@ -15,7 +15,7 @@ import {
   turnedSize,
   type CropRect,
   type PhotoEdit,
-} from '../src/core/photoEdit';
+} from '../core/photoEdit';
 
 describe('straightenScale', () => {
   it('is 1 when not turned', () => {

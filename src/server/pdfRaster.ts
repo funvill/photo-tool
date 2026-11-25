@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import sharp, { type Sharp } from 'sharp';
 import type { PDFiumLibrary } from '@hyzyla/pdfium';
-import { pdfiumDir } from './resources';
+import { pdfiumDir } from '../../shared/server/resources';
 
 // Turning a page of the verified print PDF into pixels, for poster images and the flipbook.
 // macOS uses its own PDF renderer (`sips`), as before. Windows and Linux use PDFium, the renderer

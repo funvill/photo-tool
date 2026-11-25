@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { histogram } from '../src/core';
+import { histogram } from '../src/core/histogram';
 
 describe('histogram', () => {
   it('counts channels and luminance per bin, ignoring alpha', () => {

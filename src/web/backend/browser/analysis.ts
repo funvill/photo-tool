@@ -1,6 +1,6 @@
 import type { PhotoAnalysis } from '../../../core';
 
-// The photo analysis of src/server/media.ts (`analyze`), as pure functions over pixel buffers so
+// The photo analysis of shared/server/media.ts (`analyze`), as pure functions over pixel buffers so
 // the browser computes the same numbers from its own decode. Only the decode and resampling
 // differ (canvas instead of libvips); tests/browser-analysis.test.ts feeds these functions sharp's
 // buffers and checks they reproduce the server's values exactly.

@@ -179,10 +179,10 @@ function shelfPreview(c: Context, key: string, file: File, name: string): Promis
 /** The files of each drop job, to report the job's photos in drop order. */
 const dropped = new Map<string, File[]>();
 
-let placesCache: Promise<import('../../../shared/places').Place[]> | null = null;
+let placesCache: Promise<import('../../../../shared/server/placesLogic').Place[]> | null = null;
 const places = () =>
-  (placesCache ??= Promise.all([import('../../../shared/places'), import('world-atlas/countries-10m.json')]).then(([m, topo]) =>
-    m.placesFromTopology((topo as { default?: unknown }).default as import('../../../shared/places').PlacesTopology ?? (topo as unknown as import('../../../shared/places').PlacesTopology)),
+  (placesCache ??= Promise.all([import('../../../../shared/server/placesLogic'), import('world-atlas/countries-10m.json')]).then(([m, topo]) =>
+    m.placesFromTopology((topo as { default?: unknown }).default as import('../../../../shared/server/placesLogic').PlacesTopology ?? (topo as unknown as import('../../../../shared/server/placesLogic').PlacesTopology)),
   ));
 
 const outlineFonts = new Map<string, Promise<import('fontkit').Font>>();
@@ -432,11 +432,11 @@ export const browserBackend: Backend = {
 
   // ---- outlines
   async places() {
-    const { listPlaces } = await import('../../../shared/places');
+    const { listPlaces } = await import('../../../../shared/server/placesLogic');
     return listPlaces(await places());
   },
   async placeOutline(id) {
-    const { placeOutline } = await import('../../../shared/places');
+    const { placeOutline } = await import('../../../../shared/server/placesLogic');
     try {
       return placeOutline(await places(), id);
     } catch (e) {
@@ -444,7 +444,7 @@ export const browserBackend: Backend = {
     }
   },
   async suggestPlaces(points) {
-    const { suggestPlaces } = await import('../../../shared/places');
+    const { suggestPlaces } = await import('../../../../shared/server/placesLogic');
     const pts = points.filter((p) => Array.isArray(p) && p.length === 2 && p.every((n) => typeof n === 'number' && Number.isFinite(n)));
     return suggestPlaces(await places(), pts);
   },

@@ -3,7 +3,7 @@ import { setBackgroundImage, updateBackgroundImage } from '../../core';
 import { thumbUrl } from '../api';
 import { useEditor } from '../store';
 import { ASSET_MIME } from './Canvas';
-import { Icon } from './Icon';
+import { Icon } from '../../../shared/web/components/Icon';
 
 /**
  * A photo behind everything on the sheet. Drop a library photo on the field (or use the photo in the

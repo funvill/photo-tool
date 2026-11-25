@@ -1,7 +1,7 @@
 import { produce, type Draft } from 'immer';
 import type { BindingId, BookDocument, BookSettings, BookStyle, Element, ImageElement, PhotoAsset, PrinterId, Spread, TextRole } from './model';
 import { blankSpread, pageContentRect, pageTrimRect, type PageSide } from './book';
-import { aspectOf, dateRangeOf } from './curation';
+import { aspectOf, dateRangeOf } from '../../shared/core/curation';
 import { defaultCrop } from './geometry';
 import { chooseTemplate, isCutout, keepSubjectOutOfGutter, layoutPage, makeImageElement, makeTextElement, pageOfElement, templateOrThrow } from './layout';
 import { mulberry32, newId } from './random';
@@ -11,7 +11,7 @@ import { chooseCoverPhotos, coverPhotos, makeCover, reconcileCover } from './cov
 import { pageCountOf, presetSettings } from './printers';
 import { findSurface } from './surface';
 import { pageScale, recolorLinkedText, restyleText, roleSizePt, roleStyle, setRoleStyle, styleFields } from './typography';
-import { MM_PER_PT } from './units';
+import { MM_PER_PT } from '../../shared/core/units';
 import { layoutCollage } from './collage';
 import { MOSAIC_LAYOUT } from './generator';
 

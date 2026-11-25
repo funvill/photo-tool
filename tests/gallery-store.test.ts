@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GalleryItem } from '../src/gallery/server/app';
 
 const { useGallery, connectDesktop, guardUnload, selectVisible, selectStackInfo, selectFiltered, selectFacts, selectStackPlace, menuTargets, shownEdit, selectMeaningStart } = await import('../src/gallery/web/store');
-const { IDENTITY_EDIT } = await import('../src/core/photoEdit');
+const { IDENTITY_EDIT } = await import('../shared/core/photoEdit');
 
 function item(over: Partial<GalleryItem> = {}): GalleryItem {
   return {

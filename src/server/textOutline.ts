@@ -1,7 +1,7 @@
 import { openSync, type Font } from 'fontkit';
 import { fontFilePath } from '../core';
 import { textOutline as outline, type OutlineRequest } from '../shared/textOutline';
-import { fontFile } from './resources';
+import { fontFile } from '../../shared/server/resources';
 
 // Text → vector outline (see src/shared/textOutline.ts), with the font files read from disk.
 

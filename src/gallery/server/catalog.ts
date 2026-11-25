@@ -2,8 +2,8 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { PhotoAnalysis } from '../../core/photoAnalysis';
-import type { PhotoExif } from '../../core/photoFacts';
+import type { PhotoAnalysis } from '../../../shared/core/photoAnalysis';
+import type { PhotoExif } from '../../../shared/core/photoFacts';
 
 // The gallery's own cache: one row per photo file, keyed by path and validated by size + mtime.
 // Lives under the gallery's data dir, never in the editor's database.

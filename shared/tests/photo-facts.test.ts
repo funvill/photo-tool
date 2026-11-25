@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { aspectRatio, formatAperture, formatBias, formatFocal, formatShutter, megapixels } from '../src/core';
+import { aspectRatio, formatAperture, formatBias, formatFocal, formatShutter, megapixels } from '../core/photoFacts';
 
 describe('photo fact formatters', () => {
   it('formats shutter speeds', () => {

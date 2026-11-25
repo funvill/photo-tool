@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from 'react';
-import { desktop } from '../../web/desktop';
+import { desktop } from '../../../shared/web/desktop';
 import { Details } from './components/Details';
 import { FilterBar } from './components/FilterBar';
 import { FolderBar, RecentFolders } from './components/FolderBar';

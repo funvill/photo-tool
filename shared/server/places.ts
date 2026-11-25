@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
-import * as shared from '../shared/places';
+import * as shared from './placesLogic';
 import { worldAtlasFile } from './resources';
 
-// Place outlines (logic in src/shared/places.ts), from the bundled world-atlas topology.
+// Place outlines (logic in shared/server/placesLogic.ts), from the bundled world-atlas topology.
 
 let places: shared.Place[] | null = null;
 

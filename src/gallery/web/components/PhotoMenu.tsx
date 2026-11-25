@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { Icon } from '../../../web/components/Icon';
-import { desktop } from '../../../web/desktop';
+import { Icon } from '../../../../shared/web/components/Icon';
+import { desktop } from '../../../../shared/web/desktop';
 import { useShallow } from 'zustand/react/shallow';
 import { editActions, menuTargets, useGallery } from '../store';
 

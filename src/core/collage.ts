@@ -1,9 +1,9 @@
 import type { BookDocument, Element, ImageElement, PhotoAsset, Rect } from './model';
-import { aspectOf } from './curation';
+import { aspectOf } from '../../shared/core/curation';
 import { defaultCrop } from './geometry';
 import { isCutout, makeImageElement, makeTextElement } from './layout';
 import { mulberry32 } from './random';
-import { clamp, MM_PER_PT } from './units';
+import { clamp, MM_PER_PT } from '../../shared/core/units';
 
 // Collage layouts: algorithms rather than fixed templates, so they work for any number of photos
 // and any sheet — a 24 × 36 in poster or a single book page.

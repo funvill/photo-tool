@@ -1,9 +1,9 @@
 import { create } from 'zustand';
-import type { DesktopApi } from '../../shared/desktopApi';
+import type { DesktopApi } from '../../../shared/desktop/desktopApi';
 import { filterItems, galleryFacts, sortItems, type GalleryFacts, type GalleryFilter, type GallerySortKey, type TagFilter } from '../../core/gallerySort';
 import { clickSelect, dragPaths, flagTargets, nextAfterRemoval } from '../../core/galleryViewer';
 import { stackItems, type StackInfo } from '../../core/galleryStacks';
-import { IDENTITY_EDIT, isIdentityEdit, parseEdit, type PhotoEdit } from '../../core/photoEdit';
+import { IDENTITY_EDIT, isIdentityEdit, parseEdit, type PhotoEdit } from '../../../shared/core/photoEdit';
 import { photoScores, scoreAdjustOf, type PhotoScore } from '../../core/photoScore';
 import { loadEditTarget, saveEditTarget, type EditTarget } from './editSettings';
 import { galleryApi, type GalleryItem, type JobUpdate, type RecentFolder, type TaggingStatus } from './api';

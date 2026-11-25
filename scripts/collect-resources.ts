@@ -1,5 +1,5 @@
 // Gather the files a packaged app needs at run time into one folder, in the layout
-// src/server/resources.ts reads when it is given a resource root:
+// shared/server/resources.ts reads when it is given a resource root:
 //
 //   <out>/fonts/<name>.woff               every font file the PDF export can embed
 //   <out>/world-atlas/countries-10m.json  the place outlines
@@ -16,7 +16,7 @@
 import { copyFileSync, cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { FONT_FAMILIES, fontFilePath } from '../src/core';
-import { fontFile, libheifFile, pdfiumDir, projectRoot, setResourceRoot, webDir, worldAtlasFile } from '../src/server/resources';
+import { fontFile, libheifFile, pdfiumDir, projectRoot, setResourceRoot, webDir, worldAtlasFile } from '../shared/server/resources';
 import { makeNotices, reportNotices } from './make-notices';
 
 const args = process.argv.slice(2);

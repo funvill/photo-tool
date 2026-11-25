@@ -7,7 +7,7 @@ import {
 import { thumbUrl } from '../api';
 import { selectedIds, useEditor } from '../store';
 import { ContextMenu, type MenuTarget } from './ContextMenu';
-import { Icon } from './Icon';
+import { Icon } from '../../../shared/web/components/Icon';
 import { SpreadView, textCss } from './SpreadView';
 
 // The interactive editor surface (a spread or the cover). All pointer input lands on one overlay;

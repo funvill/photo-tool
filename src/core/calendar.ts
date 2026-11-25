@@ -3,7 +3,7 @@ import { mapPath, shapeDef } from './shapes';
 import { addElement } from './commands';
 import { newId } from './random';
 import { roleStyle } from './typography';
-import { MM_PER_PT } from './units';
+import { MM_PER_PT } from '../../shared/core/units';
 
 // Calendar layer: a small calendar you can drop on a page or poster. "Trip" shows only the weeks
 // a trip covers (a week and a half, not the whole month), "Month" shows a whole month; either way

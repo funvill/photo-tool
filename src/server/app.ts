@@ -8,13 +8,13 @@ import { DRIVES, DRIVES_LABEL, browseParent, browsePath, listDrives } from './fo
 import { Importer, isInside, resolveFolder, scanFolder } from './importer';
 import { createShelf, folderName, listShelf, setShelfRoot, shelfPreview, shelfRoot } from './shelf';
 import { textOutline } from './textOutline';
-import { listPlaces, placeOutline, suggestPlaces } from './places';
+import { listPlaces, placeOutline, suggestPlaces } from '../../shared/server/places';
 import { exportFlipbook, type FlipbookSize } from './flipbook';
 import { exportPosterImage } from './imageExport';
-import { ALPHA_FORMATS, colorFeatures, existingThumb, hashFile, hasTransparency, isSupported, makeThumbnails, THUMB_SIZES, type ThumbSize } from './media';
+import { ALPHA_FORMATS, colorFeatures, existingThumb, hashFile, hasTransparency, isSupported, makeThumbnails, THUMB_SIZES, type ThumbSize } from '../../shared/server/media';
 import { exportCoverPdf, exportPdf, exportPosterPdf, type ExportAsset, type ExportOptions } from './pdf';
-import { setResourceRoot } from './resources';
-import { PhotoInfoWriteError } from '../photoinfo';
+import { setResourceRoot } from '../../shared/server/resources';
+import { PhotoInfoWriteError } from '../../shared/photoinfo';
 import { PhotoInfoIndex } from './photoInfoIndex';
 
 // HTTP API. Bound to 127.0.0.1 by main.ts — never reachable from the network.

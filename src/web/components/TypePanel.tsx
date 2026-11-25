@@ -5,7 +5,7 @@ import {
 } from '../../core';
 import { useEditor } from '../store';
 import { FontPicker } from './FontPicker';
-import { Icon } from './Icon';
+import { Icon } from '../../../shared/web/components/Icon';
 import { NumField } from './Inspector';
 
 /** CSS for previewing a style (sizes are fixed for previews; the page uses real sizes). */

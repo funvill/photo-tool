@@ -1,11 +1,11 @@
 import { produce, type Draft } from 'immer';
 import type { BookDocument, Cover, Element, ImageElement, PhotoAsset } from './model';
-import { aspectOf, dateRangeOf } from './curation';
+import { aspectOf, dateRangeOf } from '../../shared/core/curation';
 import { makeImageElement, makeShapeElement, makeTextElement, textSizeFor } from './layout';
 import { pageCountOf, printer } from './printers';
 import { newId } from './random';
 import { coverDims, coverGeometry } from './surface';
-import { MM_PER_PT } from './units';
+import { MM_PER_PT } from '../../shared/core/units';
 
 // Cover layouts. Coordinates: x = 0 at the back cover's left trim edge; back | spine | front.
 

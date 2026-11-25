@@ -1,7 +1,7 @@
 import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 // Bundled fonts (generated from src/core/fonts.ts): served by this app, never fetched from the internet.
-import './fonts.css';
+import '../../shared/web/fonts.css';
 import './styles.css';
 import { Editor } from './components/Editor';
 import { Home } from './components/Home';

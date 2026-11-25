@@ -1,5 +1,5 @@
 import type { Crop, Element, FitMode, ImageElement, PhotoAsset, Rect } from './model';
-import { clamp, mmToInch } from './units';
+import { clamp, mmToInch } from '../../shared/core/units';
 
 // The single source of truth for how a photo sits inside its frame.
 // Both the CSS preview and the PDF exporter call imagePlacement(); nothing else computes crops.

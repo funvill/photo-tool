@@ -1,6 +1,6 @@
 import type { PageSide } from './book';
 import { reconcileCover } from './cover';
-import { aspectOf, chronological, dateRangeOf, dayKey, timeOf } from './curation';
+import { aspectOf, chronological, dateRangeOf, dayKey, timeOf } from '../../shared/core/curation';
 import { fingerprintPage, isPageEdited, pageElements, withFingerprints } from './draftState';
 import { curatePool, distributeCounts, layoutAutoPage, layoutHeroSpread } from './generator';
 import { defaultCrop } from './geometry';

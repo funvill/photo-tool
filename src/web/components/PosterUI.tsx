@@ -6,7 +6,7 @@ import {
 import { useEditor } from '../store';
 import { CollageControls, gapOptions, marginOptions } from './CollageControls';
 import { ColorInput } from './ColorInput';
-import { Icon } from './Icon';
+import { Icon } from '../../../shared/web/components/Icon';
 import { BackgroundImageField } from './BackgroundImageField';
 import { GradeControls } from './DesignPanel';
 import { SubTabs } from './Inspector';

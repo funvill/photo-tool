@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { findSurface, useAsBackground } from '../../core';
 import { duplicate, group, remove, reorder, togglePin, toggleKeepCrop, toggleKeepRotation, toggleLock, ungroup } from '../elementActions';
 import { selectedIds, useEditor, type Selection } from '../store';
-import { Icon } from './Icon';
+import { Icon } from '../../../shared/web/components/Icon';
 
 // Right-click menu for an element on the canvas: a row of quick action icons, then the same
 // actions (and a few more) with labels and shortcuts.

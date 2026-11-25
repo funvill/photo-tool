@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, isBrowserBackend, type FolderListing } from '../api';
-import { desktop } from '../desktop';
+import { desktop } from '../../../shared/web/desktop';
 import { BrowserFolderPicker } from './BrowserFolderPicker';
-import { Icon } from './Icon';
-import { Modal } from './Modal';
+import { Icon } from '../../../shared/web/components/Icon';
+import { Modal } from '../../../shared/web/components/Modal';
 
 export interface FolderPickerProps {
   title: string;

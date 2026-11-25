@@ -1,6 +1,6 @@
 import { useId, useState } from 'react';
 import { normalisePeople } from '../../../core/galleryEdit';
-import { Icon } from '../../../web/components/Icon';
+import { Icon } from '../../../../shared/web/components/Icon';
 
 /**
  * People in a photo as chips. Enter or a comma adds what is typed (so does leaving the box), a chip's

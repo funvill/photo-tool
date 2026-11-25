@@ -8,7 +8,7 @@ import { statSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createGalleryApp, type GalleryAppOptions } from '../src/gallery/server/app';
 import { PhotoInfoIndex } from '../src/server/photoInfoIndex';
-import { updatePhotoInfo } from '../src/photoinfo';
+import { updatePhotoInfo } from '../shared/photoinfo';
 
 const TRIP = join(process.cwd(), 'fixtures', 'generated', 'trip');
 const COUNT = readdirSync(TRIP).length;

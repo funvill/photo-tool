@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 import { analyzeGrey, colorFeatures, dHash, flattenOnWhite, greyscale, hasTransparentPixels } from '../src/web/backend/browser/analysis';
-import { analyze } from '../src/server/media';
+import { analyze } from '../shared/server/media';
 
 // The web version analyses photos with these pure functions on canvas pixels. Given the same
 // pixels as sharp, they must give the server's numbers, so curation behaves the same.

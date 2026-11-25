@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Modal } from '../../../web/components/Modal';
+import { Modal } from '../../../../shared/web/components/Modal';
 import { galleryApi, type OrphanedFolder } from '../api';
 import { useGallery } from '../store';
 

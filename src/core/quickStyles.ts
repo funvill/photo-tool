@@ -3,7 +3,7 @@ import { findSurface } from './surface';
 import { updateElement } from './commands';
 import { nearestWeight } from './fonts';
 import { mixColor, pageScale } from './typography';
-import { MM_PER_PT } from './units';
+import { MM_PER_PT } from '../../shared/core/units';
 
 // Quick styles: one-click looks for a text box (font, weight, size, case, and sometimes a band of
 // colour behind it). Unlike type-pack roles they are a starting point — the box becomes custom and

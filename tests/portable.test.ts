@@ -11,7 +11,7 @@ import { createApp } from '../src/server/app';
 import { DRIVES, DRIVES_LABEL, browseParent, browsePath, expandHome } from '../src/server/folders';
 import { resolveFolder } from '../src/server/importer';
 import { licenceFiles } from '../scripts/make-notices';
-import { fontFile, libheifFile, pdfiumDir, projectRoot, resourceRoot, setResourceRoot, webDir, worldAtlasFile } from '../src/server/resources';
+import { fontFile, libheifFile, pdfiumDir, projectRoot, resourceRoot, setResourceRoot, webDir, worldAtlasFile } from '../shared/server/resources';
 
 const tmp = (name: string) => mkdtempSync(join(tmpdir(), name));
 const HEIC_FIXTURE = join(process.cwd(), 'fixtures', 'generated', 'trip', 'day2-06-heic-sunset.heic');
@@ -74,7 +74,7 @@ describe('resource paths', () => {
   it('no server module looks for its files when it loads', async () => {
     // The paths are read at call time: pointing at an empty folder after import changes what is found.
     const { textOutline } = await import('../src/server/textOutline');
-    const { suggestPlaces } = await import('../src/server/places');
+    const { suggestPlaces } = await import('../shared/server/places');
     const empty = tmp('res-empty-');
     setResourceRoot(empty);
     expect(() => textOutline({ text: 'Hi', fontFamily: 'Amatic SC', fontWeight: 700 } as Parameters<typeof textOutline>[0])).toThrow(/ENOENT/);

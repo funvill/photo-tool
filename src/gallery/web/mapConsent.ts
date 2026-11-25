@@ -1,4 +1,4 @@
-import type { DesktopApi } from '../../shared/desktopApi';
+import type { DesktopApi } from '../../../shared/desktop/desktopApi';
 
 // The Map tab's answer to "Load maps from the internet?". In the desktop app the main process keeps
 // it (its request guard lets map tiles through only while it is true); in a plain browser (the dev

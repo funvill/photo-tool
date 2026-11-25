@@ -5,8 +5,8 @@
 //    x ∈ [0, 2W], y ∈ [0, H]; bleed extends outside that range.
 //  - Rotation is degrees clockwise about the element centre.
 //  - Crop centre (cx, cy) is normalized to the auto-oriented source image.
-import type { PhotoAnalysis } from './photoAnalysis';
-import type { PhotoAsset } from './photoAsset';
+import type { PhotoAnalysis } from '../../shared/core/photoAnalysis';
+import type { PhotoAsset } from '../../shared/core/photoAsset';
 export type { PhotoAnalysis, PhotoAsset };
 
 export const SCHEMA_VERSION = 3 as const;

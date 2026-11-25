@@ -2,14 +2,14 @@ import type { BookDocument, CollageSettings, CollageSource, Element, ImageElemen
 import { SCHEMA_VERSION } from './model';
 import { blankSpread, defaultSettings } from './book';
 import { layoutCollageAround, orderPhotos, titleBand, type CollageStyle } from './collage';
-import { aspectOf, chronological, dateRangeOf } from './curation';
+import { aspectOf, chronological, dateRangeOf } from '../../shared/core/curation';
 import { curatePool, selectWithCoverage, type CuratedPool } from './generator';
 import { mulberry32 } from './random';
 import { coverDpi } from './layout';
 import { elementBounds } from './geometry';
 import { newId } from './random';
 import { styleFromPreset } from './styles';
-import { inchToMm } from './units';
+import { inchToMm } from '../../shared/core/units';
 
 // Posters: a single printed sheet filled with a collage. Same document model as a book (one
 // surface in `spreads[0]`), so the editor, preflight and export work unchanged.

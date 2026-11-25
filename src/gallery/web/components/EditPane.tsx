@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent } from 'react';
-import { Icon } from '../../../web/components/Icon';
+import { Icon } from '../../../../shared/web/components/Icon';
 import {
   ASPECTS,
   IDENTITY_EDIT,
@@ -12,7 +12,7 @@ import {
   type CropHandle,
   type CropRect,
   type PhotoEdit,
-} from '../../../core/photoEdit';
+} from '../../../../shared/core/photoEdit';
 import type { Size } from '../../../core/previewZoom';
 import { thumbUrl, type GalleryItem } from '../api';
 import { shownEdit, useGallery } from '../store';

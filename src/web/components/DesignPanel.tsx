@@ -8,7 +8,7 @@ import { api } from '../api';
 import { useEditor } from '../store';
 import { ColorInput } from './ColorInput';
 import { FontPicker } from './FontPicker';
-import { Icon } from './Icon';
+import { Icon } from '../../../shared/web/components/Icon';
 import { NumField } from './Inspector';
 import { PlacePicker } from './PlacePicker';
 

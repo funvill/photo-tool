@@ -2,12 +2,12 @@ import { produce, type Draft } from 'immer';
 import type { BookDocument, Element, PhotoAsset, Rect, Spread, TextElement, TextRole } from './model';
 import { blankSpread, isPrintable, pageContentRect, pageNumberOf, type PageSide } from './book';
 import { CommandError } from './commands';
-import { dateRangeOf } from './curation';
+import { dateRangeOf } from '../../shared/core/curation';
 import { makeImageElement, makeShapeElement, makeTextElement, pageOfElement } from './layout';
 import { shapeDef } from './shapes';
 import { MONTHS, makeCalendar } from './calendar';
 import { mixColor, roleSizePt } from './typography';
-import { MM_PER_PT } from './units';
+import { MM_PER_PT } from '../../shared/core/units';
 
 // Page add-ons: ready-made pages for a book — table of contents, title page, dedication, quote,
 // text sections, chapter openers, notes, the end. They are built from the book's text styles (so a

@@ -1,5 +1,5 @@
-import { desktop } from '../../../web/desktop';
-import { Icon } from '../../../web/components/Icon';
+import { desktop } from '../../../../shared/web/desktop';
+import { Icon } from '../../../../shared/web/components/Icon';
 import { THUMB_MAX, THUMB_MIN, useGallery } from '../store';
 import { SettingsDialog } from './SettingsDialog';
 

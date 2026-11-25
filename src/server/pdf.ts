@@ -7,7 +7,7 @@ import {
   renderCover, renderInterior, renderPoster, verifyPdf as verifyBytes,
   type ExportOptions, type ExportVerification, type ImageCut, type PageSpec, type PdfEnv, type PdfOutput,
 } from '../shared/pdfWriter';
-import { fontFile } from './resources';
+import { fontFile } from '../../shared/server/resources';
 
 // Print export on the local server. The drawing lives in src/shared/pdfWriter.ts (shared with the
 // web version); this module supplies sharp for the photos, the font files from disk, and writes

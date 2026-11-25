@@ -1,11 +1,11 @@
 import type { BookDocument, Element, ImageElement, PhotoAsset, ShapeElement, TextElement, TextRole } from './model';
 import { pageTrimRect, type PageSide } from './book';
-import { aspectOf } from './curation';
+import { aspectOf } from '../../shared/core/curation';
 import { defaultCrop, imagePlacement, innerBox } from './geometry';
 import { newId, type Rng } from './random';
 import type { StylePreset } from './styles';
 import { pageTemplatesFor, resolveTemplate, template, type LayoutTemplate } from './templates';
-import { clamp } from './units';
+import { clamp } from '../../shared/core/units';
 import { roleSizePt, styleFields } from './typography';
 
 // Turning (template + photos) into concrete page elements. Shared by the generator and by

@@ -1,7 +1,7 @@
 import { memo, type MouseEvent, type SyntheticEvent } from 'react';
 import type { StackInfo } from '../../../core/galleryStacks';
-import type { PhotoEdit } from '../../../core/photoEdit';
-import { Icon } from '../../../web/components/Icon';
+import type { PhotoEdit } from '../../../../shared/core/photoEdit';
+import { Icon } from '../../../../shared/web/components/Icon';
 import { thumbUrl, type GalleryItem } from '../api';
 import { EditedImage } from './EditedImage';
 

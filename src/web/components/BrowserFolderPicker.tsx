@@ -1,8 +1,8 @@
 import { useRef, useState } from 'react';
 import { api } from '../api';
 import type { FolderPickerProps } from './FolderPicker';
-import { Icon } from './Icon';
-import { Modal } from './Modal';
+import { Icon } from '../../../shared/web/components/Icon';
+import { Modal } from '../../../shared/web/components/Modal';
 
 const PHOTO = /\.(jpe?g|png|heic|heif|webp)$/i;
 

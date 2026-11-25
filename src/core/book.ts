@@ -3,7 +3,7 @@ import { PRINTERS, presetSettings, printer } from './printers';
 import { SCHEMA_VERSION } from './model';
 import { newId } from './random';
 import { styleFromPreset } from './styles';
-import { inchToMm } from './units';
+import { inchToMm } from '../../shared/core/units';
 
 export type PageSide = 'left' | 'right';
 

@@ -2,7 +2,7 @@
 import { statSync } from 'node:fs';
 import { basename, dirname } from 'node:path';
 import type { PhotoAsset } from '../core';
-import { folderStamp, infoFor, readFolderInfo, updatePhotoInfo, type FolderInfo, type PhotoInfoOptions } from '../photoinfo';
+import { folderStamp, infoFor, readFolderInfo, updatePhotoInfo, type FolderInfo, type PhotoInfoOptions } from '../../shared/photoinfo';
 
 /** File-system access the index uses; replaceable so tests can count reads. */
 export interface PhotoInfoIo {

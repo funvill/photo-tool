@@ -4,9 +4,9 @@ import { api, isBrowserBackend, thumbUrl } from '../api';
 import { useEditor } from '../store';
 import { ASSET_MIME } from './Canvas';
 import { FolderPicker } from './FolderPicker';
-import { Icon } from './Icon';
-import { HoverPreview, formatSize, formatTaken } from './HoverPreview';
-import { estimateRemaining, formatRemaining } from '../eta';
+import { Icon } from '../../../shared/web/components/Icon';
+import { HoverPreview, formatSize, formatTaken } from '../../../shared/web/components/HoverPreview';
+import { estimateRemaining, formatRemaining } from '../../../shared/web/eta';
 import { CleanupDialog } from './CleanupDialog';
 import { Shelf, tildePath } from './Shelf';
 

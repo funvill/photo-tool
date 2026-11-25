@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { FONT_CATEGORIES, FONT_FAMILIES } from '../../core';
-import { Icon } from './Icon';
+import { Icon } from '../../../shared/web/components/Icon';
 
 /** Font chooser that shows every family in its own face, grouped by style. */
 export function FontPicker({ value, onChange }: { value: string; onChange: (family: string) => void }) {

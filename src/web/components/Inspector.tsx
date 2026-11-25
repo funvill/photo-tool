@@ -18,7 +18,7 @@ import { CalendarControls } from './CalendarControls';
 import { OpacitySlider, PhotoAdjustControls, PhotoShapeControls, ShapeControls, TextEffects } from './DesignPanel';
 import { AddPanel, type AddSection } from './AddPanel';
 import { AlignTools, LayersPanel, MultiPanel } from './SelectionPanel';
-import { Icon } from './Icon';
+import { Icon } from '../../../shared/web/components/Icon';
 import { PreflightPanel } from './PreflightPanel';
 import { TemplatePicker } from './TemplatePicker';
 
