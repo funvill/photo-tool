@@ -50,7 +50,8 @@ export async function rasterPdf(pdfPath: string, pageMm: { w: number; h: number 
     const png = `${pdfPath}.png`;
     await run('/usr/bin/sips', ['-s', 'format', 'png', '-Z', String(longPx), pdfPath, '--out', png]);
     const meta = await sharp(png).metadata();
-    return { width: meta.width ?? 0, height: meta.height ?? 0, pxPerMm: (meta.width ?? 1) / pageMm.w, image: () => sharp(png), dispose: () => rm(png, { force: true }) };
+    // sips writes RGBA: put it on white, as PDFium's render is, so PNG exports don't carry an alpha channel.
+    return { width: meta.width ?? 0, height: meta.height ?? 0, pxPerMm: (meta.width ?? 1) / pageMm.w, image: () => sharp(png).flatten({ background: '#ffffff' }), dispose: () => rm(png, { force: true }) };
   }
   const k = longPx / Math.max(pageMm.w, pageMm.h);
   const width = Math.max(1, Math.round(pageMm.w * k));
