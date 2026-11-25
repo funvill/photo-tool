@@ -69,7 +69,7 @@ button again, or a click outside closes it. Groups, each with today's controls a
 | Photo | Stars, Shape, Hidden |
 | When | From, To |
 | Where | Folder (only when there are subfolders), Has location |
-| Content | Has people, keyword/object chips that are on |
+| Content | Has people, keyword/object chips that are on (none on: a line saying how to add one) |
 | Quality | Low quality, Near-duplicates |
 
 ### Filtered row (only when any filter, the search text included, is on)
