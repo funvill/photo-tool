@@ -82,21 +82,24 @@ function refuseToStart(names: ProgramNames, e: CarryOverError, selfTest: SelfTes
     // Only reachable in CI (a self-test moves folders only with selfTestCarriesOver): the same
     // message box, closed by itself after a few seconds since no one is there to click, and a
     // record of the refusal beside where result.json would be.
-    void app.whenReady().then(async () => {
-      const closeAfter = AbortSignal.timeout(3000);
-      const backstop = setTimeout(() => app.exit(1), 15_000);
-      let dialogClosed = false;
+    // Written before the box opens (dialogClosed false) and again once it has closed, so the record
+    // is there even if the backstop has to end the program.
+    const record = (dialogClosed: boolean) => {
       try {
-        await dialog.showMessageBox({ type: 'error', title, message, buttons: ['Close'], noLink: true, signal: closeAfter });
-        dialogClosed = true;
+        mkdirSync(selfTest.out, { recursive: true });
+        writeFileSync(join(selfTest.out, 'refused.json'), JSON.stringify({ refused: true, step: e.step, from: e.from, to: e.to, title, message, dialogClosed }, null, 2));
+      } catch (err) {
+        console.error(String(err));
+      }
+    };
+    void app.whenReady().then(async () => {
+      record(false);
+      const backstop = setTimeout(() => app.exit(1), 15_000);
+      try {
+        await dialog.showMessageBox({ type: 'error', title, message, buttons: ['Close'], noLink: true, signal: AbortSignal.timeout(3000) });
+        record(true);
       } finally {
         clearTimeout(backstop);
-        try {
-          mkdirSync(selfTest.out, { recursive: true });
-          writeFileSync(join(selfTest.out, 'refused.json'), JSON.stringify({ refused: true, step: e.step, from: e.from, to: e.to, title, message, dialogClosed }, null, 2));
-        } catch (err) {
-          console.error(String(err));
-        }
         app.exit(1);
       }
     });

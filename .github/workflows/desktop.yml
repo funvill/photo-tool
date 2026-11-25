@@ -179,6 +179,8 @@ jobs:
   windows-side-by-side:
     name: windows (both installed, then uninstalled)
     needs: windows
+    # Runs even when a check in the windows jobs failed (the installers were uploaded before those checks).
+    if: ${{ !cancelled() }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
@@ -210,7 +212,10 @@ jobs:
             $item = $shell.NameSpace((Split-Path $lnk)).ParseName((Split-Path $lnk -Leaf))
             if ($item) { $item.ExtendedProperty('System.AppUserModel.ID') }
           }
-          function Exe-Of($p) { $e = Get-Entry $p.product; if ($e -and $e.InstallLocation) { Join-Path $e.InstallLocation "$($p.product).exe" } }
+          # electron-builder keeps InstallLocation under its own Software\<guid> key, not the Uninstall one:
+          # the install folder is where UninstallString's quoted uninstaller lives.
+          function Location-Of($p) { $e = Get-Entry $p.product; if ($e -and $e.UninstallString -match '^"([^"]+)"') { Split-Path -Parent $Matches[1] } }
+          function Exe-Of($p) { $l = Location-Of $p; if ($l) { Join-Path $l "$($p.product).exe" } }
           function Check-Installed($p) {
             $e = Get-Entry $p.product
             if (-not $e) { Fail "$($p.product): no uninstall entry"; return }
@@ -223,7 +228,7 @@ jobs:
               elseif ($aumi -ne $p.appId) { Fail "$($p.product): $lnk has AppUserModelID '$aumi', not '$($p.appId)'" }
               else { "$lnk -> $aumi" }
             }
-            "$($p.product): installed at $($e.InstallLocation) ($($e.DisplayName))"
+            "$($p.product): installed at $(Location-Of $p) ($($e.DisplayName))"
           }
           function Check-Gone($p, $location) {
             if (Get-Entry $p.product) { Fail "$($p.product): uninstall entry still there" }
@@ -232,6 +237,7 @@ jobs:
           }
           function SelfTest($p, $tag) {
             $exe = Exe-Of $p
+            if (-not $exe) { Fail "$($p.product): not installed, no self-test ($tag)"; return }
             $t = "$env:RUNNER_TEMP\sbs-$tag"
             Set-Item "env:$($p.prefix)_DATA_DIR" "$t\data"; Set-Item "env:$($p.prefix)_PROFILE_DIR" "$t\profile"; $env:PHOTOINFO_FALLBACK_DIR = "$t\photoinfo"
             $proc = Start-Process -FilePath $exe -ArgumentList '--self-test', "`"$PWD\fixtures\generated\trip`"", '--self-test-out', "`"$t\out`"" -PassThru
@@ -242,7 +248,8 @@ jobs:
           }
           function Uninstall($p) {
             $e = Get-Entry $p.product
-            $location = $e.InstallLocation
+            $location = Location-Of $p
+            if (-not ($e -and $location)) { Fail "$($p.product): nothing to uninstall"; return $null }
             $cmd = if ($e.QuietUninstallString) { $e.QuietUninstallString } else { "$($e.UninstallString) /S" }
             Write-Host "uninstalling $($p.product): $cmd"
             Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', "`"$cmd`"" -Wait
@@ -252,7 +259,7 @@ jobs:
           }
 
           foreach ($p in $programs) {
-            $setup = Get-ChildItem -LiteralPath "$env:RUNNER_TEMP\installers\$($p.artifact)" -Filter '*.exe' | Select-Object -First 1
+            $setup = Get-ChildItem -LiteralPath "$env:RUNNER_TEMP\installers\$($p.artifact)" -Filter '*Setup*.exe' | Select-Object -First 1
             if (-not $setup) { throw "No installer in $($p.artifact)" }
             "installing $($setup.Name)"
             Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait
