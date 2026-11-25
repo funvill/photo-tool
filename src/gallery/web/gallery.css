@@ -5,6 +5,7 @@
 .gallery-bar-title { min-width: 0; flex: 1; }
 .gallery-bar-title strong { white-space: nowrap; }
 .gallery-bar-title .muted { min-width: 0; }
+.gallery-bar-title .gallery-version { flex: none; font-size: 12px; font-variant-numeric: tabular-nums; }
 .gallery-check { gap: 6px; white-space: nowrap; color: var(--muted); cursor: pointer; }
 .gallery-check input { accent-color: var(--accent); margin: 0; }
 .gallery-size { gap: 6px; color: var(--muted); }
@@ -58,12 +59,14 @@
 
 /* Thumbnails | handle | preview | handle | details. The side columns take the widths GalleryApp gives them
    (remembered per machine); the preview takes the rest. The grid measures itself, so it follows its column. */
-.gallery-main { flex: 1; min-height: 0; min-width: 0; display: flex; }
+/* Nothing in the middle of the window scrolls but the grid and the details panel (each its own scroller):
+   the preview, however tall its photo, is clipped to its pane. */
+.gallery-main { flex: 1; min-height: 0; min-width: 0; display: flex; overflow: hidden; }
 .gallery-grid-col { flex: none; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--stage); }
 .gallery-grid-col > .gallery-grid { min-width: 0; }
 .gallery-splitter { flex: none; width: 6px; cursor: col-resize; background: var(--line-soft); touch-action: none; }
 .gallery-splitter:hover, .gallery-splitter:active { background: var(--accent); }
-.gallery-preview { flex: 1; min-width: 300px; min-height: 0; display: flex; flex-direction: column; background: #111; color: #fff; }
+.gallery-preview { flex: 1; min-width: 300px; min-height: 0; display: flex; flex-direction: column; background: #111; color: #fff; overflow: hidden; }
 /* The stage is measured by the page and the picture placed by a transform (usePreviewZoom): nothing in the
    layout depends on the picture's own size, so it always fits. */
 .gallery-preview-stage { flex: 1; min-height: 0; position: relative; overflow: hidden; user-select: none; touch-action: none; }

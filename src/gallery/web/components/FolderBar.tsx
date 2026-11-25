@@ -30,6 +30,7 @@ export function FolderBar() {
     <header className="topbar gallery-bar">
       <div className="row gallery-bar-title">
         <strong>Photobook Gallery</strong>
+        <span className="muted gallery-version" title="Version">v{__APP_VERSION__}</span>
         {root && (
           <span className="muted ellipsis" title={root}>
             {root}

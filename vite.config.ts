@@ -17,6 +17,7 @@ const webPort = Number(process.env.PHOTOBOOK_WEB_PORT ?? 5173);
 //          page in its place, its script pointed back at src/gallery/web
 //   dev    /gallery.html is the gallery's page, its script pointed at src/gallery/web under /@fs/
 //          (how Vite serves files outside the root)
+const appVersion = (JSON.parse(readFileSync(resolve(import.meta.dirname, 'package.json'), 'utf8')) as { version: string }).version;
 const galleryHtml = resolve(import.meta.dirname, 'src/gallery/web/index.html');
 const galleryInput = resolve(import.meta.dirname, 'src/web/gallery.html');
 const slashes = (p: string) => p.replace(/\\/g, '/');
@@ -52,7 +53,8 @@ export default defineConfig(({ mode }) => {
     // The web version's demo (sample photos, the portfolio's demo-welcome.js) ships only there.
     publicDir: pages ? 'public' : false,
     plugins: [react(), ...(pages ? [] : [galleryPage()])],
-    define: { __BROWSER_BACKEND__: JSON.stringify(pages) },
+    // The version shown in the gallery's top bar, so a build can be named exactly.
+    define: { __BROWSER_BACKEND__: JSON.stringify(pages), __APP_VERSION__: JSON.stringify(appVersion) },
     worker: { format: 'es' },
     server: {
       host: '127.0.0.1',

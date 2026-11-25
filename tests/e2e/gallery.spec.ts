@@ -963,3 +963,41 @@ test('closing the folder with unsaved edits asks first; Cancel keeps it open', a
     removeTrip(dir);
   }
 });
+test('a portrait photo in a very wide window never makes the preview scroll; the bar shows the version', async ({ page, request }) => {
+  const dir = await openTrip(page, request);
+  try {
+    const version = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')).version as string;
+    await expect(page.locator('.gallery-version')).toHaveText(`v${version}`);
+    await page.getByLabel('Shape').selectOption({ label: 'Portrait' });
+    // Ultrawide sizes, at 100 % and at 150 % display scaling (3440 x 1440 is 2293 x 960 then).
+    for (const [width, height] of [[3440, 1440], [5120, 1440], [2293, 960], [2560, 1080]]) {
+      await page.setViewportSize({ width, height });
+      for (const n of [0, 1]) {
+        await page.locator('.gallery-tile').nth(n).click();
+        const preview = page.getByRole('region', { name: 'Preview' });
+        await expect(preview.locator('.gallery-preview-img')).toBeVisible();
+        for (const mode of ['view', 'edit']) {
+          if (mode === 'edit') await page.keyboard.press('e');
+          // Nothing in or around the preview can scroll, and the page itself does not.
+          await expect.poll(() =>
+            page.evaluate(() => {
+              const out: string[] = [];
+              const root = document.documentElement;
+              if (root.scrollHeight > innerHeight || root.scrollWidth > innerWidth) out.push('page');
+              const pane = document.querySelector('.gallery-preview')!;
+              for (const el of [pane, ...Array.from(pane.querySelectorAll('*')), pane.parentElement!]) {
+                const e = el as HTMLElement;
+                const cs = getComputedStyle(e);
+                if ((/auto|scroll/.test(cs.overflowY) && e.scrollHeight > e.clientHeight) || (/auto|scroll/.test(cs.overflowX) && e.scrollWidth > e.clientWidth)) out.push(e.className);
+              }
+              return out;
+            }),
+          ).toEqual([]);
+          if (mode === 'edit') await page.keyboard.press('Escape');
+        }
+      }
+    }
+  } finally {
+    removeTrip(dir);
+  }
+});
