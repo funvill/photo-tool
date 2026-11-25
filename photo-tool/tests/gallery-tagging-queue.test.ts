@@ -489,6 +489,29 @@ describe('#2 regenerate a description', () => {
     expect(row('ck-a')?.description).toBe('About a.');
   });
 
+  it('an empty or blank caption is an error, and the old text stays; a caption is saved trimmed', async () => {
+    await install(describeSmall);
+    const t = testBackend();
+    let reply = '  \n ';
+    const q = makeQueue({ ...t.backend, caption: async () => reply });
+    q.setSettings(settings({ describe: describeSmall.id }));
+    const a = photo('a');
+    await described(q, [a]);
+    const before = q.status().stamp;
+    const err = await q.regenerate(a).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(NoDescriptionError);
+    expect((err as Error).message).toMatch(/empty description/i);
+    expect(row('ck-a')?.description).toBe('About a.');
+    expect(q.status().stamp).toBe(before);
+    reply = '';
+    await expect(q.regenerate(a)).rejects.toThrow(/empty description/i);
+    expect(row('ck-a')?.description).toBe('About a.');
+    reply = '  A boat at dusk. \n';
+    expect(await q.regenerate(a)).toBe('A boat at dusk.');
+    expect(row('ck-a')?.description).toBe('A boat at dusk.');
+  });
+
   it('a lost backend: the model is loaded again and the caption asked once more', async () => {
     await install(describeSmall);
     const t = testBackend();

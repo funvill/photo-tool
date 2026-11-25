@@ -179,7 +179,9 @@ export class TaggingQueue {
       if (this.stopped) throw new Error('Tagging stopped.');
       if (!(await this.loadModel(m))) throw new NoDescriptionError(`${m.label} would not load. See Settings.`);
       try {
-        const text = await this.deps.backend.caption(image);
+        const text = (await this.deps.backend.caption(image)).trim();
+        // Sampling can end at once: saving nothing would hide the sentence (and this button) for good.
+        if (!text) throw new Error(`${m.label} wrote an empty description. Try again.`);
         if (!this.deps.catalog.setDescription(key, m.id, text)) throw new NoDescriptionError(`${m.label} has not described this photo yet.`);
         this.stamp++;
         return text;

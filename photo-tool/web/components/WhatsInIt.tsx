@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import type { TagFilter } from '../../core/gallerySort';
 import { galleryApi, type GalleryItem } from '../api';
 import { useGallery } from '../store';
@@ -21,6 +21,30 @@ function useDescribeModel(): string {
   return label;
 }
 
+// Photos being described again, by path. Kept outside the component so the busy state lasts while the panel is
+// folded, closed or showing another photo, and a second request for the same photo is not sent.
+const writing = new Set<string>();
+const writingListeners = new Set<() => void>();
+const subscribeWriting = (fn: () => void) => {
+  writingListeners.add(fn);
+  return () => void writingListeners.delete(fn);
+};
+const setWriting = (path: string, on: boolean) => {
+  if (on) writing.add(path);
+  else writing.delete(path);
+  for (const fn of writingListeners) fn();
+};
+
+async function regenerate(path: string): Promise<void> {
+  if (writing.has(path)) return;
+  setWriting(path, true);
+  try {
+    await useGallery.getState().regenerateDescription(path);
+  } finally {
+    setWriting(path, false);
+  }
+}
+
 function Chip({ f, text }: { f: TagFilter; text: string }) {
   const on = useGallery((s) => !!s.filter.tags?.some((t) => t.kind === f.kind && t.value === f.value));
   return (
@@ -37,23 +61,8 @@ function Chip({ f, text }: { f: TagFilter; text: string }) {
 export function WhatsInIt({ item }: { item: GalleryItem }) {
   const notWorking = useGallery((s) => s.tagging?.notWorking.length ?? 0) > 0;
   const model = useDescribeModel();
-  // Photos being described again, by path: the panel is reused when the selection moves on.
-  const [writing, setWriting] = useState<ReadonlySet<string>>(new Set());
+  const busy = useSyncExternalStore(subscribeWriting, () => writing.has(item.path));
   const { state, description, keywords, objects, canRegenerate } = item.tags;
-  const busy = writing.has(item.path);
-  const regenerate = async () => {
-    const path = item.path;
-    setWriting((w) => new Set(w).add(path));
-    try {
-      await useGallery.getState().regenerateDescription(path);
-    } finally {
-      setWriting((w) => {
-        const next = new Set(w);
-        next.delete(path);
-        return next;
-      });
-    }
-  };
   if (state === 'off') {
     return (
       <p className="muted small">
@@ -89,7 +98,7 @@ export function WhatsInIt({ item }: { item: GalleryItem }) {
           aria-busy={busy}
           aria-label={busy ? undefined : 'Regenerate the description'}
           title={busy ? undefined : `Ask ${model || 'the descriptions model'} to describe this photo again`}
-          onClick={() => void regenerate()}
+          onClick={() => void regenerate(item.path)}
         >
           {busy ? 'Writing a new description…' : 'Regenerate'}
         </button>
