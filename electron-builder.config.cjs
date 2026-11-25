@@ -27,7 +27,7 @@ module.exports = {
   files: ['**/*', '!**/*.map', '!**/*.d.ts', '!**/*.d.cts', '!**/*.d.mts', '!**/*.md', '!**/*.ts'],
   asar: true,
   // sharp is a native module with DLLs beside it: it only loads from real files.
-  asarUnpack: ['node_modules/sharp/**', 'node_modules/@img/**'],
+  asarUnpack: ['node_modules/sharp/**', 'node_modules/@img/**', 'node_modules/onnxruntime-node/**'],
   // The modules in dist/desktop/app are prebuilt for this platform already.
   npmRebuild: false,
   nodeGypRebuild: false,

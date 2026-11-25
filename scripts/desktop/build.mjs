@@ -32,7 +32,18 @@ const product = readJson(join(root, 'electron/product.json'));
 //   sharp    a native addon with DLLs beside it
 //   pdfkit   finds its built-in font metrics and colour profile relative to its own file
 //   fontkit  pdfkit's font engine; the server imports it too, and both must get the same copy
-const EXTERNAL = ['sharp', 'pdfkit', 'fontkit'];
+//   @huggingface/transformers  photo tagging (the gallery's tagging worker); it loads onnxruntime-node,
+//            a native addon with DLLs beside it
+const EXTERNAL = ['sharp', 'pdfkit', 'fontkit', '@huggingface/transformers'];
+// Never loaded in Node: Transformers.js carries its own copy of the web runtime inside its Node build,
+// so the onnxruntime-web package (140 MB) is left out.
+const NOT_NEEDED = new Set(['onnxruntime-web']);
+// onnxruntime-node carries binaries for every platform (about 290 MB); only this one's are packed.
+const ORT_KEEP = `${process.platform}/${process.arch}`;
+const keepFile = (src) => {
+  const m = /[\\/]onnxruntime-node[\\/]bin[\\/]napi-v\d+[\\/]([^\\/]+)(?:[\\/]([^\\/]+))?/.exec(src);
+  return !m || (m[1] === process.platform && (!m[2] || m[2] === process.arch));
+};
 
 // Linux only: sharp's native binary cannot go into the package as it is. Inside Electron its
 // glib calls reach the wrong copy of glib, and the memory of every image handled is never given
@@ -54,6 +65,8 @@ mkdirSync(appDir, { recursive: true });
 const common = { bundle: true, platform: 'node', format: 'cjs', target: 'node24', sourcemap: false, legalComments: 'none', logLevel: 'warning', absWorkingDir: root };
 await build({ ...common, entryPoints: ['electron/main.ts'], outfile: join(appDir, 'main.cjs'), external: ['electron'] });
 await build({ ...common, entryPoints: ['electron/server-host.ts'], outfile: join(appDir, 'server-host.cjs'), external: ['electron', ...EXTERNAL] });
+// The gallery's tagging worker thread (src/gallery/server/tagging/worker.ts), started by its server.
+await build({ ...common, entryPoints: ['src/gallery/server/tagging/worker.ts'], outfile: join(appDir, 'tagging-worker.cjs'), external: ['@huggingface/transformers'] });
 // The preload runs in the sandboxed page process: it may only require 'electron'.
 await build({ ...common, platform: 'browser', entryPoints: ['electron/preload.ts'], outfile: join(appDir, 'preload.cjs'), external: ['electron'] });
 
@@ -70,6 +83,7 @@ function findPackage(name, from) {
 function runtimeModules() {
   const found = new Map();
   const visit = (name, from, optional) => {
+    if (NOT_NEEDED.has(name)) return;
     // sharp loads the WebAssembly build only when it finds no native one, so leave that out.
     if (linuxWasm && /^@img\/sharp-(libvips-)?linux/.test(name)) return;
     const dir = findPackage(name, from);
@@ -127,11 +141,12 @@ if (dev) {
   for (const dir of modules.keys()) {
     // Copy each package without any node_modules nested in it: nested ones that are needed are
     // in the list themselves and are copied to the same nested place.
-    cpSync(dir, join(appDir, relative(root, dir)), { recursive: true, filter: (src) => !/[\\/]node_modules$/.test(src) || src === dir });
+    cpSync(dir, join(appDir, relative(root, dir)), { recursive: true, filter: (src) => (!/[\\/]node_modules$/.test(src) || src === dir) && keepFile(src) });
   }
   if (linuxSharp === 'shim') (await import('./linux/patch-sharp.mjs')).patchSharp(appDir);
   const names = [...modules.values()].map((p) => `${p.name}@${p.version}`).sort();
   console.log(`Copied ${names.length} run-time modules: ${names.join(', ')}`);
+  if (!existsSync(join(appDir, 'node_modules/onnxruntime-node/bin/napi-v6', ORT_KEEP))) throw new Error(`onnxruntime-node has no binary for ${ORT_KEEP}: photo tagging would not run.`);
   if (!names.some((n) => n.startsWith('@img/sharp-') && !n.startsWith('@img/sharp-libvips'))) throw new Error('No sharp binary for this platform is installed (@img/sharp-<platform>). Run npm install on the platform you are building for.');
 
   const tsx = join(root, 'node_modules/tsx/dist/cli.mjs');
