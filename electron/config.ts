@@ -121,6 +121,15 @@ export function photoInfoFallbackDir(editorDataDir: string): string {
   return join(editorDataDir, 'photoinfo');
 }
 
+/**
+ * The photo-tagging worker beside the server bundle in `bundleDir`. In the installed app that is inside app.asar,
+ * and the worker thread runs from its unpacked copy (see asarUnpack in electron-builder.config.cjs).
+ */
+export function taggingWorkerPath(bundleDir: string): string {
+  const sep = bundleDir.includes('\\') ? '\\' : '/';
+  return `${bundleDir.replace(/app\.asar(?=[\\/]|$)/, 'app.asar.unpacked')}${sep}tagging-worker.cjs`;
+}
+
 // ---- window place
 
 export interface Bounds {

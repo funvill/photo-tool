@@ -250,6 +250,16 @@ describe('gallery store', () => {
     expect(calls.some((c) => c.url.endsWith('/cancel'))).toBe(false);
   });
 
+  it('closing the folder tells the server to stop tagging it', async () => {
+    vi.useFakeTimers();
+    routes['POST /api/gallery/tagging/close'] = () => ({ status: 204, json: null });
+    await openTrip(() => 's');
+    const job = useGallery.getState().job;
+    useGallery.getState().close();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls.filter((c) => c.url === '/api/gallery/tagging/close').map((c) => c.body)).toEqual([{ job }]);
+  });
+
   it('opens a folder the desktop app hands over', async () => {
     routes['POST /api/gallery/open'] = () => ({ status: 202, json: { jobId: 'j9' } });
     routes['GET /api/gallery/recent'] = () => ({ json: [] });
@@ -1588,6 +1598,28 @@ describe('gallery store: photo tagging', () => {
     // Nothing changes after that: no more reloads.
     await vi.advanceTimersByTimeAsync(9100);
     expect(count('GET', '/api/gallery/items') - base).toBe(during + 1);
+  });
+
+  it('a big folder reloads less often while tagging runs: 10,000 photos at most once a minute', async () => {
+    vi.useFakeTimers();
+    const many = Array.from({ length: 10_000 }, (_, i) => item({ path: `D:\Trip\p${i}.jpg`, fileName: `p${i}.jpg`, key: `k${i}` }));
+    let stamp = 0;
+    routes['POST /api/gallery/open'] = () => ({ status: 202, json: { jobId: 'j1' } });
+    routes['GET /api/gallery/recent'] = () => ({ json: [] });
+    routes['GET /api/gallery/jobs/j1'] = () => ({ json: { total: many.length, processed: many.length, startedAt: 0, done: true, errors: [], items: many } });
+    routes['GET /api/gallery/stamp'] = () => ({ json: { stamp: 's' } });
+    routes['GET /api/gallery/items'] = () => ({ json: many });
+    routes['GET /api/gallery/tagging/status'] = () => ({ json: status({ total: many.length, stamp, done: stamp }) });
+    routes['POST /api/gallery/tagging/focus'] = () => ({ json: {} });
+    await useGallery.getState().open('D:\Trip', true);
+    await vi.advanceTimersByTimeAsync(1100);
+    const base = count('GET', '/api/gallery/items');
+    // A photo tagged every second for two minutes: about two reloads, not twelve.
+    for (let t = 0; t < 120; t++) {
+      stamp++;
+      await vi.advanceTimersByTimeAsync(1000);
+    }
+    expect(count('GET', '/api/gallery/items') - base).toBeLessThanOrEqual(2);
   });
 
   it('tagging that finished before the page first looked still brings its tags in (one reload)', async () => {

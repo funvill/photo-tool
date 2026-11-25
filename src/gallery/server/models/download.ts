@@ -3,7 +3,9 @@
 // SHA-256 before a file is put in place. A broken download resumes from its `.part` file.
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
+import { once } from 'node:events';
 import { dirname, join } from 'node:path';
+import { finished } from 'node:stream/promises';
 import type { ModelChoice, ModelFile } from '../../../core/tagModels';
 import { modelDir } from './store';
 
@@ -87,16 +89,23 @@ async function downloadFile(doFetch: typeof fetch, m: ModelChoice, f: ModelFile,
     } else if (!res.ok || !res.body) {
       throw new ModelDownloadError(`Hugging Face answered ${res.status} for ${f.path}.`);
     }
+    // A write that fails (a full disk, a lock) must end the download with a message, never crash the server:
+    // the stream's error is caught here and turned into a ModelDownloadError. The .part is kept for a retry.
     const out = createWriteStream(part, { flags: have > 0 ? 'a' : 'w' });
+    let writeError: Error | null = null;
+    out.on('error', (e) => (writeError ??= e));
     try {
       for await (const chunk of res.body as unknown as AsyncIterable<Uint8Array>) {
         if (signal?.aborted) throw new ModelDownloadError('Download cancelled.');
-        if (!out.write(chunk)) await new Promise((r) => out.once('drain', r));
+        if (writeError) break;
+        if (!out.write(chunk)) await once(out, 'drain').catch((e: Error) => (writeError ??= e));
         onBytes(chunk.length);
       }
     } finally {
-      await new Promise<void>((r) => out.end(() => r()));
+      out.end();
+      await finished(out).catch((e: Error) => (writeError ??= e));
     }
+    if (writeError) throw writeFailed(f.path, writeError);
   }
   if (sizeOf(part) !== f.bytes || (await sha256Of(part)) !== f.sha256) {
     rmSync(part, { force: true });
@@ -104,6 +113,27 @@ async function downloadFile(doFetch: typeof fetch, m: ModelChoice, f: ModelFile,
   }
   renameSync(part, target);
 }
+
+/**
+ * Checks every file of an installed model against its SHA-256 and deletes the ones that do not match (damaged in
+ * place, same size), so the model shows as incomplete and Download again fetches them. Returns the deleted paths.
+ */
+export async function verifyModel(dataDir: string, m: ModelChoice): Promise<string[]> {
+  const dir = modelDir(dataDir, m.id);
+  const bad: string[] = [];
+  for (const f of m.files) {
+    const path = join(dir, f.path);
+    if (!existsSync(path)) continue;
+    if (sizeOf(path) !== f.bytes || (await sha256Of(path).catch(() => '')) !== f.sha256) {
+      rmSync(path, { force: true });
+      bad.push(f.path);
+    }
+  }
+  return bad;
+}
+
+const writeFailed = (path: string, e: NodeJS.ErrnoException): ModelDownloadError =>
+  new ModelDownloadError(e.code === 'ENOSPC' ? `Not enough disk space for ${path}. Free some space and download again.` : `Couldn't write ${path}: ${e.message}`);
 
 /** Downloads every file of `m` not yet in place into `<dataDir>/models/<id>/`. */
 export async function downloadModel(dataDir: string, m: ModelChoice, opts: DownloadOptions = {}): Promise<void> {

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createRequire } from 'node:module';
-import { DEFAULT_WINDOW, GALLERY_APP_ID, GALLERY_PRODUCT_NAME, MIN_WINDOW, NOTICES_BUTTON, dataLayout, describeAbout, describeFailure, galleryEnv, galleryLaunchCommand, parseMode, parseSelfTest, photoInfoFallbackDir, restoreWindow, selfTestOverlap } from '../electron/config';
+import { DEFAULT_WINDOW, GALLERY_APP_ID, GALLERY_PRODUCT_NAME, MIN_WINDOW, NOTICES_BUTTON, dataLayout, describeAbout, describeFailure, galleryEnv, galleryLaunchCommand, parseMode, parseSelfTest, photoInfoFallbackDir, restoreWindow, selfTestOverlap, taggingWorkerPath } from '../electron/config';
 import product from '../electron/product.json';
 import { isAllowedRequest, isAppNavigation, requestHost } from '../electron/netGuard';
 
@@ -401,6 +401,21 @@ describe('desktop packaging', () => {
     expect(uninstall).toContain(`WinShell::UninstAppUserModelId "${GALLERY_APP_ID}"`);
     // Uninstalling never deletes either program's data.
     expect(nsh).not.toMatch(/\$APPDATA|RMDir \/r/i);
+  });
+
+  it('photo tagging runs from plain files in the installed app: the worker, Transformers.js and onnxruntime are unpacked from app.asar', () => {
+    const path = require.resolve('../electron-builder.config.cjs');
+    delete require.cache[path];
+    const config = require(path);
+    delete require.cache[path];
+    for (const p of ['tagging-worker.cjs', 'node_modules/@huggingface/**', 'node_modules/onnxruntime-node/**', 'node_modules/onnxruntime-common/**']) {
+      expect(config.asarUnpack, p).toContain(p);
+    }
+    // The worker thread is started from the unpacked copy; in development there is no app.asar.
+    expect(taggingWorkerPath('C:\\Program Files\\Photobook Studio\\resources\\app.asar')).toBe('C:\\Program Files\\Photobook Studio\\resources\\app.asar.unpacked\\tagging-worker.cjs');
+    expect(taggingWorkerPath('/opt/photobook-studio/resources/app.asar')).toBe('/opt/photobook-studio/resources/app.asar.unpacked/tagging-worker.cjs');
+    expect(taggingWorkerPath('D:\\git\\photobook\\dist\\desktop\\app')).toBe('D:\\git\\photobook\\dist\\desktop\\app\\tagging-worker.cjs');
+    expect(read('electron/server-host.ts')).toMatch(/workerFile: taggingWorkerPath\(__dirname\)/);
   });
 
   it('the .deb adds a Photobook Gallery launcher to the applications menu', () => {

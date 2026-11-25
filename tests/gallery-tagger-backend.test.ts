@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { findModel } from '../src/core/tagModels';
-import { ModelLoadError, workerBackend } from '../src/gallery/server/tagging/backend';
+import { BackendLostError, ModelLoadError, workerBackend } from '../src/gallery/server/tagging/backend';
 import { taggingWorkerSource } from '../src/gallery/server/tagging/workerSource';
 import { VOCABULARY } from '../src/gallery/server/tagging/vocabulary';
 
@@ -38,7 +38,10 @@ describe('worker backend', () => {
 
   it('a call before load is refused, not hung', async () => {
     const backend = workerBackend(1, taggingWorkerSource());
-    await expect(backend.keywords(join(TRIP, 'day2-04-lake.jpg'))).rejects.toThrow(/not loaded/i);
+    const call = backend.keywords(join(TRIP, 'day2-04-lake.jpg'));
+    await expect(call).rejects.toThrow(/not loaded/i);
+    // Says the model is gone (load it again), not that the photo is bad.
+    await expect(call).rejects.toBeInstanceOf(BackendLostError);
     await backend.close();
   });
 });

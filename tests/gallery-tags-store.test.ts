@@ -91,7 +91,7 @@ describe('content key', () => {
 });
 
 describe('tag rows', () => {
-  it('putTags then tagsFor returns the row; failed rows keep their error', () => {
+  it('putTags then tagsFor returns the row without its embedding (only embeddings() reads those); failed rows keep their error', () => {
     const catalog = new Catalog(dataDir);
     const embedding = new Float32Array([0.6, 0.8]);
     catalog.putTags(tagRow('k1', 'm1', { description: 'A dog.', keywords: [{ label: 'dog', score: 0.9 }], objects: [{ label: 'dog', count: 2 }], embedding }));
@@ -99,7 +99,8 @@ describe('tag rows', () => {
     catalog.putTags(tagRow('k1', 'other', { description: 'Not asked for.' }));
     const got = catalog.tagsFor(['k1', 'k2', 'k3'], ['m1']);
     expect([...got.keys()].sort()).toEqual(['k1', 'k2']);
-    expect(got.get('k1')).toEqual([tagRow('k1', 'm1', { description: 'A dog.', keywords: [{ label: 'dog', score: 0.9 }], objects: [{ label: 'dog', count: 2 }], embedding })]);
+    // The embedding (2-3 KB a photo) is not read for the items or the queue: only search by meaning needs it.
+    expect(got.get('k1')).toEqual([tagRow('k1', 'm1', { description: 'A dog.', keywords: [{ label: 'dog', score: 0.9 }], objects: [{ label: 'dog', count: 2 }], embedding: null })]);
     expect(got.get('k2')![0]).toMatchObject({ status: 'failed', error: 'unreadable' });
     expect([...catalog.embeddings(['k1', 'k2'], 'm1').entries()]).toEqual([['k1', embedding]]);
     catalog.close();

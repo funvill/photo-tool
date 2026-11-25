@@ -11,7 +11,7 @@ import { listPlaces, suggestPlaces } from '../../server/places';
 import { setResourceRoot } from '../../server/resources';
 import { Catalog, type GalleryPhoto } from './catalog';
 import { GalleryFolderError, Scanner } from './scanner';
-import type { ModelChoice } from '../../core/tagModels';
+import { MODEL_CATALOGUE, type ModelChoice } from '../../core/tagModels';
 import { modelRoutes } from './models/routes';
 import { readTaggingSettings } from './models/store';
 import { workerBackend, type TaggerBackend } from './tagging/backend';
@@ -106,7 +106,7 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     catalogue: opts.tagging?.catalogue,
     imageOf: opts.tagging?.imageOf ?? (async (p) => catalog.thumbPath(p.key, 'm')),
   });
-  tagging.setSettings(readTaggingSettings(dataDir));
+  tagging.setSettings({ ...readTaggingSettings(dataDir), paused: false });
   // Tagging starts when the open folder's scan is done (not one cancelled because another folder was opened).
   const scanner = new Scanner(catalog, dataDir, {
     onDone: (job) => {
@@ -157,12 +157,21 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     const s = readTaggingSettings(dataDir);
     const chosen = [s.describe, s.keywords].filter((m): m is string => !!m);
     if (!chosen.length) return () => ({ state: 'off', description: null, keywords: [], objects: [] });
-    const rows = catalog.tagsFor(photos.map((p) => p.contentKey).filter((k): k is string => !!k), chosen);
+    // Until the chosen model of a part has looked at a photo, the other model of that part's results show (kept
+    // until replaced); the state stays "waiting".
+    const catalogue = opts.tagging?.catalogue ?? MODEL_CATALOGUE;
+    const partOf = new Map(catalogue.map((m) => [m.id, m.part]));
+    const rows = catalog.tagsFor(photos.map((p) => p.contentKey).filter((k): k is string => !!k), catalogue.map((m) => m.id));
     return (p) => {
       const mine = (p.contentKey && rows.get(p.contentKey)) || [];
       const of = (id: string | null) => (id ? mine.find((r) => r.modelId === id) : undefined);
-      const d = of(s.describe);
-      const k = of(s.keywords);
+      const shown = (id: string | null) => {
+        const own = of(id);
+        if (!id || own) return own;
+        return mine.find((r) => r.status === 'done' && r.modelId !== id && partOf.get(r.modelId) === partOf.get(id));
+      };
+      const d = shown(s.describe);
+      const k = shown(s.keywords);
       const got = chosen.map((id) => of(id));
       const state = got.some((r) => !r) ? 'waiting' : got.some((r) => r!.status === 'failed') ? 'failed' : 'done';
       return {
@@ -493,7 +502,19 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     catalogue: opts.tagging?.catalogue,
     onSettings: (s) => tagging.setSettings(s),
     onModelsChanged: () => tagging.refresh(),
+    tagging: () => {
+      const st = tagging.status();
+      return { paused: st.paused, notWorking: st.notWorking };
+    },
   });
+
+  // The page closed the folder: stop tagging it.
+  app.post('/api/gallery/tagging/close', wrap((req, res) => {
+    const job = req.body?.job;
+    if (typeof job !== 'string') throw new HttpError(400, 'Send the job.');
+    if (jobIds.at(-1) === job) tagging.clearJob();
+    res.status(204).end();
+  }));
 
   app.get('/api/gallery/tagging/status', (_req, res) => res.json(tagging.status()));
 

@@ -29,6 +29,9 @@ export interface TaggerBackend {
 
 export class ModelLoadError extends Error {}
 
+/** The backend no longer has the model loaded (its worker stopped or restarted): load it again and retry. */
+export class BackendLostError extends Error {}
+
 const fileSize = (path: string): number | null => {
   try {
     return statSync(path).size;
@@ -52,7 +55,7 @@ export function workerBackend(threads: number, workerFile: string): TaggerBacken
   const pending = new Map<number, Pending>();
 
   const failAll = (e: Error) => {
-    for (const p of pending.values()) p.reject(p.load ? new ModelLoadError(e.message) : e);
+    for (const p of pending.values()) p.reject(p.load ? new ModelLoadError(e.message) : new BackendLostError(e.message));
     pending.clear();
     worker = null;
   };
@@ -65,7 +68,7 @@ export function workerBackend(threads: number, workerFile: string): TaggerBacken
       if (!p) return;
       pending.delete(r.id);
       if (r.ok) p.resolve(r.result);
-      else p.reject(r.load ? new ModelLoadError(r.error) : new Error(r.error));
+      else p.reject(r.load ? new ModelLoadError(r.error) : r.lost ? new BackendLostError(r.error) : new Error(r.error));
     });
     w.on('error', (e) => failAll(e instanceof Error ? e : new Error(String(e))));
     w.on('exit', (code) => {

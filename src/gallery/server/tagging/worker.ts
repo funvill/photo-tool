@@ -12,7 +12,10 @@ export type WorkerRequest =
   | { id: number; op: 'load'; part: 'describe' | 'keywords'; dir: string; dtype: string; threads: number; keywordThreshold: number; vocabulary: string[] }
   | { id: number; op: 'describe' | 'keywords'; path: string }
   | { id: number; op: 'embedText'; text: string };
-export type WorkerReply = { id: number; ok: true; result: unknown } | { id: number; ok: false; error: string; load?: boolean };
+export type WorkerReply = { id: number; ok: true; result: unknown } | { id: number; ok: false; error: string; load?: boolean; lost?: boolean };
+
+/** Asked to use a model this worker has not loaded (it was restarted): the caller loads it again. */
+class NotLoaded extends Error {}
 
 env.allowRemoteModels = false;
 env.allowLocalModels = true;
@@ -95,7 +98,7 @@ async function florenceTask(image: Any, task: string, maxTokens: number) {
 }
 
 async function describe(path: string) {
-  if (!florence) throw new Error('The descriptions model is not loaded.');
+  if (!florence) throw new NotLoaded('The descriptions model is not loaded.');
   const image = await RawImage.read(path);
   const caption = String((await florenceTask(image, '<MORE_DETAILED_CAPTION>', 100)) ?? '').replace(/<[^>]*>/g, '').trim();
   const od = (await florenceTask(image, '<OD>', 256)) as { labels?: string[] } | undefined;
@@ -108,7 +111,7 @@ async function describe(path: string) {
 }
 
 async function keywords(path: string) {
-  if (!clip) throw new Error('The keywords model is not loaded.');
+  if (!clip) throw new NotLoaded('The keywords model is not loaded.');
   const image = await RawImage.read(path);
   const { image_embeds } = await clip.vision(await clip.processor(image));
   const embedding = unit(image_embeds.data as Float32Array);
@@ -125,7 +128,7 @@ async function keywords(path: string) {
 }
 
 async function embedText(text: string) {
-  if (!clip) throw new Error('The keywords model is not loaded.');
+  if (!clip) throw new NotLoaded('The keywords model is not loaded.');
   return (await embedTexts([text]))[0];
 }
 
@@ -137,7 +140,7 @@ async function handle(r: WorkerRequest): Promise<WorkerReply> {
     else result = r.op === 'describe' ? await describe(r.path) : await keywords(r.path);
     return { id: r.id, ok: true, result };
   } catch (e) {
-    return { id: r.id, ok: false, error: e instanceof Error ? e.message : String(e), load: r.op === 'load' };
+    return { id: r.id, ok: false, error: e instanceof Error ? e.message : String(e), load: r.op === 'load', lost: e instanceof NotLoaded };
   }
 }
 

@@ -257,6 +257,8 @@ const STAMP_POLL_MS = 3000;
 const TAG_POLL_MS = 1000;
 /** While tagging runs, the photos are reloaded for their new tags at most this often (and once when it stops). */
 const TAG_REFRESH_MS = 10_000;
+/** Each reload while tagging runs costs about this per photo, so a big folder reloads less often (10,000 photos: once a minute). */
+const TAG_REFRESH_MS_PER_PHOTO = 6;
 /** The photos tagging is asked to look at first: the selected one, then this many of the grid's. */
 const FOCUS_COUNT = 200;
 const FOCUS_DEBOUNCE_MS = 500;
@@ -598,7 +600,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
     if (st) set({ tagging: mine });
     // The first reading of this folder's tagging reloads too: it may have finished before this page first looked.
     if (mine && mine.stamp !== tagSeen && get().progress === null) {
-      if (tagSeen === null || !mine.running || Date.now() - tagRefreshedAt >= TAG_REFRESH_MS) {
+      if (tagSeen === null || !mine.running || Date.now() - tagRefreshedAt >= Math.max(TAG_REFRESH_MS, get().items.length * TAG_REFRESH_MS_PER_PHOTO)) {
         tagSeen = mine.stamp;
         tagRefreshedAt = Date.now();
         await get().refreshInfo();
@@ -1004,6 +1006,9 @@ export const useGallery = create<GalleryState>()((set, get) => {
 
     close() {
       cancelScan();
+      // Tagging this folder stops too. A failed call is harmless: the next folder opened replaces it.
+      const { job } = get();
+      if (job) void galleryApi.closeTagging(job).catch(() => {});
       stopTimers();
       set({ job: null, root: null, items: [], openStacks: [], progress: null, ...noSelection, ...noEdits, tidyOpen: false, tagging: null, meaning: null });
     },

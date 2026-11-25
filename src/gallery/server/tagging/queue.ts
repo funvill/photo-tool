@@ -4,8 +4,9 @@
 import { existsSync } from 'node:fs';
 import { MODEL_CATALOGUE, findModel, type ModelChoice, type TagPart } from '../../../core/tagModels';
 import type { Catalog, GalleryPhoto } from '../catalog';
+import { verifyModel } from '../models/download';
 import { installedModels, modelDir, type TaggingSettings } from '../models/store';
-import type { TaggerBackend } from './backend';
+import { BackendLostError, type TaggerBackend } from './backend';
 
 export interface TaggingStatus {
   job: string | null;
@@ -21,6 +22,8 @@ export interface TaggingStatus {
   notWorking: TagPart[];
   /** Bumps whenever a photo's tags change. */
   stamp: number;
+  /** Why tagging stopped on its own (a catalogue write failed, say); cleared when it is asked to carry on. */
+  problem: string | null;
 }
 
 export interface TaggingQueueDeps {
@@ -33,6 +36,8 @@ export interface TaggingQueueDeps {
 }
 
 const PARTS: TagPart[] = ['describe', 'keywords'];
+/** Times in a row the backend may lose a part's model before that part counts as not working. */
+const MAX_LOSSES = 3;
 
 export class TaggingQueue {
   private settings: TaggingSettings = { describe: null, keywords: null, paused: false };
@@ -56,6 +61,10 @@ export class TaggingQueue {
   private stamp = 0;
   private loop: Promise<void> | null = null;
   private stopped = false;
+  private problem: string | null = null;
+  /** Parts whose model the backend lost during the last photo, and how many times in a row each was lost. */
+  private lost = new Set<TagPart>();
+  private losses: Partial<Record<TagPart, number>> = {};
   private readonly catalogue: readonly ModelChoice[];
 
   constructor(private deps: TaggingQueueDeps) {
@@ -73,6 +82,8 @@ export class TaggingQueue {
 
   /** The folder was closed or another one is being opened: stop after the photo in hand. */
   clearJob(): void {
+    // Pause holds until Resume or the next folder.
+    this.settings.paused = false;
     this.job = null;
     this.focusPaths = [];
     this.gone.clear();
@@ -98,12 +109,16 @@ export class TaggingQueue {
   /** Models were downloaded or removed: look at them again (a re-downloaded model may work now). */
   refresh(): void {
     this.broken.clear();
+    this.losses = {};
     this.kick();
   }
 
   status(): TaggingStatus {
     const photos = this.job ? this.job.photos().filter((p) => p.contentKey) : [];
-    const models = this.activeModels().map((m) => m.id);
+    const active = this.activeModels();
+    const models = active.map((m) => m.id);
+    // Counted from the catalogue even when the loop is not running (paused), once per photo.
+    if (this.job) this.learn(active, photos);
     let done = 0;
     let failed = 0;
     if (models.length) {
@@ -122,6 +137,7 @@ export class TaggingQueue {
       running: this.loop !== null,
       notWorking: PARTS.filter((p) => this.broken.has(p)),
       stamp: this.stamp,
+      problem: this.problem,
     };
   }
 
@@ -131,8 +147,16 @@ export class TaggingQueue {
    */
   async embedText(text: string): Promise<{ model: ModelChoice; embedding: Float32Array } | null> {
     const m = this.activeModels().find((x) => x.part === 'keywords');
-    if (!m || this.stopped || !(await this.loadModel(m))) return null;
-    return { model: m, embedding: await this.deps.backend.embedText(text) };
+    for (let tries = 0; tries < 2; tries++) {
+      if (!m || this.stopped || !(await this.loadModel(m))) return null;
+      try {
+        return { model: m, embedding: await this.deps.backend.embedText(text) };
+      } catch (e) {
+        if (!(e instanceof BackendLostError)) throw e;
+        if (this.loaded.keywords === m.id) delete this.loaded.keywords;
+      }
+    }
+    return null;
   }
 
   async stop(): Promise<void> {
@@ -163,9 +187,19 @@ export class TaggingQueue {
 
   private kick(): void {
     if (this.loop || this.stopped || !this.job || this.settings.paused) return;
-    this.loop = this.run().finally(() => {
-      this.loop = null;
-    });
+    this.problem = null;
+    this.loop = this.run()
+      .catch((e: unknown) => {
+        // Nothing is thrown at whoever started tagging: the bar shows why it stopped, and it is tried again
+        // when asked (a setting, a refresh, another folder).
+        this.problem = e instanceof Error ? e.message : String(e);
+      })
+      .finally(() => {
+        this.loop = null;
+        // The job changed while the last step ran (another folder opened during a model load): start on it.
+        if (!this.problem && this.job && this.job !== ran) this.kick();
+      });
+    const ran = this.job;
   }
 
   /** What has been looked at for these models, from the catalogue (once per model). */
@@ -222,9 +256,11 @@ export class TaggingQueue {
             this.loaded[m.part] = m.id;
             return true;
           },
-          () => {
-            this.broken.add(m.part);
+          async () => {
             delete this.loaded[m.part];
+            // A file damaged in place (same size) is found and deleted, so Settings offers Download again.
+            await verifyModel(this.deps.dataDir, m).catch(() => []);
+            this.broken.add(m.part);
             return false;
           },
         )
@@ -239,12 +275,24 @@ export class TaggingQueue {
       const job = this.job;
       if (!job || this.stopped || this.settings.paused) return;
       const models = await this.ensureLoaded(this.activeModels());
-      if (!models.length || this.job !== job) return;
+      if (this.job !== job) continue;
+      if (!models.length) return;
       const photos = job.photos();
       this.learn(models, photos);
       const photo = this.next(models, photos);
       if (!photo) return;
       await this.tag(job, photo, models);
+      for (const m of models) {
+        if (!this.lost.has(m.part)) {
+          delete this.losses[m.part];
+          continue;
+        }
+        // The backend lost the model (its worker restarted): load it again, unless that keeps happening.
+        if (this.loaded[m.part] === m.id) delete this.loaded[m.part];
+        this.losses[m.part] = (this.losses[m.part] ?? 0) + 1;
+        if (this.losses[m.part]! >= MAX_LOSSES) this.broken.add(m.part);
+      }
+      this.lost.clear();
     }
   }
 
@@ -275,6 +323,11 @@ export class TaggingQueue {
           results.push({ m, row: { ...base, status: 'done', keywords: k.keywords, embedding: k.embedding } });
         }
       } catch (e) {
+        // Not the photo's fault: the model is loaded again and the photo looked at again.
+        if (e instanceof BackendLostError) {
+          this.lost.add(m.part);
+          continue;
+        }
         results.push({ m, row: { ...base, status: 'failed', error: e instanceof Error ? e.message : String(e) } });
       }
       if (this.job !== job || this.stopped) break;

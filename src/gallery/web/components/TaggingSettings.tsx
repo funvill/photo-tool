@@ -82,6 +82,8 @@ export function TaggingSettings() {
             {choices.map((m) => {
               const inst = installed.get(m.id);
               const ok = !!inst?.ok;
+              // Chosen, and it would not load (its damaged files were deleted, or it fails some other way).
+              const failing = chosen === m.id && !!state.notWorking?.includes(part);
               const isDownloading = state.downloading?.id === m.id;
               return (
                 <div key={m.id} className={`gallery-settings-option gallery-model${ok ? '' : ' disabled'}`}>
@@ -111,14 +113,21 @@ export function TaggingSettings() {
                           Cancel
                         </button>
                       </>
-                    ) : ok ? (
+                    ) : ok && !failing ? (
                       <button type="button" className="btn btn-small" aria-label={`Remove ${m.label}`} onClick={() => void act(() => galleryApi.removeModel(m.id))}>
                         Remove
                       </button>
                     ) : inst ? (
-                      <button type="button" className="btn btn-small" aria-label={`Download ${m.label} again`} disabled={downloading} onClick={() => setAsking(m)}>
-                        Not working · Download again
-                      </button>
+                      <>
+                        <button type="button" className="btn btn-small" aria-label={`Download ${m.label} again`} disabled={downloading} onClick={() => setAsking(m)}>
+                          Not working · Download again
+                        </button>
+                        {ok && (
+                          <button type="button" className="btn btn-small" aria-label={`Remove ${m.label}`} onClick={() => void act(() => galleryApi.removeModel(m.id))}>
+                            Remove
+                          </button>
+                        )}
+                      </>
                     ) : (
                       <button type="button" className="btn btn-small" aria-label={`Download ${m.label}`} disabled={downloading} onClick={() => setAsking(m)}>
                         Download

@@ -26,8 +26,10 @@ module.exports = {
   electronVersion,
   files: ['**/*', '!**/*.map', '!**/*.d.ts', '!**/*.d.cts', '!**/*.d.mts', '!**/*.md', '!**/*.ts'],
   asar: true,
-  // sharp is a native module with DLLs beside it: it only loads from real files.
-  asarUnpack: ['node_modules/sharp/**', 'node_modules/@img/**', 'node_modules/onnxruntime-node/**'],
+  // sharp, onnxruntime-node (photo tagging) and their DLLs only load from real files. The tagging worker thread is
+  // started from a real file too, with Transformers.js (and its tokenizers) beside it: none of it relies on Electron's
+  // app.asar reading inside a worker thread.
+  asarUnpack: ['node_modules/sharp/**', 'node_modules/@img/**', 'node_modules/onnxruntime-node/**', 'node_modules/onnxruntime-common/**', 'node_modules/@huggingface/**', 'tagging-worker.cjs'],
   // The modules in dist/desktop/app are prebuilt for this platform already.
   npmRebuild: false,
   nodeGypRebuild: false,

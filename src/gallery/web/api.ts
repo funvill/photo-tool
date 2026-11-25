@@ -1,5 +1,5 @@
 import type { GalleryInfoReply, GalleryItem, PhotoTags } from '../server/app';
-import type { ModelChoice } from '../../core/tagModels';
+import type { ModelChoice, TagPart } from '../../core/tagModels';
 import type { DownloadProgress } from '../server/models/download';
 import type { InstalledModel, TaggingSettings } from '../server/models/store';
 import type { TaggingStatus } from '../server/tagging/queue';
@@ -14,6 +14,8 @@ export interface ModelsState {
   installed: InstalledModel[];
   settings: TaggingSettings;
   downloading: DownloadProgress | null;
+  /** Chosen parts whose model is damaged or would not load. */
+  notWorking?: TagPart[];
   error: string | null;
 }
 
@@ -67,6 +69,7 @@ export const galleryApi = {
   open: (folder: string, recursive: boolean) => call<{ jobId: string }>('POST', '/api/gallery/open', { folder, recursive }),
   job: (id: string, since: number) => call<JobUpdate>('GET', `/api/gallery/jobs/${encodeURIComponent(id)}?${qs({ since })}`),
   cancel: (job: string) => call<{ cancelled: boolean }>('POST', `/api/gallery/jobs/${encodeURIComponent(job)}/cancel`),
+  closeTagging: (job: string) => call<void>('POST', '/api/gallery/tagging/close', { job }),
   items: (job: string) => call<GalleryItem[]>('GET', `/api/gallery/items?${qs({ job })}`),
   stamp: async (job: string) => (await call<{ stamp: string }>('GET', `/api/gallery/stamp?${qs({ job })}`)).stamp,
   people: (job: string) => call<string[]>('GET', `/api/gallery/people?${qs({ job })}`),

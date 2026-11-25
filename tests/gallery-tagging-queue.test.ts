@@ -7,7 +7,7 @@ import type { ModelChoice, TagPart } from '../src/core/tagModels';
 import { Catalog, type GalleryPhoto } from '../src/gallery/server/catalog';
 import { downloadModel } from '../src/gallery/server/models/download';
 import { modelDir, type TaggingSettings } from '../src/gallery/server/models/store';
-import { ModelLoadError, type TaggerBackend } from '../src/gallery/server/tagging/backend';
+import { BackendLostError, ModelLoadError, type TaggerBackend } from '../src/gallery/server/tagging/backend';
 import { TaggingQueue } from '../src/gallery/server/tagging/queue';
 import { FAKE_CATALOGUE, fakeFetch } from './support/fakeTagging';
 
@@ -26,19 +26,28 @@ function testBackend() {
   const failOn = new Set<string>();
   let gate: Promise<void> | null = null;
   let release: (() => void) | null = null;
+  let loadGate: Promise<void> | null = null;
+  let releaseLoad: (() => void) | null = null;
+  // What the (pretend) worker has loaded: a restart forgets it; `forgetAlways` forgets after every load.
+  const inWorker = new Set<TagPart>();
+  let forgetAlways = false;
   const name = (p: string) => p.split(/[\\/]/).pop()!.replace('.img', '');
   const backend: TaggerBackend = {
     async load(part, model) {
       loads.push(`${part}:${model.id}`);
+      if (loadGate) await loadGate;
       if (failLoad === part) throw new ModelLoadError('broken model');
+      if (!forgetAlways) inWorker.add(part);
     },
     async describe(path) {
+      if (!inWorker.has('describe')) throw new BackendLostError('The tagging worker stopped.');
       calls.push(`describe:${name(path)}`);
       if (gate) await gate;
       if (failOn.has(name(path))) throw new Error('unreadable');
       return { description: `About ${name(path)}.`, objects: [{ label: 'thing', count: 1 }] };
     },
     async keywords(path) {
+      if (!inWorker.has('keywords')) throw new BackendLostError('The tagging worker stopped.');
       calls.push(`keywords:${name(path)}`);
       if (gate) await gate;
       if (failOn.has(name(path))) throw new Error('unreadable');
@@ -52,6 +61,18 @@ function testBackend() {
   return {
     backend, calls, loads, failOn,
     failLoadOf: (p: TagPart | null) => (failLoad = p),
+    /** The worker restarts: it forgets every model. */
+    restart: () => inWorker.clear(),
+    /** Every load "succeeds" but the worker dies straight after. */
+    forgetAlways: () => {
+      forgetAlways = true;
+      inWorker.clear();
+    },
+    holdLoad: () => (loadGate = new Promise((r) => (releaseLoad = r))),
+    releaseLoad: () => {
+      loadGate = null;
+      releaseLoad?.();
+    },
     hold: () => (gate = new Promise((r) => (release = r))),
     releaseAll: () => {
       gate = null;
@@ -241,6 +262,88 @@ describe('tagging queue', () => {
     await idle(q);
     expect(t.calls).toEqual(['describe:b', 'describe:a-copy']);
     expect(catalog.tagsFor(['ck-a'], [describeSmall.id]).get('ck-a')?.[0].description).toBe('About a-copy.');
+  });
+
+  it('a worker that restarts mid-folder: the model is loaded again and no photo is marked failed', async () => {
+    await install(describeSmall);
+    const t = testBackend();
+    const q = makeQueue(t.backend);
+    q.setSettings(settings({ describe: describeSmall.id }));
+    const list = ['a', 'b', 'c', 'd'].map((n) => photo(n));
+    t.hold();
+    q.startJob('j1', () => list);
+    for (let i = 0; i < 100 && !t.calls.length; i++) await new Promise((r) => setTimeout(r, 5));
+    t.restart(); // the worker dies while a is being looked at; a's own call still answers
+    t.releaseAll();
+    await idle(q);
+    expect(t.loads).toEqual([`describe:${describeSmall.id}`, `describe:${describeSmall.id}`]);
+    expect(q.status()).toMatchObject({ total: 4, done: 4, failed: 0, notWorking: [] });
+    const rows = catalog.tagsFor(['ck-a', 'ck-b', 'ck-c', 'ck-d'], [describeSmall.id]);
+    expect([...rows.values()].map((r) => r[0].status)).toEqual(['done', 'done', 'done', 'done']);
+  });
+
+  it('a worker that keeps dying: that part is reported not working after a few tries, and no photo is marked failed', async () => {
+    await install(describeSmall);
+    const t = testBackend();
+    t.forgetAlways();
+    const q = makeQueue(t.backend);
+    q.setSettings(settings({ describe: describeSmall.id }));
+    q.startJob('j1', () => ['a', 'b', 'c'].map((n) => photo(n)));
+    await idle(q);
+    expect(t.loads.length).toBeLessThanOrEqual(4);
+    expect(q.status()).toMatchObject({ notWorking: ['describe'], failed: 0, running: false });
+    expect(catalog.tagsFor(['ck-a', 'ck-b', 'ck-c'], [describeSmall.id]).size).toBe(0);
+  });
+
+  it('a folder opened while a model is loading is tagged once the load finishes', async () => {
+    await install(describeSmall);
+    const t = testBackend();
+    const q = makeQueue(t.backend);
+    q.setSettings(settings({ describe: describeSmall.id }));
+    t.holdLoad();
+    q.startJob('j1', () => [photo('a')]);
+    for (let i = 0; i < 100 && !t.loads.length; i++) await new Promise((r) => setTimeout(r, 5));
+    q.clearJob(); // another folder is being opened while the model loads
+    q.startJob('j2', () => [photo('b')]);
+    t.releaseLoad();
+    await idle(q);
+    expect(t.calls).toEqual(['describe:b']);
+    expect(q.status()).toMatchObject({ job: 'j2', done: 1 });
+  });
+
+  it('a catalogue write that fails stops tagging with a problem in the status, never an unhandled error', async () => {
+    await install(describeSmall);
+    const t = testBackend();
+    const q = makeQueue(t.backend);
+    vi.spyOn(catalog, 'putTags').mockImplementation(() => {
+      throw new Error('database or disk is full');
+    });
+    q.setSettings(settings({ describe: describeSmall.id }));
+    q.startJob('j1', () => [photo('a'), photo('b')]);
+    await idle(q);
+    expect(q.status()).toMatchObject({ running: false, problem: expect.stringMatching(/disk is full/) });
+    expect(t.calls).toEqual(['describe:a']);
+    vi.restoreAllMocks();
+    // Asked again (a refresh, a setting): it carries on, and the problem is gone.
+    q.refresh();
+    await idle(q);
+    expect(q.status()).toMatchObject({ done: 2, problem: null });
+  });
+
+  it('started paused, a folder already tagged counts as done (not 0 of N)', async () => {
+    await install(describeSmall);
+    const list = [photo('a'), photo('b')];
+    const first = makeQueue(testBackend().backend);
+    first.setSettings(settings({ describe: describeSmall.id }));
+    first.startJob('j1', () => list);
+    await idle(first);
+    await first.stop();
+    const t = testBackend();
+    const q = makeQueue(t.backend);
+    q.setSettings(settings({ describe: describeSmall.id, paused: true }));
+    q.startJob('j2', () => list);
+    expect(q.status()).toMatchObject({ total: 2, done: 2, running: false, paused: true });
+    expect(t.calls).toEqual([]);
   });
 
   it('a model that fails to load is reported in notWorking and that part does not run', async () => {

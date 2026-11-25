@@ -70,6 +70,14 @@ describe('model downloads', () => {
     expect(installedModels(dataDir(), FAKE_CATALOGUE).filter((m) => m.ok)).toEqual([]);
   });
 
+  it('a file that cannot be written (disk full, locked) fails the download with a message; nothing crashes', async () => {
+    // A folder where the .part file should go: opening it for writing fails, as a full disk or a lock would.
+    const part = join(modelDir(dataDir(), describeSmall.id), `${bigFile().path}.part`);
+    mkdirSync(part, { recursive: true });
+    await expect(downloadModel(dataDir(), describeSmall, { fetch: fakeFetch() })).rejects.toThrow(/Couldn't write|disk/i);
+    expect(installedModels(dataDir(), FAKE_CATALOGUE).find((i) => i.id === describeSmall.id)?.ok ?? false).toBe(false);
+  });
+
   it('a redirect to a host not allowed is refused', async () => {
     await expect(downloadModel(dataDir(), describeSmall, { fetch: fakeFetch({ redirectTo: 'https://example.com/x' }) }))
       .rejects.toThrow(/not allowed/i);

@@ -11,6 +11,8 @@ export interface ModelRoutesOptions {
   onSettings?(s: TaggingSettings): void;
   /** Called after a download ends or a model is removed. */
   onModelsChanged?(): void;
+  /** Tagging's own state: Pause (kept in memory, not saved) and the chosen parts that would not work. */
+  tagging?(): { paused: boolean; notWorking: TagPart[] };
 }
 
 export function modelRoutes(app: express.Express, dataDir: string, o: ModelRoutesOptions): { stop(): void } {
@@ -18,16 +20,19 @@ export function modelRoutes(app: express.Express, dataDir: string, o: ModelRoute
   let downloading: (DownloadProgress & { abort: AbortController }) | null = null;
   let error: string | null = null;
 
+  // Pause is not saved: it holds until Resume or the next folder.
   const saveSettings = (s: TaggingSettings) => {
-    writeTaggingSettings(dataDir, s);
+    writeTaggingSettings(dataDir, { ...s, paused: false });
     o.onSettings?.(s);
   };
+  const state = () => o.tagging?.() ?? { paused: false, notWorking: [] };
 
   app.get('/api/gallery/models', (_req, res) => {
     res.json({
       catalogue,
       installed: installedModels(dataDir, catalogue),
-      settings: readTaggingSettings(dataDir),
+      settings: { ...readTaggingSettings(dataDir), paused: state().paused },
+      notWorking: state().notWorking,
       downloading: downloading && { id: downloading.id, received: downloading.received, total: downloading.total },
       error,
     });
@@ -68,7 +73,7 @@ export function modelRoutes(app: express.Express, dataDir: string, o: ModelRoute
     if (downloading?.id === m.id) downloading.abort.abort();
     removeModel(dataDir, m.id);
     const s = readTaggingSettings(dataDir);
-    if (s[m.part] === m.id) saveSettings({ ...s, [m.part]: null });
+    if (s[m.part] === m.id) saveSettings({ ...s, [m.part]: null, paused: state().paused });
     o.onModelsChanged?.();
     res.status(204).end();
   });

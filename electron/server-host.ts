@@ -8,6 +8,7 @@ import type { Express } from 'express';
 import type { Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
+import { taggingWorkerPath } from './config';
 
 export interface StartMessage {
   type: 'start';
@@ -50,8 +51,9 @@ async function createServer(msg: StartMessage, post: (m: HostReply) => void): Pr
     const { createGalleryApp } = await import('../src/gallery/server/app');
     return createGalleryApp(msg.dataDir, {
       photoInfoFallbackDir: msg.photoInfoFallbackDir,
-      // Built beside this bundle by scripts/desktop/build.mjs (both the packaged and the development build).
-      tagging: { workerFile: join(__dirname, 'tagging-worker.cjs') },
+      // Built beside this bundle by scripts/desktop/build.mjs (both the packaged and the development build); run
+      // from app.asar.unpacked in the installed app.
+      tagging: { workerFile: taggingWorkerPath(__dirname) },
       ...(msg.resourceRoot ? { resourceRoot: msg.resourceRoot, staticDir: join(msg.resourceRoot, 'web') } : { devWebUrl: msg.devWebUrl }),
     });
   }

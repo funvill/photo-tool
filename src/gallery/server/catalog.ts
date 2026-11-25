@@ -151,8 +151,8 @@ export class Catalog {
       .run(t.contentKey, t.modelId, t.status, t.description, JSON.stringify(t.keywords), JSON.stringify(t.objects), emb, t.error, Date.now());
   }
 
-  /** The rows of these models for these pictures, by content key. */
-  tagsFor(contentKeys: string[], modelIds: string[]): Map<string, TagRow[]> {
+  /** The rows of these models for these pictures, by content key; `embedding` is left out (null) unless asked for. */
+  tagsFor(contentKeys: string[], modelIds: string[], withEmbedding = false): Map<string, TagRow[]> {
     const out = new Map<string, TagRow[]>();
     if (!modelIds.length) return out;
     const models = modelIds.map(() => '?').join(',');
@@ -160,7 +160,7 @@ export class Catalog {
     for (let i = 0; i < keys.length; i += IN_BATCH) {
       const batch = keys.slice(i, i + IN_BATCH);
       const rows = this.db
-        .prepare(`SELECT content_key, model_id, status, description, keywords, objects, embedding, error FROM tags WHERE model_id IN (${models}) AND content_key IN (${batch.map(() => '?').join(',')})`)
+        .prepare(`SELECT content_key, model_id, status, description, keywords, objects, ${withEmbedding ? 'embedding' : 'NULL AS embedding'}, error FROM tags WHERE model_id IN (${models}) AND content_key IN (${batch.map(() => '?').join(',')})`)
         .all(...modelIds, ...batch) as unknown as TagDbRow[];
       for (const r of rows) {
         const list = out.get(r.content_key) ?? [];
@@ -174,7 +174,7 @@ export class Catalog {
   /** The picture embeddings of one model, by content key (pictures without one are left out). */
   embeddings(contentKeys: string[], modelId: string): Map<string, Float32Array> {
     const out = new Map<string, Float32Array>();
-    for (const [k, rows] of this.tagsFor(contentKeys, [modelId])) {
+    for (const [k, rows] of this.tagsFor(contentKeys, [modelId], true)) {
       const e = rows[0]?.embedding;
       if (e) out.set(k, e);
     }
