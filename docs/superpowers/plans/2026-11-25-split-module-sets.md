@@ -35,7 +35,7 @@ Electron files are in neither list; Tasks 5 to 7 sort them by hand.
 - `src/web/fonts.css`
 - `src/web/styles.css`
 
-## Photo Tool only (57)
+## Photo Tool only (56)
 
 - `src/core/galleryMap.ts`
 - `src/core/gallerySort.ts`
@@ -93,7 +93,6 @@ Electron files are in neither list; Tasks 5 to 7 sort them by hand.
 - `src/gallery/web/store.ts`
 - `src/gallery/web/useReviewKeys.ts`
 - `src/web/virtualGrid.ts`
-- `tests/support/fakeTagging.ts`
 
 ## Editor only (115)
 
@@ -212,3 +211,5 @@ Electron files are in neither list; Tasks 5 to 7 sort them by hand.
 - `src/web/index.html`
 - `src/web/main.tsx`
 - `src/web/store.ts`
+
+`src/gallery/server/main.ts` reaches `tests/support/fakeTagging.ts` through a dynamic import (the e2e fake tagger). It is left out of the lists above and moves with Photo Tool's tests in Task 3.
