@@ -1001,3 +1001,34 @@ test('a portrait photo in a very wide window never makes the preview scroll; the
     removeTrip(dir);
   }
 });
+test('every tile shows its photo score; the details panel shows it with what made it; a favourite is worth 50 more', async ({ page, request }) => {
+  const dir = await openTrip(page, request);
+  try {
+    await page.getByLabel('Stack similar').uncheck();
+    const tiles = page.locator('.gallery-tile');
+    const count = await tiles.count();
+    await expect(page.locator('.gallery-tile-score')).toHaveCount(count);
+    for (let i = 0; i < count; i++) await expect(tiles.nth(i).locator('.gallery-tile-score')).toHaveText(/^-?\d+$/);
+    await tiles.first().click();
+    const card = page.locator('.gallery-score');
+    const total = card.locator('.gallery-score-total');
+    const before = Number(await total.textContent());
+    expect(await tiles.first().locator('.gallery-tile-score').textContent()).toBe(String(before));
+    // Hovering shows each line and the total.
+    await card.hover();
+    const pop = page.getByRole('tooltip');
+    await expect(pop).toBeVisible();
+    await expect(pop.getByRole('rowheader', { name: 'Focus' })).toBeVisible();
+    await expect(pop.getByRole('rowheader', { name: 'Size' })).toBeVisible();
+    await expect(pop.locator('tfoot')).toContainText(String(before));
+    // F: +50, in the panel and on the tile.
+    await page.mouse.move(0, 0);
+    await page.keyboard.press('f');
+    await expect(total).toHaveText(String(before + 50));
+    await expect(tiles.first().locator('.gallery-tile-score')).toHaveText(String(before + 50));
+    await card.hover();
+    await expect(pop.getByRole('rowheader', { name: 'Favourite' })).toBeVisible();
+  } finally {
+    removeTrip(dir);
+  }
+});

@@ -17,6 +17,7 @@ import { useGallery } from '../store';
 import { Histogram } from './Histogram';
 import { LocationInput } from './LocationInput';
 import { PeopleInput } from './PeopleInput';
+import { ScoreCard } from './ScoreCard';
 import { Section } from './Section';
 
 /** The country list is the same for every photo: fetched once. */
@@ -212,6 +213,7 @@ function DetailsFor({ item }: { item: GalleryItem }) {
         </button>
       </div>
       <div className="gallery-details-body">
+        <ScoreCard path={item.path} />
         {item.infoSource === 'fallback' && (
           <p className="gallery-note small">This folder can&apos;t be written; info is kept in Photobook&apos;s own folder</p>
         )}

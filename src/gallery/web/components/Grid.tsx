@@ -3,10 +3,12 @@ import { dragPaths } from '../../../core/galleryViewer';
 import { desktop } from '../../../web/desktop';
 import { gridWindow } from '../../../web/virtualGrid';
 import { isIdentityEdit } from '../../../core/photoEdit';
-import { selectVisible, shownEdit, useGallery, useStackInfo, useVisibleItems } from '../store';
+import { selectScores, selectVisible, shownEdit, useGallery, useStackInfo, useVisibleItems } from '../store';
 import { Tile } from './Tile';
 
 const GAP = 6;
+
+const scoreOf = (s: { total: number; analysed: boolean } | undefined) => (s?.analysed ? s.total : null);
 /** The grid's padding (px), matching .gallery-grid in gallery.css. */
 const PAD = 12;
 
@@ -30,6 +32,8 @@ export function Grid({ onOpen, onContextMenu }: { onOpen: (path: string) => void
   // Edits shown on the tiles (unsaved, else saved): a photo without one keeps the plain thumbnail.
   const pendingEdits = useGallery((s) => s.pendingEdits);
   const editTarget = useGallery((s) => s.editTarget);
+  // Each tile shows its photo score (a whole number; null until the photo is analysed).
+  const scores = useGallery(selectScores);
   const ref = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ width: 0, height: 0 });
   const [scrollTop, setScrollTop] = useState(0);
@@ -117,6 +121,7 @@ export function Grid({ onOpen, onContextMenu }: { onOpen: (path: string) => void
         stack={stacks.get(item.path)}
         edit={edit && !isIdentityEdit(edit) ? edit : null}
         unsaved={item.path in pendingEdits}
+        score={scoreOf(scores.get(item.path))}
         onSelect={onSelect}
         onStar={onStar}
         onToggleStack={onToggleStack}

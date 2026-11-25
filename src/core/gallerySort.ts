@@ -1,5 +1,6 @@
 import { cleanupSuggestions, type PhotoFlags } from './cleanup';
 import type { PhotoAnalysis, PhotoAsset } from './model';
+import { colourVariety } from './photoScore';
 
 // The gallery's sorts and filters, free of any UI or server. The "facts" of a folder (interesting
 // score, main colour, quality flags, bursts) are worked out once per list of photos; sorting and
@@ -72,7 +73,6 @@ const HUE_RANGES: [ColourBucket, number][] = [
 ];
 const BUCKET_ORDER = new Map<ColourBucket, number>((['red', 'orange', 'yellow', 'green', 'cyan', 'blue', 'purple', 'pink', 'neutral'] as const).map((b, i) => [b, i]));
 const NEUTRAL_BELOW = 0.15;
-const MAX_RGB_DISTANCE = Math.hypot(255, 255, 255);
 
 /** Main colour of an sRGB (0–255) colour: its hue range (red, orange, yellow, green, cyan, blue, purple, pink), or neutral when grey. */
 export function colourBucket(rgb: [number, number, number]): { bucket: ColourBucket; lightness: number } {
@@ -89,16 +89,6 @@ export function colourBucket(rgb: [number, number, number]): { bucket: ColourBuc
   for (const [name, from] of HUE_RANGES) if (hue >= from) bucket = name;
   if (hue < 15) bucket = 'red';
   return { bucket, lightness };
-}
-
-/** Spread of the 3 × 3 colour grid: mean distance of its nine colours from their mean, over the largest possible. */
-function colourVariety(grid: number[] | undefined): number {
-  if (!grid || grid.length < 27) return 0;
-  const mean = [0, 0, 0];
-  for (let i = 0; i < 9; i++) for (let c = 0; c < 3; c++) mean[c] += grid[i * 3 + c] / 9;
-  let sum = 0;
-  for (let i = 0; i < 9; i++) sum += Math.hypot(grid[i * 3] - mean[0], grid[i * 3 + 1] - mean[1], grid[i * 3 + 2] - mean[2]);
-  return Math.min(1, Math.max(0, sum / 9 / MAX_RGB_DISTANCE));
 }
 
 const NO_FLAGS: PhotoFlags = { blurry: false, dark: false, bright: false, lowRes: false };

@@ -214,3 +214,24 @@ describe('PATCH /api/gallery/info edit field', () => {
     expect(statSync(photos).isDirectory()).toBe(true);
   });
 });
+
+describe('PATCH /api/gallery/info scoreAdjust field', () => {
+  const patch = (scoreAdjust: unknown) => api('PATCH', '/api/gallery/info', { path: join(photos, 'a.jpg'), patch: { scoreAdjust } });
+  const infoPath = () => join(photos, 'photoinfo.json');
+
+  it('stores a whole number, and 0 or null as no field', async () => {
+    await openAndFinish();
+    expect((await patch(3)).body.info.scoreAdjust).toBe(3);
+    expect(JSON.parse(readFileSync(infoPath(), 'utf8')).photos['a.jpg'].scoreAdjust).toBe(3);
+    expect((await patch(-2)).body.info.scoreAdjust).toBe(-2);
+    expect((await patch(0)).body.info.scoreAdjust).toBeUndefined();
+    await patch(5);
+    expect((await patch(null)).body.info.scoreAdjust).toBeUndefined();
+  });
+
+  it('refuses anything but a whole number, and writes nothing', async () => {
+    await openAndFinish();
+    for (const bad of [1.5, '2', true, 1e9]) expect((await patch(bad)).status).toBe(400);
+    expect(existsSync(infoPath())).toBe(false);
+  });
+});

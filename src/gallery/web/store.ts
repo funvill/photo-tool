@@ -4,6 +4,7 @@ import { filterItems, galleryFacts, sortItems, type GalleryFacts, type GalleryFi
 import { clickSelect, dragPaths, flagTargets, nextAfterRemoval } from '../../core/galleryViewer';
 import { stackItems, type StackInfo } from '../../core/galleryStacks';
 import { IDENTITY_EDIT, isIdentityEdit, parseEdit, type PhotoEdit } from '../../core/photoEdit';
+import { photoScores, scoreAdjustOf, type PhotoScore } from '../../core/photoScore';
 import { loadEditTarget, saveEditTarget, type EditTarget } from './editSettings';
 import { galleryApi, type GalleryItem, type JobUpdate, type RecentFolder } from './api';
 
@@ -973,20 +974,35 @@ const FACTS_SCAN_THROTTLE_MS = 2000;
 
 type VisibleInput = Pick<GalleryState, 'items' | 'sort' | 'filter'> & { progress?: GalleryState['progress']; stacked?: boolean; openStacks?: string[] };
 
+/** The folder's facts (bursts, quality), worked out again only when what they read changed; mid-scan at most every FACTS_SCAN_THROTTLE_MS. */
+function currentFacts(s: Pick<VisibleInput, 'items' | 'progress'>): Map<string, GalleryFacts> {
+  const now = Date.now();
+  // Mid-scan the list grows every half second: keep the last facts (new photos have none yet) for a while.
+  if (factsMemo && factsMemo.items !== s.items && sameFactsInput(factsMemo.items, s.items)) factsMemo = { ...factsMemo, items: s.items };
+  const fresh = factsMemo?.items === s.items || (!!s.progress && !!factsMemo && now >= factsMemo.at && now - factsMemo.at < FACTS_SCAN_THROTTLE_MS);
+  if (!fresh) factsMemo = { items: s.items, facts: galleryFacts(s.items), at: now };
+  return factsMemo!.facts;
+}
+
+let scoresMemo: { items: GalleryItem[]; facts: Map<string, GalleryFacts>; scores: Map<string, PhotoScore> } | null = null;
+
+/**
+ * Every photo's score, by path (photoScores over the whole folder, not just what is shown). Worked out again
+ * when a photo changes (a star, a hide, a nudge): cheap next to the facts, which are kept when they can be.
+ */
+export function selectScores(s: Pick<VisibleInput, 'items' | 'progress'>): Map<string, PhotoScore> {
+  const facts = currentFacts(s);
+  if (scoresMemo && scoresMemo.items === s.items && scoresMemo.facts === facts) return scoresMemo.scores;
+  scoresMemo = { items: s.items, facts, scores: photoScores(s.items, facts) };
+  return scoresMemo.scores;
+}
+
 export function selectVisible(s: VisibleInput): GalleryItem[] {
   const stacked = !!s.stacked;
   const m = visibleMemo;
   if (m && m.items === s.items && m.sort === s.sort && m.filter === s.filter && m.stacked === stacked && m.openStacks === s.openStacks && !(m.stale && !s.progress)) return m.visible;
   const withFacts = needsFacts(s.sort, s.filter, stacked);
-  let facts = NO_FACTS;
-  if (withFacts) {
-    const now = Date.now();
-    // Mid-scan the list grows every half second: keep the last facts (new photos have none yet) for a while.
-    if (factsMemo && factsMemo.items !== s.items && sameFactsInput(factsMemo.items, s.items)) factsMemo = { ...factsMemo, items: s.items };
-    const fresh = factsMemo?.items === s.items || (!!s.progress && !!factsMemo && now >= factsMemo.at && now - factsMemo.at < FACTS_SCAN_THROTTLE_MS);
-    if (!fresh) factsMemo = { items: s.items, facts: galleryFacts(s.items), at: now };
-    facts = factsMemo!.facts;
-  }
+  const facts = withFacts ? currentFacts(s) : NO_FACTS;
   const sorted = sortItems(filterItems(s.items, s.filter, facts), s.sort, facts);
   const folded = stacked ? stackItems(sorted, facts, new Set(s.openStacks ?? [])) : null;
   const visible = folded ? folded.items : sorted;

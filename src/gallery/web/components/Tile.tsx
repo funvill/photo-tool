@@ -23,6 +23,8 @@ export interface TileProps {
   edit: PhotoEdit | null;
   /** It has an edit not saved yet: a small dot says so. */
   unsaved: boolean;
+  /** Its photo score, shown in the bottom-right corner; null (shown as "–") until the photo is analysed. */
+  score: number | null;
   onSelect(path: string, mods: { ctrl: boolean; shift: boolean }): void;
   onStar(path: string, star: boolean): void;
   /** The "×N" badge of a stack's top: unfold or fold the stack. */
@@ -40,8 +42,8 @@ export interface TileProps {
 /** A click on one of the tile's own buttons is not a click on the photo. */
 const onControls = (e: SyntheticEvent) => !!(e.target as HTMLElement).closest('.gallery-tile-actions, .gallery-stack-badge');
 
-/** One photo in the grid: its thumbnail (edited, when it has an edit), star and hidden marks, a dot for an unsaved edit, a stack's "×N" badge, and a star button on hover. */
-export const Tile = memo(function Tile({ item, x, y, size, selected, picked, hidden, stack, edit, unsaved, onSelect, onStar, onToggleStack, onOpen, onDragReady, onDragOut, onContextMenu }: TileProps) {
+/** One photo in the grid: its thumbnail (edited, when it has an edit), star and hidden marks, a dot for an unsaved edit, its photo score, a stack's "×N" badge, and a star button on hover. */
+export const Tile = memo(function Tile({ item, x, y, size, selected, picked, hidden, stack, edit, unsaved, score, onSelect, onStar, onToggleStack, onOpen, onDragReady, onDragOut, onContextMenu }: TileProps) {
   const starred = item.info.star === true;
   const classes = ['gallery-tile', selected && 'selected', picked && 'picked', starred && 'starred', hidden && 'hidden', stack && !stack.top && 'stack-member', stack?.top && stack.open && 'stack-open', edit && 'edited'];
   return (
@@ -67,6 +69,7 @@ export const Tile = memo(function Tile({ item, x, y, size, selected, picked, hid
         <img src={thumbUrl(item.key, 's')} alt={item.fileName} loading="lazy" decoding="async" draggable={false} />
       )}
       {unsaved && <span className="gallery-tile-unsaved" aria-label="Edited, not saved" title="Edited, not saved" />}
+      <span className="gallery-tile-score" aria-label={score === null ? 'Score not worked out yet' : `Score ${score}`}>{score === null ? '–' : score}</span>
       {(starred || hidden) && (
         <span className="gallery-tile-marks">
           {starred && (

@@ -324,6 +324,12 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
       if (!edit) throw new HttpError(400, 'That edit is not valid.');
       toWrite = { ...patch, edit: isIdentityEdit(edit) ? null : edit };
     }
+    // The score nudges (Up/Down): a whole number; 0 is stored as no field.
+    if ('scoreAdjust' in patch && patch.scoreAdjust !== null) {
+      const n = patch.scoreAdjust;
+      if (typeof n !== 'number' || !Number.isInteger(n) || Math.abs(n) > 100_000) throw new HttpError(400, 'scoreAdjust must be a whole number.');
+      toWrite = { ...toWrite, scoreAdjust: n === 0 ? null : n };
+    }
     const job = typeof jobId === 'string' && jobIds.includes(jobId) ? scanner.get(jobId) : undefined;
     const before = job ? jobStamp(job.photos) : undefined;
     // A patch that only removes fields the photo does not have changes nothing: photoinfo.json is not
