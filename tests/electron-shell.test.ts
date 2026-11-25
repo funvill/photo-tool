@@ -142,8 +142,27 @@ describe('desktop build scripts', () => {
     expect(config.directories.app).toBe('dist/photobook-editor/desktop/app');
   });
 
-  it('build.mjs maps each program to its entry files, externals and tagging worker', () => {
-    const build = readFileSync('scripts/desktop/build.mjs', 'utf8');
+  it('the program table is the one list of entry files: build.mjs and collect-resources both read it', async () => {
+    const { PROGRAMS, programEntries } = (await loadPrograms()) as unknown as { PROGRAMS: Record<string, unknown>; programEntries(name: string): string[] };
+    expect(Object.keys(PROGRAMS).sort()).toEqual(['photo-tool', 'photobook-editor']);
+    expect(programEntries('photo-tool')).toEqual(['photo-tool/electron/main.ts', 'photo-tool/electron/server-host.ts', 'photo-tool/electron/preload.ts', 'photo-tool/server/tagging/worker.ts', 'photo-tool/web/index.html']);
+    expect(programEntries('photobook-editor')).toEqual(['electron/main.ts', 'electron/server-host.ts', 'electron/preload.ts', 'photobook-editor/web/index.html']);
+    for (const name of Object.keys(PROGRAMS)) for (const f of programEntries(name)) expect(existsSync(f), f).toBe(true);
+    for (const script of ['scripts/desktop/build.mjs', 'scripts/collect-resources.ts']) {
+      const text = readFileSync(script, 'utf8');
+      expect(text, script).toContain('programs.mjs');
+      expect(text, script).not.toMatch(/'(photo-tool\/electron|electron)\/main\.ts'/);
+    }
+  });
+
+  it('the run-time module list refuses an entry file that does not exist, rather than leaving its packages out', async () => {
+    const { packageImports } = await import('../scripts/import-graph');
+    expect(() => packageImports(['electron/no-such-main.ts'], '.')).toThrow(/electron\/no-such-main\.ts/);
+    expect(packageImports(['photo-tool/electron/server-host.ts'], '.').has('express')).toBe(true);
+  });
+
+  it('the program table maps each program to its entry files, externals and tagging worker', () => {
+    const build = readFileSync('scripts/desktop/programs.mjs', 'utf8');
     expect(build).toContain("main: 'photo-tool/electron/main.ts'");
     expect(build).toContain("main: 'electron/main.ts'");
     expect(build).toContain("external: ['sharp', '@huggingface/transformers']");
@@ -151,6 +170,7 @@ describe('desktop build scripts', () => {
     expect(build).toContain("taggingWorker: 'photo-tool/server/tagging/worker.ts'");
     expect(build).toContain('taggingWorker: null');
     expect(build).not.toContain('gallery.html');
+    expect(readFileSync('scripts/desktop/build.mjs', 'utf8')).not.toContain('gallery.html');
     expect(readFileSync('scripts/collect-resources.ts', 'utf8')).not.toContain('gallery.html');
   });
 });

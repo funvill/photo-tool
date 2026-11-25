@@ -55,16 +55,27 @@ describe('builder config', () => {
     expect(builderConfig('win32').productName).toBe('Photo Tool');
   });
 
-  it('unpacks node_modules and the tagging worker, and adds no installer script or second launcher', () => {
+  it("unpacks node_modules and the tagging worker, and adds neither the editor's installer script nor a second launcher", () => {
     const text = read('photo-tool/electron-builder.config.cjs');
     expect(text).toMatch(/asarUnpack: \[[^\]]*'node_modules\/\*\*'/);
     expect(text).not.toContain("include: 'electron/installer.nsh'");
     expect(text).not.toContain('fpm');
     const config = builderConfig('linux');
     for (const p of ['tagging-worker.cjs', 'node_modules/**']) expect(config.asarUnpack, p).toContain(p);
-    expect(config.nsis.include).toBeUndefined();
+    expect(config.nsis.include).toBe('photo-tool/electron/installer.nsh');
     expect(config.deb?.fpm).toBeUndefined();
     expect(config.linux.desktop.entry.Name).toBe('Photo Tool');
+  });
+
+  it("its installer script only removes electron-builder's leftover installer copy: no shortcuts, no taskbar ids, no data", () => {
+    const nsh = read('photo-tool/electron/installer.nsh');
+    const macro = (name: string) => new RegExp(`!macro ${name}\\b([\\s\\S]*?)!macroend`).exec(nsh)?.[1] ?? '';
+    expect(macro('removeInstallerCopy')).toContain('Delete "$LOCALAPPDATA\\${APP_INSTALLER_STORE_FILE}"');
+    expect(macro('customInstall').trim()).toBe('!insertmacro removeInstallerCopy');
+    expect(macro('customUnInstall').trim()).toBe('!insertmacro removeInstallerCopy');
+    const code = nsh.split('\n').filter((l) => !/^\s*;/.test(l)).join('\n');
+    expect(code).not.toMatch(/Gallery|CreateShortCut|WinShell|\$APPDATA|RMDir \/r/i);
+    expect([...code.matchAll(/!macro (\w+)/g)].map((m) => m[1]).sort()).toEqual(['customInstall', 'customUnInstall', 'removeInstallerCopy']);
   });
 
   it('ships a self-contained installer: no web installer, no updater, no crash reporter', () => {
@@ -145,7 +156,8 @@ describe('entry points', () => {
     const shipped = packageImports(['photo-tool/electron/main.ts', 'photo-tool/electron/server-host.ts', 'photo-tool/electron/preload.ts', 'photo-tool/server/tagging/worker.ts', 'photo-tool/web/index.html'], root);
     for (const name of ['sharp', '@huggingface/transformers', 'express', 'exifr', 'react', 'leaflet', '@fontsource/inter']) expect(shipped, name).toContain(name);
     for (const name of ['pdfkit', 'fontkit', 'pdf-lib', '@hyzyla/pdfium']) expect(shipped, name).not.toContain(name);
-    expect(read('scripts/collect-resources.ts')).toContain("'photo-tool/server/tagging/worker.ts', 'photo-tool/web/index.html'");
+    expect(read('scripts/desktop/programs.mjs')).toContain("page: 'photo-tool/web/index.html'");
+    expect(read('scripts/collect-resources.ts')).toContain('programEntries(name)');
   });
 
   it('no gallery switch: neither photo-tool/ nor shared/ mentions the old one', () => {
@@ -209,6 +221,14 @@ describe('the Photo Tool program', () => {
     const old = ['Photobook', 'Gallery'].join(' ');
     const hits = [...filesUnder('photo-tool/web'), ...filesUnder('photo-tool/electron'), ...filesUnder('photo-tool/server')].filter((f) => readFileSync(f, 'utf8').replace(`oldProductName: '${old}'`, '').includes(old));
     expect(hits.map((f) => f.slice(root.length + 1))).toEqual([]);
+    // No other old name on the page either: "Photobook" only as part of "Photobook Editor".
+    const stray = filesUnder('photo-tool/web').flatMap((f) =>
+      readFileSync(f, 'utf8')
+        .split('\n')
+        .map((line, i) => ({ at: `${f.slice(root.length + 1)}:${i + 1}`, line }))
+        .filter(({ line }) => /Photobook(?! Editor)/.test(line)),
+    );
+    expect(stray.map((s) => `${s.at}: ${s.line.trim()}`)).toEqual([]);
     // Only the old name to move data from is left.
     expect(main().replace("oldProductName: 'Photobook Gallery'", '')).not.toContain(old);
   });

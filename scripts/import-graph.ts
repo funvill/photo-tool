@@ -78,9 +78,12 @@ function packageOf(spec: string): string | null {
 /**
  * The npm packages the code reached from `entries` imports by name (`import 'x'`, `import('x')`,
  * `require('x')`, a style sheet's `@import 'x/…'`), type-only imports included: what a bundle of
- * those entries can carry.
+ * those entries can carry. Throws when an entry is not a file: importClosure would skip it, and every
+ * package only it reaches would quietly go missing from the list.
  */
 export function packageImports(entries: string[], root: string): Set<string> {
+  const missing = entries.filter((e) => !isFile(resolve(root, e)));
+  if (missing.length) throw new Error(`Entry files not found: ${missing.join(', ')}`);
   const found = new Set<string>();
   for (const rel of importClosure(entries, root)) {
     const css = rel.endsWith('.css');

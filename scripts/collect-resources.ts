@@ -22,32 +22,17 @@ import { FONT_FAMILIES, fontFilePath } from '../photobook-editor/core';
 import { fontFile, libheifFile, pdfiumDir, projectRoot, setResourceRoot, webDir, worldAtlasFile } from '../shared/server/resources';
 import { packageImports } from './import-graph';
 import { makeNotices, reportNotices } from './make-notices';
-
-type Program = 'photo-tool' | 'photobook-editor';
+import { PROGRAMS, programEntries, type ProgramName } from './desktop/programs.mjs';
 
 /**
- * What each program's installer carries: the code its bundles start from (the desktop entries, the
- * tagging worker, the page), the npm packages its resource files come from, its product.json, and
- * whether its server embeds fonts and renders PDFs. The editor's desktop entries stay in electron/
- * until it is packaged apart.
+ * What each program's installer carries besides its code: the npm packages its resource files come
+ * from, and whether its server embeds fonts and renders PDFs. Its code (the desktop entries, the tagging
+ * worker, the page) and its product.json come from the one program table, scripts/desktop/programs.mjs.
  */
-const PROGRAMS: Record<Program, { entries: string[]; resourcePackages: (deps: string[]) => string[]; product: string; fonts: boolean; pdfium: boolean }> = {
-  'photo-tool': {
-    entries: ['photo-tool/electron/main.ts', 'photo-tool/electron/server-host.ts', 'photo-tool/electron/preload.ts', 'photo-tool/server/tagging/worker.ts', 'photo-tool/web/index.html'],
-    resourcePackages: () => ['world-atlas', 'libheif-js'],
-    product: 'photo-tool/product.json',
-    fonts: false,
-    pdfium: false,
-  },
-  'photobook-editor': {
-    entries: ['electron/main.ts', 'electron/server-host.ts', 'electron/preload.ts', 'photobook-editor/web/index.html'],
-    resourcePackages: (deps) => ['world-atlas', 'libheif-js', '@hyzyla/pdfium', ...deps.filter((d) => d.startsWith('@fontsource/'))],
-    product: 'electron/product.json',
-    fonts: true,
-    pdfium: true,
-  },
+const RESOURCES: Record<ProgramName, { resourcePackages: (deps: string[]) => string[]; fonts: boolean; pdfium: boolean }> = {
+  'photo-tool': { resourcePackages: () => ['world-atlas', 'libheif-js'], fonts: false, pdfium: false },
+  'photobook-editor': { resourcePackages: (deps) => ['world-atlas', 'libheif-js', '@hyzyla/pdfium', ...deps.filter((d) => d.startsWith('@fontsource/'))], fonts: true, pdfium: true },
 };
-
 const args = process.argv.slice(2);
 const flagValue = (flag: string) => {
   const i = args.indexOf(flag);
@@ -59,8 +44,8 @@ if (!outArg || (args.includes('--program') && !(programName && programName in PR
   console.error('Usage: npx tsx scripts/collect-resources.ts <output folder> [--program photo-tool|photobook-editor] [--web]');
   process.exit(1);
 }
-const program = programName as Program | undefined;
-const spec = program ? PROGRAMS[program] : null;
+const program = programName as ProgramName | undefined;
+const spec = program ? RESOURCES[program] : null;
 const out = resolve(outArg);
 const withWeb = !!program || args.includes('--web');
 const withFonts = spec?.fonts ?? true;
@@ -108,13 +93,14 @@ if (withWeb) cpSync(web, join(out, 'web'), { recursive: true });
 copyFileSync(licence, join(out, 'LICENSE.txt'));
 
 /** The npm packages the program's installer carries: what its code imports, and where its resource files come from. */
-function runtimeModules(s: (typeof PROGRAMS)[Program]): string[] {
+function runtimeModules(name: ProgramName): string[] {
   const deps = Object.keys((JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { dependencies?: Record<string, string> }).dependencies ?? {});
-  const imported = packageImports(s.entries, root);
-  return [...new Set([...deps.filter((d) => imported.has(d)), ...s.resourcePackages(deps)])].sort();
+  // packageImports throws on an entry file that is not there: a moved entry must never quietly drop its packages.
+  const imported = packageImports(programEntries(name), root);
+  return [...new Set([...deps.filter((d) => imported.has(d)), ...RESOURCES[name].resourcePackages(deps)])].sort();
 }
-const modules = spec ? runtimeModules(spec) : undefined;
-const productName = spec ? (JSON.parse(readFileSync(join(root, spec.product), 'utf8')) as { productName: string }).productName : undefined;
+const modules = program ? runtimeModules(program) : undefined;
+const productName = program ? (JSON.parse(readFileSync(join(root, PROGRAMS[program].product), 'utf8')) as { productName: string }).productName : undefined;
 const notices = makeNotices(root, { modules, productName });
 writeFileSync(join(out, 'THIRD-PARTY-NOTICES.txt'), notices.text);
 if (modules) console.log(`${program} ships: ${modules.join(', ')}`);

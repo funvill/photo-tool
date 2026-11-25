@@ -20,39 +20,13 @@ import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
-import { programArg } from './programs.mjs';
+// Each program's entry files and external modules: the table in programs.mjs.
+import { PROGRAMS, programArg } from './programs.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const dev = process.argv.includes('--dev');
 const readJson = (f) => JSON.parse(readFileSync(f, 'utf8'));
 const pkg = readJson(join(root, 'package.json'));
-
-// Native or self-locating modules stay real folders in node_modules:
-//   sharp    a native addon with DLLs beside it (both programs)
-//   pdfkit   finds its built-in font metrics and colour profile relative to its own file (the editor)
-//   fontkit  pdfkit's font engine; the server imports it too, and both must get the same copy (the editor)
-//   @huggingface/transformers  photo tagging (Photo Tool's tagging worker); it loads onnxruntime-node,
-//            a native addon with DLLs beside it
-//
-// Each program's entry files. The editor's stay in electron/ until it is packaged apart (Task 7).
-const PROGRAMS = {
-  'photo-tool': {
-    product: 'photo-tool/product.json',
-    main: 'photo-tool/electron/main.ts',
-    serverHost: 'photo-tool/electron/server-host.ts',
-    preload: 'photo-tool/electron/preload.ts',
-    taggingWorker: 'photo-tool/server/tagging/worker.ts',
-    external: ['sharp', '@huggingface/transformers'],
-  },
-  'photobook-editor': {
-    product: 'electron/product.json',
-    main: 'electron/main.ts',
-    serverHost: 'electron/server-host.ts',
-    preload: 'electron/preload.ts',
-    taggingWorker: null,
-    external: ['sharp', 'pdfkit', 'fontkit'],
-  },
-};
 
 const program = programArg(process.argv);
 const spec = PROGRAMS[program];

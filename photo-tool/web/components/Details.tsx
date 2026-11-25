@@ -207,7 +207,7 @@ function DetailsFor({ item }: { item: GalleryItem }) {
       <div className="gallery-details-body">
         <ScoreCard path={item.path} />
         {item.infoSource === 'fallback' && (
-          <p className="gallery-note small">This folder can&apos;t be written; info is kept in Photobook&apos;s own folder</p>
+          <p className="gallery-note small">This folder can&apos;t be written; info is kept in the folder Photo Tool shares with Photobook Editor</p>
         )}
         {item.infoError && <p className="gallery-note gallery-note-error small">{item.infoError}</p>}
 

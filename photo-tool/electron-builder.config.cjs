@@ -64,6 +64,8 @@ module.exports = {
     // No updater: leave out the elevation helper and the block map that only updates use.
     packElevateHelper: false,
     differentialPackage: false,
+    // Only removes the copy of the installer that electron-builder would otherwise leave behind.
+    include: 'photo-tool/electron/installer.nsh',
     artifactName: '${productName} Setup ${version}.${ext}',
   },
   linux: {
