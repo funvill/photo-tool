@@ -1245,3 +1245,178 @@ describe('gallery store: deleted photos', () => {
     expect(useGallery.getState().pendingEdits).toEqual({ c: e });
   });
 });
+
+describe('gallery store: score nudges and undo', () => {
+  const g = () => useGallery.getState();
+  const photos = (...names: string[]) => names.map((n) => item({ path: n, fileName: `${n}.jpg`, key: n }));
+  const setup = (items: GalleryItem[], selected: string | null, extra: Record<string, unknown> = {}) =>
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items, sort: 'name', filter: {}, stacked: false, openStacks: [], view: 'grid', selected, selection: selected ? [selected] : [], anchor: selected, ...extra });
+  /** A server that applies each patch to the photo (as it has it) and answers with it; `hold` keeps replies back until released. */
+  const serve = (opts: { hold?: boolean; fail?: boolean } = {}) => {
+    const saved: { path: string; patch: Record<string, unknown> }[] = [];
+    const server = new Map<string, Record<string, unknown>>();
+    const waiting: (() => void)[] = [];
+    routes['PATCH /api/gallery/info'] = async (body) => {
+      const b = body as { path: string; patch: Record<string, unknown> };
+      saved.push({ path: b.path, patch: b.patch });
+      if (opts.fail) return { status: 409, json: { error: 'in use' } };
+      if (opts.hold) await new Promise<void>((r) => waiting.push(r));
+      const old = g().items.find((i) => i.path === b.path)!;
+      const info = { ...(server.get(b.path) ?? old.info), ...b.patch } as Record<string, unknown>;
+      for (const k of Object.keys(info)) if (info[k] === null) delete info[k];
+      server.set(b.path, info);
+      return { json: { ...old, info } };
+    };
+    routes['GET /api/gallery/items'] = () => ({ json: g().items });
+    return { saved, release: () => waiting.splice(0).forEach((r) => r()) };
+  };
+
+  it('Up adds 1 to the selected photo at once, shows a green toast, and saves scoreAdjust', async () => {
+    setup(photos('a', 'b'), 'a');
+    const { saved } = serve();
+    g().nudgeScore(1);
+    expect(g().items[0].info.scoreAdjust).toBe(1);
+    expect(g().scoreToast).toEqual(expect.objectContaining({ delta: 1, path: 'a', count: 1 }));
+    await vi.waitFor(() => expect(saved).toEqual([{ path: 'a', patch: { scoreAdjust: 1 } }]));
+    expect(g().items[0].info.scoreAdjust).toBe(1);
+  });
+
+  it('a quick run of presses counts from the newest value, not the saved one', async () => {
+    setup(photos('a'), 'a');
+    const { saved, release } = serve({ hold: true });
+    g().nudgeScore(1);
+    g().nudgeScore(1);
+    g().nudgeScore(1);
+    g().nudgeScore(-1);
+    expect(g().items[0].info.scoreAdjust).toBe(2);
+    for (let n = 0; n < 4; n++) {
+      await vi.waitFor(() => expect(saved.length).toBe(n + 1));
+      release();
+    }
+    expect(saved.map((s) => s.patch.scoreAdjust)).toEqual([1, 2, 3, 2]);
+    await vi.waitFor(() => expect(count('PATCH', '/api/gallery/info')).toBe(4));
+    await vi.waitFor(() => expect(g().items[0].info.scoreAdjust).toBe(2));
+  });
+
+  it('back to 0 removes the field; several selected photos are each nudged from their own value', async () => {
+    setup([item({ path: 'a', key: 'a', info: { scoreAdjust: 1 } }), item({ path: 'b', key: 'b', info: { scoreAdjust: 5 } })], 'a', { selection: ['a', 'b'] });
+    const { saved } = serve();
+    g().nudgeScore(-1);
+    expect(g().scoreToast).toEqual(expect.objectContaining({ delta: -1, count: 2 }));
+    await vi.waitFor(() => expect(saved).toHaveLength(2));
+    expect(saved).toEqual([{ path: 'a', patch: { scoreAdjust: null } }, { path: 'b', patch: { scoreAdjust: 4 } }]);
+    expect('scoreAdjust' in g().items[0].info).toBe(false);
+  });
+
+  it('the toast goes by itself', async () => {
+    vi.useFakeTimers();
+    setup(photos('a'), 'a');
+    serve();
+    g().nudgeScore(1);
+    expect(g().scoreToast).not.toBeNull();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(g().scoreToast).toBeNull();
+  });
+
+  it('a nudge the server refuses reloads the photo info', async () => {
+    setup(photos('a'), 'a');
+    serve({ fail: true });
+    g().nudgeScore(1);
+    await vi.waitFor(() => expect(count('GET', '/api/gallery/items')).toBe(1));
+  });
+
+  it('Ctrl+Z undoes nudges one at a time, newest first, and says so', async () => {
+    setup(photos('a'), 'a');
+    const { saved } = serve();
+    g().nudgeScore(1);
+    g().nudgeScore(1);
+    await vi.waitFor(() => expect(saved).toHaveLength(2));
+    await g().undo();
+    expect(g().items[0].info.scoreAdjust).toBe(1);
+    await g().undo();
+    expect('scoreAdjust' in g().items[0].info).toBe(false);
+    await vi.waitFor(() => expect(saved.map((s) => s.patch.scoreAdjust)).toEqual([1, 2, 1, null]));
+    expect(g().toasts.map((t) => t.text)).toEqual(['Undid: score', 'Undid: score']);
+    await g().undo();
+    expect(g().toasts.at(-1)?.text).toBe('Nothing to undo');
+  });
+
+  it('undoes a hide: the photo comes back, selected again', async () => {
+    setup(photos('a', 'b', 'c'), 'b');
+    const { saved } = serve();
+    await g().toggleFlag('hidden');
+    expect(g().selected).toBe('c');
+    await g().undo();
+    expect(saved.at(-1)).toEqual({ path: 'b', patch: { hidden: null } });
+    expect(g().items[1].info.hidden).toBeUndefined();
+    expect(g().selected).toBe('b');
+  });
+
+  it('undoes a favourite of several photos in one step, each as it was', async () => {
+    setup([item({ path: 'a', key: 'a' }), item({ path: 'b', key: 'b', info: { star: true } }), item({ path: 'c', key: 'c' })], 'a', { selection: ['a', 'b', 'c'] });
+    const { saved } = serve();
+    await g().toggleFlag('star');
+    expect(g().undoStack).toHaveLength(1);
+    await g().undo();
+    expect(saved.slice(-2)).toEqual([{ path: 'a', patch: { star: null } }, { path: 'c', patch: { star: null } }]);
+    expect(g().items.map((i) => i.info.star ?? null)).toEqual([null, true, null]);
+    expect(g().toasts.at(-1)?.text).toBe('Undid: favourite');
+  });
+
+  it('undoes a field typed in the details panel, and a revert to original', async () => {
+    const cropped = { rotate: 0 as const, straighten: 0, crop: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 } };
+    setup([item({ path: 'a', key: 'a', info: { description: 'old', edit: cropped } })], 'a');
+    const { saved } = serve();
+    await g().saveInfo('a', { description: 'new' });
+    await g().revertEdit('a');
+    await g().undo();
+    expect(saved.at(-1)).toEqual({ path: 'a', patch: { edit: cropped } });
+    expect(g().toasts.at(-1)?.text).toBe('Undid: revert to original');
+    await g().undo();
+    expect(saved.at(-1)).toEqual({ path: 'a', patch: { description: 'old' } });
+    expect(g().items[0].info.description).toBe('old');
+  });
+
+  it('a save that changes nothing, or fails, is not recorded', async () => {
+    setup([item({ path: 'a', key: 'a', info: { star: true } })], 'a');
+    serve();
+    await g().setStar('a', true);
+    expect(g().undoStack).toEqual([]);
+    serve({ fail: true });
+    await g().setStar('a', false);
+    expect(g().undoStack).toEqual([]);
+  });
+
+  it('undoes Done in edit mode: the unsaved edit goes back to what it was', async () => {
+    const cropped = { rotate: 0 as const, straighten: 0, crop: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 } };
+    setup(photos('a'), 'a');
+    serve();
+    g().startEdit('a');
+    g().finishEdit(cropped);
+    expect(g().pendingEdits).toEqual({ a: cropped });
+    await g().undo();
+    expect(g().pendingEdits).toEqual({});
+    expect(g().toasts.at(-1)?.text).toBe('Undid: crop and rotate');
+  });
+
+  it('does nothing while a photo is being edited; closing the folder forgets the changes', async () => {
+    setup(photos('a'), 'a');
+    const { saved } = serve();
+    g().nudgeScore(1);
+    g().startEdit('a');
+    await g().undo();
+    expect(g().undoStack).toHaveLength(1);
+    g().cancelEdit();
+    await vi.waitFor(() => expect(saved).toHaveLength(1));
+    g().close();
+    expect(g().undoStack).toEqual([]);
+  });
+
+  it('keeps at most 100 changes', async () => {
+    setup(photos('a'), 'a');
+    serve();
+    for (let n = 0; n < 105; n++) g().nudgeScore(1);
+    expect(g().undoStack).toHaveLength(100);
+    await vi.waitFor(() => expect(count('PATCH', '/api/gallery/info')).toBe(105));
+  });
+});

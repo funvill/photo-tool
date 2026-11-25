@@ -1032,3 +1032,57 @@ test('every tile shows its photo score; the details panel shows it with what mad
     removeTrip(dir);
   }
 });
+test('Up and Down nudge the score with a green or red toast; Left and Right move; Ctrl+Z undoes a nudge and a hide', async ({ page, request }) => {
+  const dir = await openTrip(page, request);
+  try {
+    await page.getByLabel('Stack similar').uncheck();
+    const tiles = page.locator('.gallery-tile');
+    await tiles.first().click();
+    const first = await altOf(page, 0);
+    const total = page.locator('.gallery-score .gallery-score-total');
+    const start = Number(await total.textContent());
+    const toast = page.locator('.gallery-score-toast');
+
+    await page.keyboard.press('ArrowUp');
+    await expect(toast).toHaveClass(/up/);
+    await expect(toast).toHaveText(`+1 · ${start + 1}`);
+    await page.keyboard.press('ArrowUp');
+    await expect(total).toHaveText(String(start + 2));
+    await expect(tiles.first().locator('.gallery-tile-score')).toHaveText(String(start + 2));
+    await page.keyboard.press('ArrowDown');
+    await expect(toast).toHaveClass(/down/);
+    await expect(toast).toHaveText(`−1 · ${start + 1}`);
+    // Up and Down did not move the selection; it is saved in photoinfo.json.
+    await expect(selectedImg(page)).toHaveAttribute('alt', first!);
+    await expect.poll(() => photoInfo(dir)[first!]?.scoreAdjust).toBe(1);
+    await expect(toast).toHaveCount(0, { timeout: 5000 });
+
+    // Ctrl+Z takes the Down back, then an Up.
+    await page.keyboard.press('Control+z');
+    await expect(total).toHaveText(String(start + 2));
+    await expect(page.getByText('Undid: score').first()).toBeVisible();
+    await page.keyboard.press('Control+z');
+    await expect(total).toHaveText(String(start + 1));
+    await expect.poll(() => photoInfo(dir)[first!]?.scoreAdjust).toBe(1);
+
+    // Right moves on; H hides it; Ctrl+Z brings it back, selected.
+    await page.keyboard.press('ArrowRight');
+    const second = await altOf(page, 1);
+    await expect(selectedImg(page)).toHaveAttribute('alt', second!);
+    await page.keyboard.press('h');
+    await expect(page.locator(`.gallery-tile img[alt="${second}"]`)).toHaveCount(0);
+    await page.keyboard.press('Control+z');
+    await expect(selectedImg(page)).toHaveAttribute('alt', second!);
+    await expect.poll(() => photoInfo(dir)[second!]?.hidden).toBeUndefined();
+    await page.keyboard.press('ArrowLeft');
+    await expect(selectedImg(page)).toHaveAttribute('alt', first!);
+
+    // Ctrl+Z in a text field is the field's own: the photo's info is left alone.
+    const description = page.getByRole('textbox', { name: 'Description', exact: true });
+    await description.fill('A harbour');
+    await description.press('Control+z');
+    await expect.poll(() => photoInfo(dir)[first!]?.scoreAdjust).toBe(1);
+  } finally {
+    removeTrip(dir);
+  }
+});

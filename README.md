@@ -105,15 +105,30 @@ A second program in the desktop app, for looking through a folder of photos and 
 
 **Zooming the preview.** Turn the mouse wheel over the preview to zoom in, from 1 to 8 times, toward the pointer. Drag to move the photo around. While zoomed, a small map in the top right corner shows where you are; click or drag it to move the view. Double-click to go back to the whole photo. (Double-click at the whole photo still opens it full screen.) The sharper full-size picture is loaded once you zoom far enough to need it.
 
-**Keys.** They work in the grid, the preview and the full-screen viewer, and are ignored while you type in a field.
+**Keys.** They work in the grid and the preview, and are ignored while you type in a field. The full-screen viewer has its own (last line).
 
 - **F**: favourite (star) the photo, or unfavourite it. With several photos selected, they all take the opposite of the state of the photo shown in the preview (the focused one). **H** works the same way.
 - **H**: hide the photo, or show it again. Hidden photos are left out of the grid until you change the **Hidden** filter. After H, the selection moves on to the next photo, so you can press H down a run of bad shots.
-- **Left**, **Right**, **Up** and **Down**: move to the previous, next, upper or lower photo.
+- **Left** and **Right**: move to the previous or next photo.
+- **Up** and **Down**: add 1 to the photo score, or take 1 away (every selected photo when several are). A green "+1" or red "−1" with the new score shows on the preview for a moment. See Photo score below.
 - **Home** and **End**: the first or last photo.
+- **Ctrl+Z**: undo the last change: a favourite, a hide, a score nudge, Done in edit mode, Revert to original, a saved edit in the info file, or a field typed in the details. The last 100 changes are kept until you open another folder. It doesn't undo moving photos to the Recycle Bin or saving into the photo file; get those back from the Recycle Bin. In a text field, Ctrl+Z undoes your typing as usual.
 - **E**: edit the photo (see Editing photos below).
 - **Enter** (or **Space**): view the photo full screen. **Esc** closes the viewer.
 - In the full-screen viewer, **Left** and **Right** step through the photos, **F** (or **S**) favourites the photo, **H** hides it, and **I** shows or hides its details.
+
+**Photo score.** Every photo gets a score, shown at the top of the details and in the bottom-right corner of its thumbnail ("–" until the photo has been read). Hover the score in the details to see what made it. It is made of:
+
+- **Focus**, up to 35: how sharp the photo is next to the others in this folder.
+- **Exposure**, up to 20: brightness near the middle.
+- **Clipping**, down to −15: when more than 2 % of the photo is blown to white or crushed to black.
+- **Colour variety**, up to 10, and **Composition**, up to 5: many colours across the frame, and the subject near a third rather than dead centre.
+- **People**, 5 for each person tagged, up to 10.
+- **Size**, up to 10: megapixels, full points at 8.
+- **Burst**, −10: a near-identical shot when another in its burst is better.
+- **Favourite** +50, **Hidden** −50, and **your nudges** from Up and Down, kept in `photoinfo.json` as `scoreAdjust`.
+
+There is no top or bottom; a plain photo lands roughly between 30 and 90.
 
 **Editing photos.** Click **Edit** under the preview, press **E**, or right-click and choose **Edit**. The whole photo is shown with a crop box over it: drag a corner or an edge to resize it, or drag inside to move it. The bar under it has:
 

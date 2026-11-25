@@ -30,18 +30,26 @@ function stepFrom(list: { path: string }[], unfolded: { path: string }[], select
 
 /**
  * The review keys, one window listener for the whole screen (it works whichever view shows the photos):
- * arrows, Home and End move the selection through the shown list (Up/Down by a row of the grid);
- * F favourites (stars) and H hides the selected photo, every selected one when several are; Enter or
- * Space opens the selected photo in the viewer; E opens edit mode on it. Not while typing, while the
- * viewer or the tidy dialog is open, while a photo is being edited (edit mode has its own keys), or
- * with Ctrl, Alt or Meta held.
+ * Left/Right, Home and End move the selection through the shown list; Up and Down nudge the photo score
+ * of the selected photo (every selected one when several are) by +1 / −1; F favourites (stars) and H
+ * hides the same photos; Enter or Space opens the selected photo in the viewer; E opens edit mode on it;
+ * Ctrl+Z undoes the last change. Not while typing (Ctrl+Z there is the field's own), while the viewer or a
+ * dialog is open, or while a photo is being edited (edit mode has its own keys); no other key with Ctrl,
+ * Alt or Meta held.
  */
 export function useReviewKeys(onOpen: (path: string) => void) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey) return;
+      if (e.defaultPrevented) return;
       const s = useGallery.getState();
       if (s.viewing !== null || s.tidyOpen || s.settingsOpen || s.leaving !== null || s.editing !== null) return;
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+        if (inside(e, TYPING)) return;
+        e.preventDefault();
+        void s.undo();
+        return;
+      }
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
 
       if (e.key === 'Enter' || e.key === ' ') {
         if (e.repeat || !s.selected || inside(e, PRESSABLE)) return;
@@ -69,12 +77,19 @@ export function useReviewKeys(onOpen: (path: string) => void) {
         return;
       }
 
+      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+        if (s.selected === null && s.selection.length === 0) return;
+        e.preventDefault();
+        s.nudgeScore(e.key === 'ArrowUp' ? 1 : -1);
+        return;
+      }
+
       const list = selectVisible(s);
       const place = stepFrom(list, selectFiltered(s), s.selected);
       let at = place.at;
       if (place.before !== undefined) {
         // Between two shown photos: back lands on the one before, forward on the one after.
-        const back = e.key === 'ArrowLeft' || e.key === 'ArrowUp';
+        const back = e.key === 'ArrowLeft';
         at = back ? place.before + 1 : place.before;
       }
       const to = gridStep(Math.max(0, at), list.length, s.gridCols, e.key);

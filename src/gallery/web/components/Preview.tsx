@@ -7,6 +7,7 @@ import { Icon } from '../../../web/components/Icon';
 import { EditPane } from './EditPane';
 import { EditedImage } from './EditedImage';
 import { MiniMap } from './MiniMap';
+import { ScoreToast } from './ScoreToast';
 import { usePreviewZoom } from './usePreviewZoom';
 
 export interface PreviewProps {
@@ -64,6 +65,7 @@ export function Preview({ onOpen, onContextMenu }: PreviewProps) {
               </span>
             )}
           </div>
+          <ScoreToast />
         </>
       )}
     </section>

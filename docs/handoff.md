@@ -115,6 +115,15 @@ Built 2026-11-23 on branch `gallery` (eight tasks, branched from `main` at `27b3
 23. **Closing with unsaved edits:** closing the window shows "Close without saving" or "Keep editing"; opening another folder asks too.
 24. **A transparent PNG edited in info mode, then imported:** expect the transparency to be lost in the editor (known limitation above).
 
+**Photo score, nudges and undo (branch `gallery-score`, built 2026-11-24, branched from `main`; not pushed).** Design: `docs/superpowers/specs/2026-11-24-gallery-photo-score-design.md`. Adds the version in the top bar (bumped once per commit), a photo score per photo (details panel with a hover breakdown, and a badge on each tile; `src/core/photoScore.ts`), Up/Down to nudge it (`scoreAdjust` in photoinfo.json, a green or red toast on the preview), Left/Right only to move, and Ctrl+Z undo (the last 100 changes). The preview and its row now clip what they hold. The scroll bar Steven saw on a portrait photo in a full-screen wide window could not be reproduced in Chrome; only the details panel scrolls there, when it is taller than the window.
+
+**Checks only a person can do for the score (none done yet):**
+
+25. **The scroll bar:** full-screen on the wide monitor, a portrait photo shows no scroll bar on the preview. If one still shows, note which pane it belongs to (the details panel scrolls when its sections are taller than the window).
+26. **Does the score rank well?** In a real folder, sort through by score once it can be sorted; check the sharpest, best-exposed shots score high and the blurry or blown ones low, and that the hover breakdown makes sense.
+27. **Nudging fast:** hold or tap Up and Down quickly; the toast keeps up, the score lands on the right number, and photoinfo.json has the same `scoreAdjust` after a reload.
+28. **Ctrl+Z:** undo a run of hides, stars and nudges; each comes back in reverse order, with a toast; Ctrl+Z while typing in the description only undoes the typing.
+
 ## Linux
 
 Built and tested by a subagent; the lead agent checked that the packages exist and that the tests pass on Windows, but did not rerun the container tests. Evidence is in `%TEMP%\photobook-linux\test\<name>\` (`test.log`, `result.json`, screenshots); build logs are `%TEMP%\photobook-linux-build*.log`.

@@ -68,7 +68,14 @@
 .gallery-grid-col > .gallery-grid { min-width: 0; }
 .gallery-splitter { flex: none; width: 6px; cursor: col-resize; background: var(--line-soft); touch-action: none; }
 .gallery-splitter:hover, .gallery-splitter:active { background: var(--accent); }
-.gallery-preview { flex: 1; min-width: 300px; min-height: 0; display: flex; flex-direction: column; background: #111; color: #fff; overflow: hidden; }
+.gallery-preview { flex: 1; min-width: 300px; min-height: 0; display: flex; flex-direction: column; background: #111; color: #fff; overflow: hidden; position: relative; }
+/* Up / Down: "+1 · 74" over the middle of the photo, green or red, fading out. */
+.gallery-score-toast { position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%); z-index: 5; padding: 10px 22px; border-radius: 12px; font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; color: #fff; pointer-events: none; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45); animation: gallery-score-toast 1.1s ease-out forwards; }
+.gallery-score-toast.up { background: rgba(46, 160, 82, 0.92); }
+.gallery-score-toast.down { background: rgba(214, 64, 52, 0.92); }
+.gallery-score-toast span { font-weight: 600; opacity: 0.9; }
+@keyframes gallery-score-toast { 0% { opacity: 0; transform: translate(-50%, -40%); } 12% { opacity: 1; transform: translate(-50%, -50%); } 70% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .gallery-score-toast { animation: none; } }
 /* The stage is measured by the page and the picture placed by a transform (usePreviewZoom): nothing in the
    layout depends on the picture's own size, so it always fits. */
 .gallery-preview-stage { flex: 1; min-height: 0; position: relative; overflow: hidden; user-select: none; touch-action: none; }

@@ -18,6 +18,26 @@ export interface Toast {
   text: string;
 }
 
+/**
+ * One change Ctrl+Z can take back: the info fields of some photos as they were before it (a field that was
+ * not there is null), and/or their unsaved edits as they were (undefined: none).
+ */
+export interface UndoStep {
+  /** Said in the toast: "Undid: hide". */
+  label: string;
+  info: { path: string; before: Record<string, unknown> }[];
+  edits?: { path: string; before: PhotoEdit | undefined }[];
+}
+
+/** The toast on the preview after Up or Down: the change, and how many photos it was made to. */
+export interface ScoreToast {
+  id: number;
+  delta: 1 | -1;
+  /** The selected photo, whose new score the toast shows (with one photo nudged). */
+  path: string;
+  count: number;
+}
+
 export interface GalleryState {
   job: string | null;
   root: string | null;
@@ -47,7 +67,7 @@ export interface GalleryState {
   toasts: Toast[];
   /** The "Tidy photo info" dialog is open. */
   tidyOpen: boolean;
-  /** Tiles per row in the grid as drawn now (the grid publishes it; Up/Down step by it). 1 while the grid is not shown. */
+  /** Tiles per row in the grid as drawn now (the grid publishes it). 1 while the grid is not shown. */
   gridCols: number;
   /** What the thumbnail column shows: the grid, or the photos on a map. Kept across folders, for the session. */
   view: 'grid' | 'map';
@@ -67,6 +87,10 @@ export interface GalleryState {
   settingsOpen: boolean;
   /** Opening another folder (or closing this one) waits for "without saving?": what was asked for. */
   leaving: { folder: string; recursive: boolean } | 'close' | null;
+  /** What Ctrl+Z takes back, oldest first (at most UNDO_LIMIT); emptied when a folder is opened or closed. */
+  undoStack: UndoStep[];
+  /** The Up/Down toast on the preview, or null. */
+  scoreToast: ScoreToast | null;
 
   loadRecent(): Promise<void>;
   open(folder: string, recursive: boolean): Promise<void>;
@@ -74,7 +98,7 @@ export interface GalleryState {
    * Save fields of a photo's info (a null value deletes the field). Resolves false, after an error toast
    * with the server's message, when it could not be saved; nothing is applied then.
    */
-  saveInfo(path: string, patch: Record<string, unknown>, opts?: { quiet?: boolean }): Promise<boolean>;
+  saveInfo(path: string, patch: Record<string, unknown>, opts?: SaveInfoOptions): Promise<boolean>;
   setStar(path: string, star: boolean): Promise<boolean>;
   /** Reload every photo's info (after another program changed a photoinfo.json). */
   refreshInfo(): Promise<void>;
@@ -146,8 +170,71 @@ export interface GalleryState {
   /** "Without saving?" answered yes: open or close as asked. */
   confirmLeave(): Promise<void>;
   cancelLeave(): void;
+  /**
+   * Up (+1) or Down (−1): nudge the score of the selected photo, every selected one when several are
+   * (photoinfo.json `scoreAdjust`). Shown at once, with a toast on the preview; saved in the background.
+   */
+  nudgeScore(delta: 1 | -1): void;
+  /** Ctrl+Z: take back the last change in undoStack, toasting what was undone. Not while editing. */
+  undo(): Promise<void>;
   toast(kind: Toast['kind'], text: string): void;
   dismissToast(id: number): void;
+}
+
+export interface SaveInfoOptions {
+  /** No error toast (the caller says it). */
+  quiet?: boolean;
+  /**
+   * Ctrl+Z can take this save back (the default), named by this label (default: from the fields saved).
+   * False: not recorded (the caller records the change itself, or this is an undo).
+   */
+  undo?: string | false;
+}
+
+/** Ctrl+Z goes back at most this many changes. */
+export const UNDO_LIMIT = 100;
+/** How long the Up/Down toast stays on the preview (ms). */
+export const SCORE_TOAST_MS = 1100;
+
+const UNDO_LABELS: Record<string, string> = {
+  star: 'favourite', hidden: 'hide', scoreAdjust: 'score', edit: 'crop and rotate', people: 'people', description: 'description',
+  notes: 'notes', date: 'date', location: 'location',
+};
+/** What an undo of a save of these fields is called. */
+export const undoLabel = (patch: Record<string, unknown>) => {
+  const k = Object.keys(patch)[0];
+  return k === undefined ? 'change' : (UNDO_LABELS[k] ?? k);
+};
+
+/** The fields of `info` that `patch` writes, as they are now (missing: null). */
+function fieldsBefore(info: Record<string, unknown>, patch: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.keys(patch).map((k) => [k, info[k] ?? null]));
+}
+const sameValue = (a: unknown, b: unknown) => a === b || JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+/** The stack with this step on top (the oldest dropped past UNDO_LIMIT). */
+const pushUndo = (stack: UndoStep[], step: UndoStep) => [...stack.slice(-(UNDO_LIMIT - 1)), step];
+
+/** The undo step for what leaving edit mode did to the edited photo's unsaved edit (null: nothing changed). */
+function editUndo(s: GalleryState, next: Partial<GalleryState>): UndoStep | null {
+  const path = s.editing;
+  if (path === null || !next.pendingEdits) return null;
+  const before = s.pendingEdits[path];
+  const after = next.pendingEdits[path];
+  if (before === after || (before && after && sameEdit(before, after))) return null;
+  return { label: 'crop and rotate', info: [], edits: [{ path, before }] };
+}
+
+/** `next` with the undo step for its change to the edited photo's unsaved edit, when there is one. */
+function withEditUndo(s: GalleryState, next: Partial<GalleryState>): Partial<GalleryState> {
+  const step = editUndo(s, next);
+  return step ? { ...next, undoStack: pushUndo(s.undoStack, step) } : next;
+}
+
+/** `info` with the score nudges set to `n` (0: no field). */
+function withAdjust<T extends Record<string, unknown>>(info: T, n: number): T {
+  const { scoreAdjust: _old, ...rest } = info;
+  return (n === 0 ? rest : { ...rest, scoreAdjust: n }) as T;
 }
 
 export const THUMB_MIN = 96;
@@ -218,6 +305,10 @@ const saveQueues = new Map<string, SaveQueue>();
 let host: Partial<DesktopApi> | undefined;
 // The edit in progress in edit mode, as edit mode last reported it, for the photo being edited.
 let draft: { path: string; edit: PhotoEdit | null } | null = null;
+// Score nudges shown in the page and not confirmed by the server yet, by photo path, with how many saves
+// of them are on their way: a quick run of Up presses counts from the newest value, not the saved one.
+const pendingAdjust = new Map<string, { value: number; waiting: number }>();
+let scoreToastId = 0;
 // Saves of edits on their way (the store's `saving` is true while any is).
 let savingCount = 0;
 /** Saving into the photo file needs the desktop app. */
@@ -231,7 +322,7 @@ interface Before {
 
 const noSelection: Pick<GalleryState, 'selected' | 'selection' | 'anchor' | 'viewing'> = { selected: null, selection: [], anchor: null, viewing: null };
 /** A folder opened or closed: its unsaved edits, and edit mode, go with it. */
-const noEdits: Pick<GalleryState, 'editing' | 'pendingEdits' | 'leaving' | 'editDirty'> = { editing: null, pendingEdits: {}, leaving: null, editDirty: false };
+const noEdits: Pick<GalleryState, 'editing' | 'pendingEdits' | 'leaving' | 'editDirty' | 'undoStack' | 'scoreToast'> = { editing: null, pendingEdits: {}, leaving: null, editDirty: false, undoStack: [], scoreToast: null };
 
 const without = (edits: Record<string, PhotoEdit>, path: string) => {
   const { [path]: _dropped, ...others } = edits;
@@ -529,6 +620,23 @@ export const useGallery = create<GalleryState>()((set, get) => {
     return true;
   };
 
+  /**
+   * Show the photo's score nudges as `n` at once and save them; the newest value is what the next nudge
+   * counts from until the server has it. A save that fails reloads the folder's info (the toast says why).
+   */
+  const sendAdjust = (path: string, n: number) => {
+    const p = pendingAdjust.get(path);
+    pendingAdjust.set(path, { value: n, waiting: (p?.waiting ?? 0) + 1 });
+    set((x) => ({ items: x.items.map((i) => (i.path === path ? { ...i, info: withAdjust(i.info, n) } : i)) }));
+    void get()
+      .saveInfo(path, { scoreAdjust: n === 0 ? null : n }, { undo: false })
+      .then((ok) => {
+        const q = pendingAdjust.get(path);
+        if (q && --q.waiting <= 0) pendingAdjust.delete(path);
+        if (!ok) void get().refreshInfo();
+      });
+  };
+
   return {
     job: null,
     root: null,
@@ -585,6 +693,10 @@ export const useGallery = create<GalleryState>()((set, get) => {
     async saveInfo(path, patch, opts) {
       const job = get().job;
       const gen = generation;
+      // What Ctrl+Z puts back: the fields as they are now (nothing when the save changes nothing).
+      const was = opts?.undo === false ? undefined : get().items.find((i) => i.path === path);
+      const before = was ? fieldsBefore(was.info, patch) : null;
+      const changes = !!before && Object.keys(patch).some((k) => !sameValue(before[k], patch[k]));
       let queue = saveQueues.get(path);
       if (!queue) saveQueues.set(path, (queue = { tail: Promise.resolve(), waiting: 0, latest: null }));
       const q = queue;
@@ -606,6 +718,10 @@ export const useGallery = create<GalleryState>()((set, get) => {
       const run = q.tail.then(send);
       q.tail = run;
       const ok = await run;
+      if (ok && changes && before && job && current(gen, job)) {
+        const step: UndoStep = { label: typeof opts?.undo === 'string' ? opts.undo : undoLabel(patch), info: [{ path, before }] };
+        set((s) => ({ undoStack: pushUndo(s.undoStack, step) }));
+      }
       if (--q.waiting > 0) return ok;
       if (saveQueues.get(path) === q) saveQueues.delete(path);
       const updated = q.latest;
@@ -647,13 +763,13 @@ export const useGallery = create<GalleryState>()((set, get) => {
     // photo deleted or filtered out) ends edit mode as Done does: what was done is kept as an unsaved edit,
     // and the preview moves on to the new photo.
     select(path) {
-      set((s) => ({ selected: path, selection: path === null ? [] : [path], anchor: path, ...(s.editing === path ? {} : endEditAsDone(s)) }));
+      set((s) => ({ selected: path, selection: path === null ? [] : [path], anchor: path, ...(s.editing === path ? {} : withEditUndo(s, endEditAsDone(s))) }));
     },
 
     clickSelect(path, mods) {
       const s = get();
       const next = clickSelect(selectVisible(s).map((i) => i.path), s, path, mods);
-      set({ ...next, ...(next.selected === s.editing ? {} : endEditAsDone(s)) });
+      set({ ...next, ...(next.selected === s.editing ? {} : withEditUndo(s, endEditAsDone(s))) });
     },
 
     openViewer(path) {
@@ -728,9 +844,13 @@ export const useGallery = create<GalleryState>()((set, get) => {
       const targets = flagTargets(s.selection, s.selected, (p) => byPath.get(p)?.info[field] === true);
       if (!targets) return;
       const before = snapshot();
-      await Promise.all(
-        targets.paths.map((p) => (field === 'star' ? get().setStar(p, targets.value) : get().saveInfo(p, { hidden: targets.value ? true : null }))),
-      );
+      const gen = generation;
+      const patch = { [field]: field === 'star' ? targets.value : targets.value ? true : null };
+      // One undo step for every photo changed (each as it was).
+      const was = targets.paths.map((p) => ({ path: p, before: fieldsBefore(byPath.get(p)?.info ?? {}, patch) }));
+      const oks = await Promise.all(targets.paths.map((p) => get().saveInfo(p, patch, { undo: false })));
+      const info = was.filter((w, n) => oks[n] && !sameValue(w.before[field], patch[field]));
+      if (info.length && gen === generation) set((s) => ({ undoStack: pushUndo(s.undoStack, { label: field === 'star' ? 'favourite' : 'hide', info }) }));
       settleSelection(before);
     },
 
@@ -805,7 +925,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
       // Not while its save is on its way: an edit made now would be lost when the save lands.
       if (get().savingPaths.includes(path)) return;
       // Editing another photo: that one is Done first.
-      set((s) => (s.editing === path ? {} : { ...endEditAsDone(s), editing: path }));
+      set((s) => (s.editing === path ? {} : { ...withEditUndo(s, endEditAsDone(s)), editing: path }));
     },
 
     finishEdit(edit) {
@@ -813,7 +933,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
       const path = s.editing;
       if (path === null) return;
       draft = null;
-      set({ editing: null, editDirty: false, pendingEdits: afterDone(s, path, edit) });
+      set(withEditUndo(s, { editing: null, editDirty: false, pendingEdits: afterDone(s, path, edit) }));
     },
 
     cancelEdit() {
@@ -920,7 +1040,69 @@ export const useGallery = create<GalleryState>()((set, get) => {
     },
 
     revertEdit(path) {
-      return busy(() => get().saveInfo(path, { edit: null }));
+      return busy(() => get().saveInfo(path, { edit: null }, { undo: 'revert to original' }));
+    },
+
+    nudgeScore(delta) {
+      const s = get();
+      if (!s.job) return;
+      const byPath = new Map(s.items.map((i) => [i.path, i]));
+      const paths = (s.selection.length > 1 ? s.selection : s.selected !== null ? [s.selected] : []).filter((p) => byPath.has(p));
+      if (!paths.length) return;
+      const changes = paths.map((path) => {
+        const was = pendingAdjust.get(path)?.value ?? scoreAdjustOf(byPath.get(path)!.info);
+        return { path, was, now: was + delta };
+      });
+      const id = ++scoreToastId;
+      const shown = s.selected !== null && paths.includes(s.selected) ? s.selected : paths[0];
+      set((x) => ({
+        undoStack: pushUndo(x.undoStack, { label: 'score', info: changes.map((c) => ({ path: c.path, before: { scoreAdjust: c.was || null } })) }),
+        scoreToast: { id, delta, path: shown, count: paths.length },
+      }));
+      for (const c of changes) sendAdjust(c.path, c.now);
+      setTimeout(() => {
+        if (get().scoreToast?.id === id) set({ scoreToast: null });
+      }, SCORE_TOAST_MS);
+    },
+
+    async undo() {
+      const s = get();
+      if (s.editing !== null) return;
+      const step = s.undoStack.at(-1);
+      if (!step) {
+        get().toast('info', 'Nothing to undo');
+        return;
+      }
+      set({ undoStack: s.undoStack.slice(0, -1) });
+      const present = new Set(s.items.map((i) => i.path));
+      if (step.edits?.length) {
+        set((x) => {
+          const pendingEdits = { ...x.pendingEdits };
+          for (const e of step.edits!) {
+            if (!present.has(e.path)) continue;
+            if (e.before) pendingEdits[e.path] = e.before;
+            else delete pendingEdits[e.path];
+          }
+          return { pendingEdits };
+        });
+      }
+      const before = snapshot();
+      const oks = await Promise.all(
+        step.info
+          .filter((c) => present.has(c.path))
+          .map(({ path, before: fields }) => {
+            const { scoreAdjust, ...rest } = fields;
+            // Nudges go the way Up and Down send them (shown at once); any other field is saved as it was.
+            if ('scoreAdjust' in fields) sendAdjust(path, typeof scoreAdjust === 'number' ? scoreAdjust : 0);
+            return Object.keys(rest).length ? get().saveInfo(path, rest, { undo: false }) : Promise.resolve(true);
+          }),
+      );
+      // A photo brought back (unhidden) is shown again where it was; one photo undone is selected.
+      settleSelection(before);
+      const paths = [...step.info.map((c) => c.path), ...(step.edits ?? []).map((e) => e.path)].filter((p) => present.has(p));
+      if (new Set(paths).size === 1 && selectablePaths(get()).includes(paths[0]) && get().selected !== paths[0]) get().select(paths[0]);
+      const ok = oks.every(Boolean);
+      get().toast(ok ? 'info' : 'error', ok ? `Undid: ${step.label}` : `Couldn't undo all of: ${step.label}`);
     },
 
     toast(kind, text) {
