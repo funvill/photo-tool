@@ -1,6 +1,7 @@
 import { cleanupSuggestions, type PhotoFlags } from '../../shared/core/cleanup';
 import type { PhotoAnalysis } from '../../shared/core/photoAnalysis';
 import type { PhotoAsset } from '../../shared/core/photoAsset';
+import { FILTERS } from './galleryFilters';
 import { colourVariety } from './photoScore';
 
 // The gallery's sorts and filters, free of any UI or server. The "facts" of a folder (interesting
@@ -37,9 +38,9 @@ export interface TagFilter {
   value: string;
 }
 
-/** True when any filter is set (an empty search box or a cleared option does not count). */
+/** True when any filter is set (an empty search box or a cleared option does not count); worked out from the list of filters. */
 export function isFilterActive(f: GalleryFilter): boolean {
-  return !!(f.starred || f.from || f.to || f.lowQuality || f.nearDuplicates || f.orientation || f.hasLocation || f.hasPeople || f.hidden || f.relDir !== undefined || f.text?.trim() || f.tags?.length);
+  return FILTERS.some((d) => d.isOn(f));
 }
 
 export type ColourBucket = 'red' | 'orange' | 'yellow' | 'green' | 'cyan' | 'blue' | 'purple' | 'pink' | 'neutral';
