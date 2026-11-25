@@ -1,5 +1,5 @@
 // Start-up decisions that need no Electron, the same for both desktop programs: command-line flags,
-// where data lives, the window's remembered place, and how a failed start is put into words.
+// where data lives, the local server's port, the window's remembered place, and how a failed start is put into words.
 // Unit-tested in shared/tests/desktop-config.test.ts.
 import { join, posix, resolve, win32 } from 'node:path';
 
@@ -141,6 +141,34 @@ export function photoInfoFallbackDir(o: { appData: string; packaged: boolean; en
 export function taggingWorkerPath(bundleDir: string): string {
   const sep = bundleDir.includes('\\') ? '\\' : '/';
   return `${bundleDir.replace(/app\.asar(?=[\\/]|$)/, 'app.asar.unpacked')}${sep}tagging-worker.cjs`;
+}
+
+// ---- the local server's port
+
+/**
+ * The port kept in <profileDir>/server-port.json ({ "port": number }), or null. Only a whole number from
+ * 1024 to 65535 counts; anything else (a string, a low port, a hand-edited file) is no saved port.
+ */
+export function parseSavedPort(raw: unknown): number | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const port = (raw as { port?: unknown }).port;
+  return typeof port === 'number' && Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : null;
+}
+
+/**
+ * Which port to ask the local server for. The page's origin includes the port, and the browser keeps
+ * localStorage per origin, so the installed app asks for the port it had last time (falling back to any
+ * free one when that is taken) and the page keeps its settings across restarts.
+ *   development: ${PREFIX}_PORT, or the one above the Vite dev server's (it sends the API there)
+ *   self-test:   any free port (its profile folder is new each time anyway)
+ *   saved port:  that one, or any free port if it is busy or refused
+ *   otherwise:   any free port
+ */
+export function serverPortRequest(o: { devUrl?: string; envPort?: string; selfTest: boolean; saved: number | null }): { port: number; fallbackToAny: boolean } {
+  if (o.devUrl) return { port: Number(o.envPort ?? Number(new URL(o.devUrl).port) + 1), fallbackToAny: false };
+  if (o.selfTest) return { port: 0, fallbackToAny: false };
+  if (o.saved !== null) return { port: o.saved, fallbackToAny: true };
+  return { port: 0, fallbackToAny: false };
 }
 
 // ---- window place
