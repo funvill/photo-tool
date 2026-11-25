@@ -1,0 +1,7 @@
+{
+  "productName": "Photobook Editor",
+  "appId": "app.photobookeditor.desktop",
+  "description": "Make a photobook from a folder of photos and export print-ready PDFs. Works offline.",
+  "maintainer": "Photobook Editor <photobook-editor@localhost>",
+  "repository": "github:funvill/photo-tool"
+}

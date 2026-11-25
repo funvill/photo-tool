@@ -1,6 +1,12 @@
-# Builds the desktop app's installers, each on its own platform (sharp's native part is chosen by
-# `npm ci` for the machine it runs on): the Windows .exe on Windows, the .deb and AppImage on Linux.
-# The installers are unsigned and are kept as workflow artifacts; nothing is published.
+# Builds the installers of both desktop programs, Photo Tool and Photobook Editor, each on its own
+# platform (sharp's native part is chosen by `npm ci` for the machine it runs on): the Windows .exe
+# on Windows, the .deb and AppImage on Linux. The installers are unsigned and are kept as workflow
+# artifacts; nothing is published.
+#
+# Each program is one matrix entry. `dist` is its package script (the editor's is dist:editor),
+# `product` the name a Windows user sees, `env_prefix` the prefix of its _DATA_DIR and _PROFILE_DIR,
+# and `required_step` a self-test step that must be in result.json and ok (overall "ok" alone would
+# pass if the step were missing).
 name: Desktop installers
 
 on:
@@ -11,6 +17,170 @@ on:
 
 jobs:
   windows:
+    name: windows (${{ matrix.program }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        program: [photo-tool, photobook-editor]
+        include:
+          - program: photo-tool
+            dist: dist:photo-tool
+            product: Photo Tool
+            old_product: Photobook Gallery
+            env_prefix: PHOTO_TOOL
+            required_step: taggingWorkerLoads
+          - program: photobook-editor
+            dist: dist:editor
+            product: Photobook Editor
+            old_product: Photobook Studio
+            env_prefix: PHOTOBOOK
+            required_step: ''
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      # Builds the program's page, bundles the app, fetches the Electron program, then packages.
+      - run: npm run ${{ matrix.dist }}
+      - name: The installer and the program have their names
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          $dir = 'dist\installer\${{ matrix.program }}'
+          foreach ($f in "$dir\${{ matrix.product }} Setup $version.exe", "$dir\win-unpacked\${{ matrix.product }}.exe") {
+            if (-not (Test-Path -LiteralPath $f)) { Get-ChildItem -Recurse -Depth 1 $dir | Select-Object -ExpandProperty FullName; throw "Missing: $f" }
+            "found: $f"
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.program }}-windows-x64
+          path: dist/installer/${{ matrix.program }}/*.exe
+          if-no-files-found: error
+      # The packaged program tests itself (see <program>/electron/selfTest.ts) and fails if anything
+      # tried to reach a host other than 127.0.0.1. Its data, browser profile and shared photo info
+      # all go under the runner's temp folder.
+      - run: npm run fixtures
+      - name: Self-test the packaged program
+        shell: pwsh
+        run: |
+          $t = "$env:RUNNER_TEMP\selftest"
+          Set-Item 'env:${{ matrix.env_prefix }}_DATA_DIR' "$t\data"
+          Set-Item 'env:${{ matrix.env_prefix }}_PROFILE_DIR' "$t\profile"
+          $env:PHOTOINFO_FALLBACK_DIR = "$t\photoinfo"
+          $exe = (Resolve-Path -LiteralPath 'dist\installer\${{ matrix.program }}\win-unpacked\${{ matrix.product }}.exe').Path
+          $p = Start-Process -FilePath $exe -ArgumentList '--self-test', "`"$PWD\fixtures\generated\trip`"", '--self-test-out', "`"$t\out`"" -Wait -PassThru
+          Get-Content "$t\data\logs\desktop.log" -ErrorAction SilentlyContinue
+          $r = Get-Content "$t\out\result.json" -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
+          if ($r) { $r.steps.PSObject.Properties | ForEach-Object { "step $($_.Name): ok=$($_.Value.ok)" } }
+          $required = '${{ matrix.required_step }}'
+          if ($required -and $r.steps.$required.ok -ne $true) { Write-Output "::error::self-test step $required is missing or not ok"; exit 1 }
+          exit $p.ExitCode
+      # The first start of a user coming from the old name, in the packaged program on this throwaway
+      # runner: a fake old folder where the program really looks (the runner's own %APPDATA%), and no
+      # data-folder variables, so the carry-over really runs. A self-test normally moves nothing;
+      # PHOTO_TOOLS_CI_SELF_TEST_CARRY_OVER=1 lets it, and only together with GitHub Actions' own
+      # GITHUB_ACTIONS=true (shared/electron/dataFolders.ts selfTestCarriesOver). The self-test still
+      # keeps its own data in its output folder.
+      - name: First start carries the old folder over (real %APPDATA%)
+        shell: pwsh
+        run: |
+          $old = Join-Path $env:APPDATA '${{ matrix.old_product }}'
+          $new = Join-Path $env:APPDATA '${{ matrix.product }}'
+          $studio = Join-Path $env:APPDATA 'Photobook Studio'
+          $shared = Join-Path $env:APPDATA 'Photo Tools Shared'
+          foreach ($d in $old, $new, $studio, $shared) { if (Test-Path -LiteralPath $d) { throw "Not a clean runner: $d exists" } }
+          New-Item -ItemType Directory -Force "$old\data", "$studio\data\photoinfo" | Out-Null
+          Set-Content -LiteralPath "$old\data\marker.txt" 'carried'
+          Set-Content -LiteralPath "$studio\data\photoinfo\x.json" '{"stars":1}'
+          $before = @(Get-ChildItem -LiteralPath $env:APPDATA -Name)
+          $env:PHOTO_TOOLS_CI_SELF_TEST_CARRY_OVER = '1'
+          foreach ($v in '${{ matrix.env_prefix }}_DATA_DIR', '${{ matrix.env_prefix }}_PROFILE_DIR', 'PHOTOINFO_FALLBACK_DIR') { Remove-Item "env:$v" -ErrorAction SilentlyContinue }
+          $t = "$env:RUNNER_TEMP\carry"
+          $exe = (Resolve-Path -LiteralPath 'dist\installer\${{ matrix.program }}\win-unpacked\${{ matrix.product }}.exe').Path
+          $p = Start-Process -FilePath $exe -ArgumentList '--self-test', "`"$PWD\fixtures\generated\trip`"", '--self-test-out', "`"$t\out`"" -PassThru
+          $null = $p.Handle  # keeps the exit code readable after WaitForExit
+          if (-not $p.WaitForExit(600000)) { $p.Kill($true); throw 'The program did not finish within 10 minutes' }
+          Get-Content "$t\out\data\logs\desktop.log" -ErrorAction SilentlyContinue | Select-String 'starting'
+          $after = @(Get-ChildItem -LiteralPath $env:APPDATA -Name)
+          "appData before: $($before -join ', ')"; "appData after: $($after -join ', ')"
+          $fail = @()
+          if ($p.ExitCode -ne 0) { $fail += "self-test exit code $($p.ExitCode)" }
+          if (Test-Path -LiteralPath $old) { $fail += "the old folder is still there: $old" }
+          if ((Get-Content -LiteralPath "$new\data\marker.txt" -ErrorAction SilentlyContinue) -ne 'carried') { $fail += "no marker in $new\data" }
+          if (-not (Test-Path -LiteralPath "$shared\photoinfo\x.json")) { $fail += "the photo info did not reach $shared\photoinfo" }
+          if (Test-Path -LiteralPath "$studio\data\photoinfo") { $fail += "the photo info is still in $studio\data\photoinfo" }
+          $made = @($after | Where-Object { $_ -notin $before })
+          # Anything of ours, or Electron's default folder: only the two new names may appear.
+          $unexpected = @($made | Where-Object { $_ -match 'photo|electron' -and $_ -notin '${{ matrix.product }}', 'Photo Tools Shared' })
+          if ($unexpected) { $fail += "folders made under appData that should not be: $($unexpected -join ', ')" }
+          if ($fail) {
+            Get-ChildItem -Recurse -LiteralPath $env:APPDATA -ErrorAction SilentlyContinue | Where-Object { $_.FullName -match 'Photo' } | Select-Object -ExpandProperty FullName
+            $fail | ForEach-Object { Write-Output "::error::$_" }; exit 1
+          }
+          "carried over: $new\data\marker.txt, $shared\photoinfo\x.json"
+          Remove-Item -Recurse -Force -LiteralPath $new, $studio, $shared -ErrorAction SilentlyContinue
+      # The refusal: with the old program "still running" (its Chromium lockfile held open), or with a
+      # new folder there already holding no data, the program shows its message (closed by itself
+      # after a few seconds in a self-test), writes refused.json and exits non-zero, moving nothing.
+      - name: First start refuses, and moves nothing, when it cannot carry over
+        shell: pwsh
+        run: |
+          $old = Join-Path $env:APPDATA '${{ matrix.old_product }}'
+          $new = Join-Path $env:APPDATA '${{ matrix.product }}'
+          $env:PHOTO_TOOLS_CI_SELF_TEST_CARRY_OVER = '1'
+          $exe = (Resolve-Path -LiteralPath 'dist\installer\${{ matrix.program }}\win-unpacked\${{ matrix.product }}.exe').Path
+          $fail = @()
+          foreach ($case in 'old-program-running', 'new-folder-without-data') {
+            foreach ($d in $old, $new) { if (Test-Path -LiteralPath $d) { throw "Not a clean runner: $d exists" } }
+            New-Item -ItemType Directory -Force "$old\data", "$old\browser" | Out-Null
+            Set-Content -LiteralPath "$old\data\marker.txt" 'stays'
+            $held = $null
+            if ($case -eq 'old-program-running') {
+              $held = [System.IO.File]::Open("$old\browser\lockfile", 'OpenOrCreate', 'ReadWrite', 'None')
+              $expectedStep = 'data'
+            } else {
+              New-Item -ItemType Directory -Force "$new\browser" | Out-Null
+              $expectedStep = 'new-folder-without-data'
+            }
+            $t = "$env:RUNNER_TEMP\refuse-$case"
+            $p = Start-Process -FilePath $exe -ArgumentList '--self-test', "`"$PWD\fixtures\generated\trip`"", '--self-test-out', "`"$t`"" -PassThru
+            $null = $p.Handle  # keeps the exit code readable after WaitForExit
+            if (-not $p.WaitForExit(120000)) { $p.Kill($true); $fail += "${case}: the program did not exit within 2 minutes" }
+            if ($held) { $held.Dispose() }
+            $r = Get-Content "$t\refused.json" -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
+            "${case}: exit code $($p.ExitCode), refused.json: $($r | ConvertTo-Json -Compress)"
+            if ($p.ExitCode -eq 0) { $fail += "${case}: exit code 0" }
+            if ($r.step -ne $expectedStep) { $fail += "${case}: refused.json step is '$($r.step)', not '$expectedStep'" }
+            if (Test-Path "$t\result.json") { $fail += "${case}: the self-test ran instead of refusing" }
+            if ((Get-Content -LiteralPath "$old\data\marker.txt" -ErrorAction SilentlyContinue) -ne 'stays') { $fail += "${case}: the old folder changed" }
+            if ($case -eq 'old-program-running' -and (Test-Path -LiteralPath $new)) { $fail += "${case}: $new was made" }
+            if ($case -eq 'new-folder-without-data' -and ((@(Get-ChildItem -Recurse -LiteralPath $new -Name)) -join ',') -ne 'browser') { $fail += "${case}: $new changed" }
+            Remove-Item -Recurse -Force -LiteralPath $old, $new -ErrorAction SilentlyContinue
+          }
+          if ($fail) { $fail | ForEach-Object { Write-Output "::error::$_" }; exit 1 }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ matrix.program }}-windows-self-test
+          path: |
+            ${{ runner.temp }}/selftest/out/result.json
+            ${{ runner.temp }}/selftest/out/*.png
+            ${{ runner.temp }}/selftest/data/logs/desktop.log
+            ${{ runner.temp }}/carry/out/result.json
+            ${{ runner.temp }}/carry/out/data/logs/desktop.log
+            ${{ runner.temp }}/refuse-*/refused.json
+
+  # Both installers on one Windows machine, as a user would have them: installed silently side by
+  # side, each self-tested, then the editor uninstalled while Photo Tool keeps working, then Photo
+  # Tool uninstalled. Nothing here runs anywhere but this throwaway runner.
+  windows-side-by-side:
+    name: windows (both installed, then uninstalled)
+    needs: windows
+    # Runs even when a check in the windows jobs failed (the installers were uploaded before those checks).
+    if: ${{ !cancelled() }}
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
@@ -19,35 +189,125 @@ jobs:
           node-version: 26
           cache: npm
       - run: npm ci
-      # Builds the editor, bundles the app, fetches the Electron program, then packages.
-      - run: npm run dist
-      - uses: actions/upload-artifact@v4
-        with:
-          name: photobook-studio-windows-x64
-          path: dist/installer/*.exe
-          if-no-files-found: error
-      # The packaged app tests itself: makes a book from the fixture photos, exports the PDFs,
-      # loads the editor, and fails if anything tried to reach a host other than 127.0.0.1.
       - run: npm run fixtures
-      - name: Self-test the packaged app
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-windows-x64'
+          path: ${{ runner.temp }}/installers
+      - name: Install both, check both, uninstall the editor, check Photo Tool, uninstall Photo Tool
         shell: pwsh
         run: |
-          $env:PHOTOBOOK_DATA_DIR = "$env:RUNNER_TEMP\selftest\data"
-          $exe = (Get-ChildItem dist\installer\win-unpacked\*.exe | Where-Object Name -notlike 'Uninstall*' | Select-Object -First 1).FullName
-          $p = Start-Process -FilePath $exe -ArgumentList '--self-test', "`"$PWD\fixtures\generated\trip`"", '--self-test-out', "`"$env:RUNNER_TEMP\selftest\out`"" -Wait -PassThru
-          Get-Content "$env:RUNNER_TEMP\selftest\data\logs\desktop.log" -ErrorAction SilentlyContinue
-          exit $p.ExitCode
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: photobook-studio-windows-self-test
-          path: |
-            ${{ runner.temp }}/selftest/out/result.json
-            ${{ runner.temp }}/selftest/out/*.png
-            ${{ runner.temp }}/selftest/data/logs/desktop.log
+          $programs = @(
+            @{ product = 'Photo Tool'; appId = 'app.phototool.desktop'; prefix = 'PHOTO_TOOL'; artifact = 'photo-tool-windows-x64' },
+            @{ product = 'Photobook Editor'; appId = 'app.photobookeditor.desktop'; prefix = 'PHOTOBOOK'; artifact = 'photobook-editor-windows-x64' }
+          )
+          $startMenu = [Environment]::GetFolderPath('Programs')
+          $desktop = [Environment]::GetFolderPath('Desktop')
+          $script:fail = @()
+          function Fail($m) { Write-Host "::error::$m"; $script:fail += $m }
+          function Wait-Until([scriptblock]$cond, [int]$seconds) { for ($i = 0; $i -lt $seconds; $i++) { if (& $cond) { return $true }; Start-Sleep 1 }; return [bool](& $cond) }
+          function Get-Entry($product) { Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*' -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -match "^$([regex]::Escape($product))( |$)" } }
+          function Get-Aumi($lnk) {
+            $shell = New-Object -ComObject Shell.Application
+            $item = $shell.NameSpace((Split-Path $lnk)).ParseName((Split-Path $lnk -Leaf))
+            if ($item) { $item.ExtendedProperty('System.AppUserModel.ID') }
+          }
+          # electron-builder keeps InstallLocation under its own Software\<guid> key, not the Uninstall one:
+          # the install folder is where UninstallString's quoted uninstaller lives.
+          function Location-Of($p) { $e = Get-Entry $p.product; if ($e -and $e.UninstallString -match '^"([^"]+)"') { Split-Path -Parent $Matches[1] } }
+          function Exe-Of($p) { $l = Location-Of $p; if ($l) { Join-Path $l "$($p.product).exe" } }
+          function Check-Installed($p) {
+            $e = Get-Entry $p.product
+            if (-not $e) { Fail "$($p.product): no uninstall entry"; return }
+            $exe = Exe-Of $p
+            if (-not ($exe -and (Test-Path -LiteralPath $exe))) { Fail "$($p.product): no program at $exe" }
+            foreach ($lnk in "$startMenu\$($p.product).lnk", "$desktop\$($p.product).lnk") {
+              if (-not (Test-Path -LiteralPath $lnk)) { Fail "$($p.product): no shortcut $lnk"; continue }
+              $aumi = Get-Aumi $lnk
+              if (-not $aumi) { Write-Output "::warning::$($p.product): could not read the AppUserModelID of $lnk" }
+              elseif ($aumi -ne $p.appId) { Fail "$($p.product): $lnk has AppUserModelID '$aumi', not '$($p.appId)'" }
+              else { "$lnk -> $aumi" }
+            }
+            "$($p.product): installed at $(Location-Of $p) ($($e.DisplayName))"
+          }
+          function Check-Gone($p, $location) {
+            if (Get-Entry $p.product) { Fail "$($p.product): uninstall entry still there" }
+            if ($location -and (Test-Path -LiteralPath (Join-Path $location "$($p.product).exe"))) { Fail "$($p.product): program still at $location" }
+            foreach ($lnk in "$startMenu\$($p.product).lnk", "$desktop\$($p.product).lnk") { if (Test-Path -LiteralPath $lnk) { Fail "$($p.product): shortcut $lnk still there" } }
+          }
+          function SelfTest($p, $tag) {
+            $exe = Exe-Of $p
+            if (-not $exe) { Fail "$($p.product): not installed, no self-test ($tag)"; return }
+            $t = "$env:RUNNER_TEMP\sbs-$tag"
+            Set-Item "env:$($p.prefix)_DATA_DIR" "$t\data"; Set-Item "env:$($p.prefix)_PROFILE_DIR" "$t\profile"; $env:PHOTOINFO_FALLBACK_DIR = "$t\photoinfo"
+            $proc = Start-Process -FilePath $exe -ArgumentList '--self-test', "`"$PWD\fixtures\generated\trip`"", '--self-test-out', "`"$t\out`"" -PassThru
+            $null = $proc.Handle  # keeps the exit code readable after WaitForExit
+            if (-not $proc.WaitForExit(600000)) { $proc.Kill($true); Fail "$($p.product): self-test ($tag) did not finish"; return }
+            if ($proc.ExitCode -ne 0) { Fail "$($p.product): self-test ($tag) exit code $($proc.ExitCode)" } else { "$($p.product): self-test ($tag) ok" }
+            Remove-Item "env:$($p.prefix)_DATA_DIR", "env:$($p.prefix)_PROFILE_DIR", 'env:PHOTOINFO_FALLBACK_DIR'
+          }
+          function Uninstall($p) {
+            $e = Get-Entry $p.product
+            $location = Location-Of $p
+            if (-not ($e -and $location)) { Fail "$($p.product): nothing to uninstall"; return $null }
+            $cmd = if ($e.QuietUninstallString) { $e.QuietUninstallString } else { "$($e.UninstallString) /S" }
+            Write-Host "uninstalling $($p.product): $cmd"
+            Start-Process -FilePath 'cmd.exe' -ArgumentList '/c', "`"$cmd`"" -Wait
+            # The NSIS uninstaller runs on from a copy of itself in the temp folder: wait for it.
+            if (-not (Wait-Until { -not (Get-Entry $p.product) -and -not (Test-Path -LiteralPath (Join-Path $location "$($p.product).exe")) } 180)) { Fail "$($p.product): uninstall did not finish within 3 minutes" }
+            return $location
+          }
+
+          foreach ($p in $programs) {
+            $setup = Get-ChildItem -LiteralPath "$env:RUNNER_TEMP\installers\$($p.artifact)" -Filter '*Setup*.exe' | Select-Object -First 1
+            if (-not $setup) { throw "No installer in $($p.artifact)" }
+            "installing $($setup.Name)"
+            Start-Process -FilePath $setup.FullName -ArgumentList '/S' -Wait
+            if (-not (Wait-Until { $x = Exe-Of $p; $x -and (Test-Path -LiteralPath $x) } 180)) { Fail "$($p.product): not installed after 3 minutes" }
+          }
+          # A silent install does not start the program; if it did, stop it before the checks.
+          Start-Sleep 5
+          foreach ($p in $programs) {
+            $running = Get-Process -Name $p.product -ErrorAction SilentlyContinue
+            if ($running) { Write-Output "::warning::$($p.product) was started by its installer; stopping it"; $running | Stop-Process -Force }
+          }
+          if ((Exe-Of $programs[0]) -eq (Exe-Of $programs[1])) { Fail 'both programs installed to the same place' }
+          foreach ($p in $programs) { Check-Installed $p }
+          foreach ($p in $programs) { SelfTest $p 'both-installed' }
+
+          $editorLocation = Uninstall $programs[1]
+          Check-Gone $programs[1] $editorLocation
+          Check-Installed $programs[0]
+          SelfTest $programs[0] 'after-editor-uninstalled'
+
+          $toolLocation = Uninstall $programs[0]
+          Check-Gone $programs[0] $toolLocation
+          if ($script:fail) { exit 1 }
 
   linux:
+    name: linux (${{ matrix.program }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        program: [photo-tool, photobook-editor]
+        include:
+          - program: photo-tool
+            dist: dist:photo-tool
+            product: Photo Tool
+            old_product: Photobook Gallery
+            env_prefix: PHOTO_TOOL
+            required_step: taggingWorkerLoads
+          - program: photobook-editor
+            dist: dist:editor
+            product: Photobook Editor
+            old_product: Photobook Studio
+            env_prefix: PHOTOBOOK
+            required_step: ''
+    env:
+      # On Linux the package, the command, the install folder (/opt/<name>) and the .desktop file are
+      # all named after the program (see <program>/electron-builder.config.cjs).
+      P: ${{ matrix.program }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -56,41 +316,125 @@ jobs:
           cache: npm
       - run: npm ci
       # patchelf (with the runner's own gcc) is for scripts/desktop/linux/patch-sharp.mjs.
-      - run: sudo apt-get update && sudo apt-get install -y patchelf
-      - run: npm run dist
+      - run: sudo apt-get update && sudo apt-get install -y patchelf jq
+      - run: npm run ${{ matrix.dist }}
+      # artifactName is ${name}-${version}-${arch}.${ext}: amd64 for the .deb, x86_64 for the AppImage.
+      - name: The packages have their names
+        run: |
+          V=$(node -p "require('./package.json').version")
+          for f in "dist/installer/$P/$P-$V-amd64.deb" "dist/installer/$P/$P-$V-x86_64.AppImage"; do
+            [ -f "$f" ] || { ls -la "dist/installer/$P"; echo "::error::missing $f"; exit 1; }
+            echo "found: $f"
+          done
+          pkg=$(dpkg-deb -f "dist/installer/$P/$P-$V-amd64.deb" Package)
+          [ "$pkg" = "$P" ] || { echo "::error::the .deb's package is '$pkg', not '$P'"; exit 1; }
       - uses: actions/upload-artifact@v4
         with:
-          name: photobook-studio-linux-x64
+          name: ${{ matrix.program }}-linux-x64
           path: |
-            dist/installer/*.deb
-            dist/installer/*.AppImage
+            dist/installer/${{ matrix.program }}/*.deb
+            dist/installer/${{ matrix.program }}/*.AppImage
           if-no-files-found: error
-      # The same self-test as on Windows, on the app as a user gets it: installed from the .deb
+      # The same self-test as on Windows, on the program as a user gets it: installed from the .deb
       # (whose install script sets up what Chromium's sandbox needs on Ubuntu 24.04), then the
       # AppImage. There is no screen on the runner, so xvfb provides one.
       - run: npm run fixtures
-      - name: Install the .deb and self-test the installed app
+      - name: Install the .deb and self-test the installed program
         run: |
-          sudo apt-get install -y xvfb ./dist/installer/*.deb
-          export PHOTOBOOK_DATA_DIR="$RUNNER_TEMP/selftest-deb/data"
-          xvfb-run -a -s '-screen 0 1600x1000x24' photobook-studio --self-test "$PWD/fixtures/generated/trip" --self-test-out "$RUNNER_TEMP/selftest-deb/out"
+          V=$(node -p "require('./package.json').version")
+          sudo apt-get install -y xvfb "./dist/installer/$P/$P-$V-amd64.deb"
+          # Installed under /opt/<name> (no space: Chromium's setuid sandbox cuts the path at one),
+          # started by the command <name>.
+          [ -x "/opt/$P/$P" ] || { ls -la /opt; echo "::error::/opt/$P/$P is not there"; exit 1; }
+          [ "$(readlink -f "$(command -v "$P")")" = "/opt/$P/$P" ] || { echo "::error::the command $P does not start /opt/$P/$P"; exit 1; }
+          [ -f "/usr/share/applications/$P.desktop" ] || { echo "::error::no /usr/share/applications/$P.desktop"; exit 1; }
+          t="$RUNNER_TEMP/selftest-deb"
+          export ${{ matrix.env_prefix }}_DATA_DIR="$t/data" ${{ matrix.env_prefix }}_PROFILE_DIR="$t/profile" PHOTOINFO_FALLBACK_DIR="$t/photoinfo"
+          code=0
+          xvfb-run -a -s '-screen 0 1600x1000x24' "$P" --self-test "$PWD/fixtures/generated/trip" --self-test-out "$t/out" || code=$?
+          jq -r '.steps | to_entries[] | "step \(.key): ok=\(.value.ok)"' "$t/out/result.json" || true
+          [ "$(jq -r .app.execPath "$t/out/result.json")" = "/opt/$P/$P" ] || { echo "::error::the self-test did not run /opt/$P/$P"; exit 1; }
+          if [ -n "${{ matrix.required_step }}" ]; then
+            jq -e '.steps.${{ matrix.required_step }}.ok == true' "$t/out/result.json" > /dev/null || { echo "::error::self-test step ${{ matrix.required_step }} is missing or not ok"; exit 1; }
+          fi
+          exit $code
       - name: Self-test the AppImage
         if: always()
         run: |
+          V=$(node -p "require('./package.json').version")
+          app="dist/installer/$P/$P-$V-x86_64.AppImage"
+          t="$RUNNER_TEMP/selftest-appimage"
           # The runner lacks the libfuse2 the AppImage mounts itself with; unpack-and-run instead.
-          export PHOTOBOOK_DATA_DIR="$RUNNER_TEMP/selftest-appimage/data" APPIMAGE_EXTRACT_AND_RUN=1
-          chmod +x dist/installer/*.AppImage
-          xvfb-run -a -s '-screen 0 1600x1000x24' dist/installer/*.AppImage --self-test "$PWD/fixtures/generated/trip" --self-test-out "$RUNNER_TEMP/selftest-appimage/out"
+          export ${{ matrix.env_prefix }}_DATA_DIR="$t/data" ${{ matrix.env_prefix }}_PROFILE_DIR="$t/profile" PHOTOINFO_FALLBACK_DIR="$t/photoinfo" APPIMAGE_EXTRACT_AND_RUN=1
+          chmod +x "$app"
+          code=0
+          xvfb-run -a -s '-screen 0 1600x1000x24' "$app" --self-test "$PWD/fixtures/generated/trip" --self-test-out "$t/out" || code=$?
+          jq -r '.steps | to_entries[] | "step \(.key): ok=\(.value.ok)"' "$t/out/result.json" || true
+          if [ -n "${{ matrix.required_step }}" ]; then
+            jq -e '.steps.${{ matrix.required_step }}.ok == true' "$t/out/result.json" > /dev/null || { echo "::error::self-test step ${{ matrix.required_step }} is missing or not ok"; exit 1; }
+          fi
+          exit $code
+      # The first start of a user coming from the old name, as on Windows, with the installed program:
+      # XDG_CONFIG_HOME (Electron's appData on Linux) points at a fresh folder holding a fake old one,
+      # and no data-folder variables are set, so the carry-over really runs (allowed in a self-test only
+      # by PHOTO_TOOLS_CI_SELF_TEST_CARRY_OVER=1 together with GITHUB_ACTIONS=true). Then the refusal:
+      # a live Chromium SingletonLock in the old folder (pointing at this shell's own process) must make
+      # the program write refused.json, exit non-zero and move nothing.
+      - name: First start carries the old folder over, or refuses while the old program runs
+        run: |
+          fail=0
+          err() { echo "::error::$*"; fail=1; }
+          run_selftest() { # <xdg> <out> <seconds>
+            XDG_CONFIG_HOME="$1" PHOTO_TOOLS_CI_SELF_TEST_CARRY_OVER=1 timeout "$3" xvfb-run -a -s '-screen 0 1600x1000x24' "$P" --self-test "$PWD/fixtures/generated/trip" --self-test-out "$2"
+          }
+          unset ${{ matrix.env_prefix }}_DATA_DIR ${{ matrix.env_prefix }}_PROFILE_DIR PHOTOINFO_FALLBACK_DIR
+
+          x="$RUNNER_TEMP/xdg-carry"
+          old="$x/${{ matrix.old_product }}"; new="$x/${{ matrix.product }}"
+          mkdir -p "$old/data" "$x/Photobook Studio/data/photoinfo"
+          echo carried > "$old/data/marker.txt"
+          echo '{"stars":1}' > "$x/Photobook Studio/data/photoinfo/x.json"
+          code=0; run_selftest "$x" "$RUNNER_TEMP/carry-out" 600 || code=$?
+          echo "appData after: $(ls -1 "$x" | tr '\n' ',')"
+          [ "$code" = 0 ] || err "carry-over self-test exit code $code"
+          [ ! -e "$old" ] || err "the old folder is still there: $old"
+          [ "$(cat "$new/data/marker.txt" 2>/dev/null)" = carried ] || err "no marker in $new/data"
+          [ -f "$x/Photo Tools Shared/photoinfo/x.json" ] || err "the photo info did not reach Photo Tools Shared/photoinfo"
+          [ ! -e "$x/Photobook Studio/data/photoinfo" ] || err "the photo info is still in Photobook Studio/data/photoinfo"
+          for d in "$x"/*; do
+            # Anything of ours, or Electron's default folder: only the two new names may appear.
+            case "$(basename "$d")" in "${{ matrix.product }}"|"Photo Tools Shared"|"Photobook Studio") ;; *[Pp]hoto*|*[Ee]lectron*) err "a folder was made that should not be: $d" ;; *) echo "also under XDG_CONFIG_HOME: $d" ;; esac
+          done
+          [ "$fail" = 0 ] || find "$x" | head -100
+
+          x="$RUNNER_TEMP/xdg-refuse"
+          old="$x/${{ matrix.old_product }}"; new="$x/${{ matrix.product }}"
+          mkdir -p "$old/data" "$old/browser"
+          echo stays > "$old/data/marker.txt"
+          ln -s "$(hostname)-$$" "$old/browser/SingletonLock"
+          code=0; run_selftest "$x" "$RUNNER_TEMP/refuse-out" 120 || code=$?
+          echo "refusal exit code $code; refused.json: $(cat "$RUNNER_TEMP/refuse-out/refused.json" 2>/dev/null)"
+          [ "$code" != 0 ] || err "the refusal exited 0"
+          [ "$code" != 124 ] || err "the refusal did not exit within 2 minutes"
+          [ "$(jq -r .step "$RUNNER_TEMP/refuse-out/refused.json" 2>/dev/null)" = data ] || err "refused.json missing or not step data"
+          [ ! -e "$RUNNER_TEMP/refuse-out/result.json" ] || err "the self-test ran instead of refusing"
+          [ "$(cat "$old/data/marker.txt" 2>/dev/null)" = stays ] || err "the old folder changed"
+          [ ! -e "$new" ] || err "$new was made"
+          exit $fail
       # The self-test passes even while sharp is mixing up two copies of glib and leaking memory
       # (see patch-sharp.mjs); these log lines are how that shows.
       - name: sharp must not be using the wrong glib
+        if: always()
         run: |
-          ! grep -l 'GLib-GObject-CRITICAL' "$RUNNER_TEMP"/selftest-*/data/logs/desktop.log
+          if grep -l 'GLib-GObject-CRITICAL' "$RUNNER_TEMP"/selftest-*/data/logs/desktop.log; then exit 1; fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: photobook-studio-linux-self-test
+          name: ${{ matrix.program }}-linux-self-test
           path: |
             ${{ runner.temp }}/selftest-*/out/result.json
             ${{ runner.temp }}/selftest-*/out/*.png
             ${{ runner.temp }}/selftest-*/data/logs/desktop.log
+            ${{ runner.temp }}/carry-out/result.json
+            ${{ runner.temp }}/carry-out/data/logs/desktop.log
+            ${{ runner.temp }}/refuse-out/refused.json

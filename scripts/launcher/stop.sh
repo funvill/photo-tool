@@ -1,9 +1,9 @@
 #!/bin/bash
-# Stop the Photobook Studio server started by start.sh (and its child processes).
+# Stop the Photobook Editor server started by start.sh (and its child processes).
 set -u
 PROJECT="$(cd "$(dirname "$0")/../.." && pwd)"
 PORT="${PHOTOBOOK_PORT:-5174}"
-DATA="${PHOTOBOOK_DATA_DIR:-$PROJECT/data}"
+DATA="${PHOTOBOOK_DATA_DIR:-$PROJECT/data/photobook-editor}"
 PIDFILE="$DATA/server-$PORT.pid"
 
 kill_tree() {
@@ -18,6 +18,6 @@ if [ -f "$PIDFILE" ]; then
 fi
 # Anything of ours still listening on the port.
 for pid in $(lsof -nP -t -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null); do
-  ps -o command= -p "$pid" | grep -q "src/server/main.ts" && kill "$pid" 2>/dev/null
+  ps -o command= -p "$pid" | grep -q "photobook-editor/server/main.ts" && kill "$pid" 2>/dev/null
 done
 exit 0

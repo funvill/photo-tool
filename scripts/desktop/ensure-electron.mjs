@@ -5,6 +5,7 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { programArg } from './programs.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const dir = join(root, 'node_modules/electron');
@@ -22,4 +23,9 @@ export function ensureElectron() {
   return exe;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) console.log(ensureElectron());
+// Both programs run the same Electron: `--program <name>` is accepted (and checked) so every desktop
+// script takes it, but changes nothing here.
+if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
+  if (process.argv.includes('--program')) programArg(process.argv);
+  console.log(ensureElectron());
+}

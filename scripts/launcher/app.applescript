@@ -1,4 +1,4 @@
--- Photobook Studio launcher. Generated into an app by scripts/make-launcher.sh.
+-- Photobook Editor launcher. Generated into an app by scripts/make-launcher.sh.
 -- A stay-open app: starting it starts the local server and opens the editor; clicking the Dock
 -- icon reopens the editor; quitting it stops the server.
 property projectDir : "__PROJECT__"
@@ -15,7 +15,7 @@ on startServer()
 		set editorURL to do shell script envPrefix & quoted form of (projectDir & "/scripts/launcher/start.sh")
 		if openBrowser then open location editorURL
 	on error errMsg
-		display dialog "Photobook Studio couldn’t start." & return & return & errMsg buttons {"Quit"} default button 1 with icon stop with title "Photobook Studio"
+		display dialog "Photobook Editor couldn’t start." & return & return & errMsg buttons {"Quit"} default button 1 with icon stop with title "Photobook Editor"
 		quit
 	end try
 end startServer
@@ -39,7 +39,7 @@ on idle
 			end try
 		end repeat
 		if not alive then
-			set choice to button returned of (display dialog "The Photobook Studio server stopped." buttons {"Quit", "Restart"} default button "Restart" with title "Photobook Studio")
+			set choice to button returned of (display dialog "The Photobook Editor server stopped." buttons {"Quit", "Restart"} default button "Restart" with title "Photobook Editor")
 			if choice is "Restart" then
 				startServer()
 			else

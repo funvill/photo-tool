@@ -1,0 +1,551 @@
+import { create } from 'zustand';
+import { CommandError, expandGroups, findSurface, reconcileCover, refreshContents, type BookDocument, type DraftReport, type PhotoAsset, type UpdateReport } from '../core';
+import { api, ApiError, type ImportJob, type LinkedFolder } from './api';
+import { desktop } from '../../shared/web/desktop';
+import { splitDropResult } from './dropResult';
+
+// Editor state. The document is immutable; every committed edit pushes the previous document onto
+// a bounded undo stack (structural sharing keeps this cheap). Drags update the document
+// "transiently" and commit once on pointer-up, so one gesture = one undo step.
+
+const HISTORY_LIMIT = 200;
+
+export type SaveState = 'saved' | 'dirty' | 'saving' | 'error' | 'conflict';
+
+export interface Selection {
+  spreadId: string;
+  elementId: string;
+}
+
+export interface Toast {
+  id: number;
+  kind: 'info' | 'error' | 'success';
+  text: string;
+}
+
+interface HistoryEntry {
+  doc: BookDocument;
+  label: string;
+}
+
+interface EditorState {
+  projectId: string | null;
+  doc: BookDocument | null;
+  revision: number;
+  assets: PhotoAsset[];
+  assetMap: Map<string, PhotoAsset>;
+  past: HistoryEntry[];
+  future: HistoryEntry[];
+  /** Document before the current transient gesture began. */
+  gestureBase: BookDocument | null;
+  selection: Selection | null;
+  /** Every selected element on the selection's surface (the primary one included). Groups are
+   * selected whole. Empty or one id = a single selection. */
+  multi: string[];
+  currentSpread: number;
+  cropElementId: string | null;
+  swapSource: Selection | null;
+  view: 'spread' | 'overview';
+  showGuides: boolean;
+  zoom: number; // 1 = fit
+  saveState: SaveState;
+  saveError: string | null;
+  lastSavedAt: number | null;
+  importJob: ImportJob | null;
+  /** Folders this project keeps in sync with its library. */
+  links: LinkedFolder[];
+  /** A quiet re-read of the linked folders is running. */
+  syncing: boolean;
+  /** Bumped to bring the poster's Auto collage controls into view. */
+  collageFocus: number;
+  /** Bumped to open the book's Draft tab. */
+  draftFocus: number;
+  /** Result of the last book draft, shown in the Draft tab. */
+  draftReport: DraftReport | null;
+  /** Result of the last "Update from stars"; null after any other draft. */
+  updateReport: UpdateReport | null;
+  /** Notes on how the last draft used the stars. */
+  draftNotes: { fellBack: boolean; addedPages: number };
+  /** Photo shown in the library's preview pane. */
+  previewAssetId: string | null;
+  toasts: Toast[];
+  loadError: string | null;
+
+  load(projectId: string): Promise<void>;
+  unload(): void;
+  /** Apply an edit as one undoable step. Command errors become toasts instead of exceptions. */
+  run(label: string, fn: (doc: BookDocument) => BookDocument): boolean;
+  /** Live update during a drag; commit with endGesture. */
+  gesture(fn: (doc: BookDocument) => BookDocument): void;
+  endGesture(label: string): void;
+  cancelGesture(): void;
+  undo(): void;
+  redo(): void;
+  /** Select an element (and the rest of its group, unless `only`). */
+  select(sel: Selection | null, opts?: { only?: boolean }): void;
+  /** Select several elements on one surface; `primary` drives the inspector. */
+  selectMany(spreadId: string, ids: string[], primary?: string): void;
+  /** Shift-click: add or remove an element (and its group) from the selection. */
+  toggleInSelection(spreadId: string, id: string): void;
+  goToSpread(i: number): void;
+  setView(v: 'spread' | 'overview'): void;
+  setZoom(z: number): void;
+  toggleGuides(): void;
+  setCrop(id: string | null): void;
+  setSwapSource(sel: Selection | null): void;
+  refreshAssets(): Promise<void>;
+  /** Resolves false (after an error toast with the server's message) when the change could not be saved. */
+  patchAsset(assetId: string, patch: { rating?: number; favorite?: boolean; excluded?: boolean }): Promise<boolean>;
+  /** Import a folder; `link` also keeps it in sync from now on. */
+  startImport(folder: string, opts?: { link?: boolean }): Promise<void>;
+  /**
+   * Import photos dropped from the file manager. Resolves to the ids of the photos from dropped files
+   * (non-empty only), in drop order; a dropped folder's photos are imported into the library only and
+   * summed up in a toast. Errors are shown as a toast.
+   */
+  importDropped(files: File[]): Promise<string[]>;
+  refreshLinks(): Promise<void>;
+  /** Re-read the linked folders (at most every 20 s unless `force`), quietly unless something changed. */
+  syncLinks(opts?: { force?: boolean }): Promise<void>;
+  unlinkFolder(folder: string): Promise<void>;
+  toast(kind: Toast['kind'], text: string): void;
+  dismissToast(id: number): void;
+}
+
+let toastId = 0;
+let lastSyncAt = 0;
+
+// Photo info (stars, dates, people) lives in photoinfo.json files that other programs may edit:
+// while a book is open, look for changes every few seconds and reload the photos when one is seen.
+const INFO_POLL_MS = 3000;
+let infoTimer: ReturnType<typeof setInterval> | null = null;
+function stopInfoWatch() {
+  if (infoTimer) clearInterval(infoTimer);
+  infoTimer = null;
+}
+/** `baseline`: the stamp read just before the photos were loaded, so a change right after loading is seen. */
+function startInfoWatch(projectId: string, baseline: string | null) {
+  stopInfoWatch();
+  let last: string | null = baseline;
+  let busy = false;
+  infoTimer = setInterval(() => {
+    const st = useEditor.getState();
+    if (busy || st.projectId !== projectId) return;
+    busy = true;
+    void (async () => {
+      try {
+        const stamp = await api.photoInfoStamp(projectId);
+        const job = useEditor.getState().importJob;
+        const importing = !!job && (job.status === 'scanning' || job.status === 'running');
+        if (last === null) last = stamp;
+        else if (stamp !== last && !importing) {
+          last = stamp;
+          await st.refreshAssets();
+        }
+      } catch {
+        /* the server may be restarting: try again next time */
+      } finally {
+        busy = false;
+      }
+    })();
+  }, INFO_POLL_MS);
+}
+const SYNC_INTERVAL_MS = 20_000;
+
+/** Photos placed anywhere in the document (kept in the library even if their file disappears). */
+function inUseIds(doc: BookDocument | null): string[] {
+  if (!doc) return [];
+  const ids = new Set<string>();
+  for (const s of doc.cover ? [doc.cover, ...doc.spreads] : doc.spreads) {
+    for (const e of s.elements) if (e.type === 'image' && e.assetId) ids.add(e.assetId);
+    if (s.backgroundImage) ids.add(s.backgroundImage.assetId);
+  }
+  return [...ids];
+}
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+
+export const useEditor = create<EditorState>((set, get) => ({
+  projectId: null,
+  doc: null,
+  revision: 0,
+  assets: [],
+  assetMap: new Map(),
+  past: [],
+  future: [],
+  gestureBase: null,
+  selection: null,
+  multi: [],
+  currentSpread: 1,
+  cropElementId: null,
+  swapSource: null,
+  view: 'spread',
+  showGuides: true,
+  zoom: 1,
+  saveState: 'saved',
+  saveError: null,
+  lastSavedAt: null,
+  importJob: null,
+  links: [],
+  syncing: false,
+  collageFocus: 0,
+  draftFocus: 0,
+  draftReport: null,
+  updateReport: null,
+  draftNotes: { fellBack: false, addedPages: 0 },
+  previewAssetId: null,
+  toasts: [],
+  loadError: null,
+
+  async load(projectId) {
+    set({ projectId, doc: null, loadError: null, past: [], future: [], selection: null, multi: [], cropElementId: null });
+    try {
+      // The photo info baseline is read before the photos, so the first poll can already spot a change.
+      const baseline = await api.photoInfoStamp(projectId).catch(() => null);
+      const [{ doc, revision }, assets] = await Promise.all([api.getProject(projectId), api.assets(projectId)]);
+      set({
+        doc, revision, assets, assetMap: new Map(assets.map((a) => [a.id, a])),
+        saveState: 'saved', lastSavedAt: Date.now(), currentSpread: doc.settings.product === 'poster' ? 0 : Math.min(1, doc.spreads.length - 1),
+      });
+      await get().refreshLinks();
+      void get().syncLinks({ force: true });
+      startInfoWatch(projectId, baseline);
+    } catch (e) {
+      set({ loadError: e instanceof Error ? e.message : String(e) });
+    }
+  },
+
+  unload() {
+    stopInfoWatch();
+    set({ projectId: null, doc: null, assets: [], assetMap: new Map(), past: [], future: [], importJob: null, links: [], syncing: false, draftReport: null, updateReport: null, draftNotes: { fellBack: false, addedPages: 0 } });
+  },
+
+  run(label, fn) {
+    const { doc } = get();
+    if (!doc) return false;
+    try {
+      // Any edit that changes the page count or binding moves the spine: keep the cover aligned.
+      // …and contents pages follow page numbers and chapters.
+      const next = refreshContents(reconcileCover(fn(doc)));
+      if (next === doc) return true;
+      set((s) => ({
+        doc: next,
+        past: [...s.past, { doc, label }].slice(-HISTORY_LIMIT),
+        future: [],
+        saveState: 'dirty',
+      }));
+      return true;
+    } catch (e) {
+      get().toast('error', e instanceof CommandError || e instanceof Error ? e.message : String(e));
+      return false;
+    }
+  },
+
+  gesture(fn) {
+    const { doc, gestureBase } = get();
+    if (!doc) return;
+    try {
+      set({ doc: fn(doc), gestureBase: gestureBase ?? doc });
+    } catch {
+      // ignore invalid intermediate states during a drag
+    }
+  },
+
+  endGesture(label) {
+    const { doc, gestureBase } = get();
+    if (!doc || !gestureBase) return;
+    if (doc === gestureBase) return set({ gestureBase: null });
+    set((s) => ({
+      gestureBase: null,
+      past: [...s.past, { doc: gestureBase, label }].slice(-HISTORY_LIMIT),
+      future: [],
+      saveState: 'dirty',
+    }));
+  },
+
+  cancelGesture() {
+    const { gestureBase } = get();
+    if (gestureBase) set({ doc: gestureBase, gestureBase: null });
+  },
+
+  undo() {
+    const { past, doc } = get();
+    if (!past.length || !doc) return;
+    const prev = past[past.length - 1];
+    set((s) => ({ doc: prev.doc, past: s.past.slice(0, -1), future: [{ doc, label: prev.label }, ...s.future], saveState: 'dirty', cropElementId: null }));
+    fixSelection();
+  },
+
+  redo() {
+    const { future, doc } = get();
+    if (!future.length || !doc) return;
+    const next = future[0];
+    set((s) => ({ doc: next.doc, future: s.future.slice(1), past: [...s.past, { doc, label: next.label }], saveState: 'dirty', cropElementId: null }));
+    fixSelection();
+  },
+
+  select(selection, opts) {
+    // Selecting a photo on the page also shows it in the library preview.
+    let previewAssetId = get().previewAssetId;
+    let multi: string[] = [];
+    const doc = get().doc;
+    if (selection && doc) {
+      const els = findSurface(doc, selection.spreadId)?.surface.elements ?? [];
+      const el = els.find((e) => e.id === selection.elementId);
+      if (el?.type === 'image' && el.assetId) previewAssetId = el.assetId;
+      multi = opts?.only ? [selection.elementId] : expandGroups(els, [selection.elementId]);
+    }
+    set({ selection, multi, previewAssetId, cropElementId: selection && get().cropElementId === selection.elementId ? selection.elementId : null });
+  },
+
+  selectMany(spreadId, ids, primary) {
+    if (!ids.length) return get().select(null);
+    const doc = get().doc;
+    const els = doc ? findSurface(doc, spreadId)?.surface.elements ?? [] : [];
+    const all = expandGroups(els, ids);
+    const main = primary && all.includes(primary) ? primary : all[all.length - 1];
+    set({ selection: { spreadId, elementId: main }, multi: all, cropElementId: null });
+  },
+
+  toggleInSelection(spreadId, id) {
+    const { selection, multi, doc } = get();
+    if (!doc || !selection || selection.spreadId !== spreadId) return get().select({ spreadId, elementId: id });
+    const els = findSurface(doc, spreadId)?.surface.elements ?? [];
+    const current = multi.length ? multi : [selection.elementId];
+    const group = expandGroups(els, [id]);
+    const next = current.includes(id) ? current.filter((x) => !group.includes(x)) : [...current, ...group.filter((x) => !current.includes(x))];
+    if (!next.length) return get().select(null);
+    set({ selection: { spreadId, elementId: next.includes(selection.elementId) ? selection.elementId : next[next.length - 1] }, multi: next, cropElementId: null });
+  },
+
+  goToSpread(i) {
+    const { doc } = get();
+    if (!doc) return;
+    // -1 is the cover (books only); a poster has just its sheet.
+    const min = doc.settings.product === 'poster' ? 0 : -1;
+    set({ currentSpread: Math.max(min, Math.min(doc.spreads.length - 1, i)), selection: null, multi: [], cropElementId: null, view: 'spread' });
+  },
+
+  setView: (view) => set({ view, selection: null, multi: [], cropElementId: null }),
+  setZoom: (zoom) => set({ zoom: Math.max(0.5, Math.min(4, zoom)) }),
+  toggleGuides: () => set((s) => ({ showGuides: !s.showGuides })),
+  setCrop: (cropElementId) => set({ cropElementId }),
+  setSwapSource: (swapSource) => set({ swapSource }),
+
+  async refreshAssets() {
+    const { projectId } = get();
+    if (!projectId) return;
+    const assets = await api.assets(projectId);
+    set({ assets, assetMap: new Map(assets.map((a) => [a.id, a])) });
+  },
+
+  async patchAsset(assetId, patch) {
+    const { projectId } = get();
+    if (!projectId) return false;
+    let updated: PhotoAsset;
+    try {
+      updated = await api.patchAsset(projectId, assetId, patch);
+    } catch (e) {
+      // e.g. the star can't be saved to photoinfo.json: say why and leave the photo as it was.
+      get().toast('error', e instanceof Error ? e.message : String(e));
+      return false;
+    }
+    set((s) => {
+      const assets = s.assets.map((a) => (a.id === assetId ? updated : a));
+      return { assets, assetMap: new Map(assets.map((a) => [a.id, a])) };
+    });
+    return true;
+  },
+
+  async startImport(folder, opts) {
+    const { projectId } = get();
+    if (!projectId) return;
+    let job = opts?.link ? await api.linkFolder(projectId, folder) : await api.startImport(projectId, folder);
+    set({ importJob: job });
+    let lastRefresh = 0;
+    while (job.status === 'scanning' || job.status === 'running') {
+      await new Promise((r) => setTimeout(r, 400));
+      job = await api.job(job.id);
+      set({ importJob: job });
+      if (Date.now() - lastRefresh > 1200) {
+        lastRefresh = Date.now();
+        await get().refreshAssets();
+      }
+    }
+    await get().refreshAssets();
+    if (opts?.link) await get().refreshLinks();
+    if (job.status === 'failed') get().toast('error', job.errors[0]?.error ?? 'Import failed');
+    else {
+      const parts = [`Imported ${job.imported} photo${job.imported === 1 ? '' : 's'}`];
+      if (job.alreadyInLibrary) parts.push(`${job.alreadyInLibrary} already in library`);
+      if (job.moved) parts.push(`${plural(job.moved, 'moved photo')} found`);
+      if (job.exactDuplicates) parts.push(`${job.exactDuplicates} exact duplicate${job.exactDuplicates === 1 ? '' : 's'} flagged`);
+      if (job.failed) parts.push(`${job.failed} could not be read`);
+      if (opts?.link) parts.push('linked: new photos are added when you open the book');
+      get().toast(job.failed ? 'error' : 'success', parts.join(' · '));
+    }
+    setTimeout(() => set((s) => (s.importJob?.id === job.id ? { importJob: null } : {})), 2500);
+  },
+
+  async importDropped(files) {
+    const { projectId } = get();
+    if (!projectId || !files.length) return [];
+    try {
+      const dsk = desktop;
+      const paths = dsk ? files.map((f) => dsk.pathForFile(f)) : null;
+      // Desktop: files with no path on disk (dragged out of a zip or a web page) cannot be imported; say which.
+      const pathless = paths ? files.filter((_, i) => !paths[i]).map((f) => `${f.name}: has no file on disk to import`) : [];
+      const usable = paths ? files.filter((_, i) => paths[i]) : files;
+      if (paths && !usable.length) {
+        get().toast('error', pathless.slice(0, 3).join(' · '));
+        return [];
+      }
+      let job = await api.importDropped(projectId, usable, paths ? paths.filter(Boolean) : null);
+      set({ importJob: job });
+      while (job.status === 'scanning' || job.status === 'running') {
+        await new Promise((r) => setTimeout(r, 300));
+        job = await api.job(job.id);
+        set({ importJob: job });
+      }
+      await get().refreshAssets();
+      // Photos from dropped files may go onto the page; a dropped folder's photos only join the library.
+      const { placed, folders } = splitDropResult({ ...job, assetIds: job.assetIds ?? [] });
+      for (const f of folders) get().toast('success', `Imported ${plural(f.count, 'photo')} from ${f.name} into the library`);
+      const problems = [...pathless, ...job.errors.map((e) => e.error)];
+      if (job.status === 'failed' || problems.length) get().toast('error', problems.slice(0, 3).join(' · ') || 'Import failed');
+      else if (!placed.length && !folders.length) get().toast('error', 'None of those could be read as photos');
+      setTimeout(() => set((s) => (s.importJob?.id === job.id ? { importJob: null } : {})), 2500);
+      return placed;
+    } catch (e) {
+      get().toast('error', e instanceof Error ? e.message : String(e));
+      return [];
+    }
+  },
+
+  async refreshLinks() {
+    const { projectId } = get();
+    if (!projectId) return;
+    const links = await api.links(projectId);
+    if (get().projectId === projectId) set({ links });
+  },
+
+  async syncLinks(opts) {
+    const { projectId, links, syncing, importJob } = get();
+    if (!projectId || !links.length || syncing) return;
+    // A visible import is already reading files; it will be picked up next time.
+    if (importJob && (importJob.status === 'scanning' || importJob.status === 'running')) return;
+    if (!opts?.force && Date.now() - lastSyncAt < SYNC_INTERVAL_MS) return;
+    lastSyncAt = Date.now();
+    set({ syncing: true });
+    try {
+      let { job } = await api.syncLinks(projectId, inUseIds(get().doc));
+      while (job && (job.status === 'scanning' || job.status === 'running')) {
+        await new Promise((r) => setTimeout(r, 500));
+        if (get().projectId !== projectId) return;
+        job = await api.job(job.id);
+      }
+      if (!job || get().projectId !== projectId) return;
+      if (job.imported || job.moved || job.removed) await get().refreshAssets();
+      await get().refreshLinks();
+      const parts: string[] = [];
+      if (job.imported) parts.push(`${plural(job.imported, 'new photo')} added`);
+      if (job.moved) parts.push(`${plural(job.moved, 'moved photo')} followed`);
+      if (job.removed) parts.push(`${plural(job.removed, 'deleted photo')} taken out of the library`);
+      if (parts.length) get().toast('success', `Linked folders: ${parts.join(' · ')}`);
+      if (job.failed) get().toast('error', `Linked folders: ${plural(job.failed, 'photo')} could not be read`);
+    } catch (e) {
+      get().toast('error', `Couldn't check linked folders: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      if (get().projectId === projectId) set({ syncing: false });
+    }
+  },
+
+  async unlinkFolder(folder) {
+    const { projectId } = get();
+    if (!projectId) return;
+    const links = await api.unlinkFolder(projectId, folder);
+    set({ links });
+  },
+
+  toast(kind, text) {
+    const id = ++toastId;
+    set((s) => ({ toasts: [...s.toasts, { id, kind, text }] }));
+    setTimeout(() => get().dismissToast(id), kind === 'error' ? 7000 : 4000);
+  },
+
+  dismissToast(id) {
+    set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
+  },
+}));
+
+/** After undo/redo the selected element may no longer exist. */
+function fixSelection() {
+  const { selection, doc, currentSpread } = useEditor.getState();
+  if (!doc) return;
+  if (currentSpread >= doc.spreads.length) useEditor.setState({ currentSpread: doc.spreads.length - 1 });
+  if (!selection) return;
+  const found = findSurface(doc, selection.spreadId);
+  if (!found || !found.surface.elements.some((e) => e.id === selection.elementId)) return useEditor.setState({ selection: null, multi: [] });
+  const ids = new Set(found.surface.elements.map((e) => e.id));
+  useEditor.setState((s) => ({ multi: s.multi.filter((id) => ids.has(id)) }));
+}
+
+/** Ids of every selected element (one or many). */
+export const selectedIds = (s: Pick<EditorState, 'selection' | 'multi'>): string[] => (s.multi.length ? s.multi : s.selection ? [s.selection.elementId] : []);
+
+// ---- autosave -------------------------------------------------------------------------------
+
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+let saving = false;
+
+async function flush(keepalive = false) {
+  const s = useEditor.getState();
+  if (!s.doc || s.saveState !== 'dirty' || s.gestureBase) return;
+  if (saving) return void schedule();
+  saving = true;
+  const doc = s.doc;
+  useEditor.setState({ saveState: 'saving' });
+  try {
+    const { revision } = await api.saveProject(doc, s.revision, keepalive);
+    const now = useEditor.getState();
+    useEditor.setState({ revision, lastSavedAt: Date.now(), saveError: null, saveState: now.doc === doc ? 'saved' : 'dirty' });
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 409) useEditor.setState({ saveState: 'conflict', saveError: e.message });
+    else useEditor.setState({ saveState: 'error', saveError: e instanceof Error ? e.message : String(e) });
+  } finally {
+    saving = false;
+    if (useEditor.getState().saveState === 'dirty') schedule();
+  }
+}
+
+function schedule(delay = 600) {
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => void flush(), delay);
+}
+
+useEditor.subscribe((s, prev) => {
+  if (s.doc !== prev.doc && s.saveState === 'dirty' && !s.gestureBase) schedule();
+  if (prev.gestureBase && !s.gestureBase && s.saveState === 'dirty') schedule();
+});
+
+/** Retry after an error (network hiccup, server restart). */
+export function retrySave() {
+  useEditor.setState({ saveState: 'dirty' });
+  void flush();
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', (e) => {
+    const s = useEditor.getState();
+    if (s.saveState === 'dirty' || s.saveState === 'saving') {
+      void flush(true);
+      e.preventDefault();
+    }
+  });
+}
+
+export const selectedElement = (s: Pick<EditorState, 'doc' | 'selection'>) => {
+  if (!s.doc || !s.selection) return null;
+  const found = findSurface(s.doc, s.selection.spreadId);
+  return found?.surface.elements.find((e) => e.id === s.selection!.elementId) ?? null;
+};

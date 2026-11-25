@@ -1,17 +1,16 @@
 #!/bin/bash
-# Start Photobook Studio for the Mac launcher app (or by hand): clear leftover servers, rebuild the
+# Start Photobook Editor for the Mac launcher app (or by hand): clear leftover servers, rebuild the
 # editor if the code changed, start the server in the background, wait until it answers.
 # Prints the editor URL on success; exits non-zero with a message on failure.
 #
 #   PHOTOBOOK_PORT / PHOTOBOOK_DATA_DIR may be set to run a separate copy (used by tests).
+# The editor's data is ./data/photobook-editor when run from source (shared/server/devData.ts); an old
+# one-folder ./data layout is split per program first (scripts/carry-over-dev-data.ts).
 set -u
 
 PROJECT="$(cd "$(dirname "$0")/../.." && pwd)"
 PORT="${PHOTOBOOK_PORT:-5174}"
-DATA="${PHOTOBOOK_DATA_DIR:-$PROJECT/data}"
-mkdir -p "$DATA"
-LOG="$DATA/launcher.log"
-PIDFILE="$DATA/server-$PORT.pid"
+DATA="${PHOTOBOOK_DATA_DIR:-$PROJECT/data/photobook-editor}"
 URL="http://127.0.0.1:$PORT"
 
 # Apps opened from Finder get a minimal PATH; find node the way the user's shell would.
@@ -33,7 +32,7 @@ fi
 # previous launch). Only processes running this project's server are touched.
 "$PROJECT/scripts/launcher/stop.sh" >/dev/null 2>&1
 for pid in $(lsof -nP -t -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null); do
-  if ps -o command= -p "$pid" | grep -q "src/server/main.ts"; then
+  if ps -o command= -p "$pid" | grep -q "photobook-editor/server/main.ts"; then
     kill "$pid" 2>/dev/null
   else
     echo "Port $PORT is in use by another program ($(basename "$(ps -o comm= -p "$pid")")). Close it and try again." >&2
@@ -42,21 +41,31 @@ for pid in $(lsof -nP -t -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null); do
 done
 for _ in $(seq 1 20); do lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1 || break; sleep 0.25; done
 
+# With the old servers stopped (nothing has the database open), split an old one-folder ./data per
+# program before anything makes ./data/photobook-editor. It is given the caller's own environment: a
+# folder chosen by hand is left as it is. On failure it says why.
+if ! (cd "$PROJECT" && ./node_modules/.bin/tsx scripts/carry-over-dev-data.ts) >&2; then
+  exit 1
+fi
+mkdir -p "$DATA"
+LOG="$DATA/launcher.log"
+PIDFILE="$DATA/server-$PORT.pid"
+
 cd "$PROJECT" || exit 1
 echo "---- $(date) starting on port $PORT" >> "$LOG"
 
 # Rebuild the editor when any source file is newer than the last build.
-BUILT="$PROJECT/dist/web/index.html"
-if [ ! -f "$BUILT" ] || [ -n "$(find src -newer "$BUILT" -type f -print -quit 2>/dev/null)" ]; then
+BUILT="$PROJECT/dist/photobook-editor/web/index.html"
+if [ ! -f "$BUILT" ] || [ -n "$(find photobook-editor shared -newer "$BUILT" -type f -print -quit 2>/dev/null)" ]; then
   echo "building editor" >> "$LOG"
-  if ! ./node_modules/.bin/vite build >> "$LOG" 2>&1; then
+  if ! ./node_modules/.bin/vite build --config photobook-editor/vite.config.ts >> "$LOG" 2>&1; then
     echo "The editor failed to build. Details: $LOG" >&2
     exit 1
   fi
 fi
 
 NODE_ENV=production PHOTOBOOK_PORT="$PORT" PHOTOBOOK_DATA_DIR="$DATA" \
-  nohup ./node_modules/.bin/tsx src/server/main.ts >> "$LOG" 2>&1 < /dev/null &
+  nohup ./node_modules/.bin/tsx photobook-editor/server/main.ts >> "$LOG" 2>&1 < /dev/null &
 echo $! > "$PIDFILE"
 
 for _ in $(seq 1 120); do

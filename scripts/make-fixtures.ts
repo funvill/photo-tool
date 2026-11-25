@@ -10,7 +10,7 @@ import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ensureInitialized, jsEncodeImage } from 'elheif';
 import sharp from 'sharp';
-import { mulberry32 } from '../src/core/random';
+import { mulberry32 } from '../photobook-editor/core/random';
 
 interface Scene {
   name: string;

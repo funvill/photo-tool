@@ -8,7 +8,8 @@ rm -rf /build/* /build/.[!.]* 2>/dev/null || true
 cp -a /src/. /build/
 cd /build
 npm ci --no-audit --no-fund
-npm run dist
-cp dist/installer/*.deb dist/installer/*.AppImage /out/
-cp dist/installer/builder-debug.yml /out/ 2>/dev/null || true
+# Both programs: dist/installer/photo-tool and dist/installer/photobook-editor.
+npm run dist:all
+cp dist/installer/*/*.deb dist/installer/*/*.AppImage /out/
+for d in dist/installer/*/; do cp "$d/builder-debug.yml" "/out/$(basename "$d")-builder-debug.yml" 2>/dev/null || true; done
 ls -l /out

@@ -1,0 +1,7 @@
+{
+  "productName": "Photo Tool",
+  "appId": "app.phototool.desktop",
+  "description": "Look through a folder of photos, star the best ones and drag them into other programs. Uses the network only for map tiles (if you choose Load maps) and to download photo-tagging models you ask for.",
+  "maintainer": "Photo Tool <photo-tool@localhost>",
+  "repository": "github:funvill/photo-tool"
+}

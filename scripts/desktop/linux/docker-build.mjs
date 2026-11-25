@@ -3,8 +3,9 @@
 //   node scripts/desktop/linux/docker-build.mjs [work folder]
 //
 // 1. copies the source (no node_modules, data, photos or build output) to <work>/src
-// 2. builds it in a node:24-bookworm container with `npm ci` and `npm run dist`
-// 3. copies the two packages to dist/installer/
+// 2. builds it in a node:24-bookworm container with `npm ci` and `npm run dist:all` (both programs)
+// 3. copies the packages (a .deb and an AppImage for each program) to dist/installer/<program>/,
+//    where a build on Linux puts them (the programs are those of scripts/desktop/programs.mjs)
 //
 // The work folder defaults to <temp>/photobook-linux and must be outside the project.
 // Downloads (npm, Electron, electron-builder's tools) are kept in the Docker volume
@@ -13,6 +14,7 @@ import { execFileSync } from 'node:child_process';
 import { cpSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative, resolve, sep } from 'node:path';
+import { PROGRAM_NAMES } from '../programs.mjs';
 
 const root = resolve(import.meta.dirname, '../../..');
 const work = resolve(process.argv[2] ?? join(tmpdir(), 'photobook-linux'));
@@ -33,9 +35,12 @@ const docker = (...args) => execFileSync('docker', args, { stdio: 'inherit' });
 docker('build', '-t', IMAGE, '-f', join(import.meta.dirname, 'Dockerfile.build'), import.meta.dirname);
 docker('run', '--rm', '-v', `${src}:/src:ro`, '-v', `${out}:/out`, '-v', 'photobook-linux-cache:/cache', '-e', 'PHOTOBOOK_APPIMAGE_TOOLSET', '-e', 'PHOTOBOOK_LINUX_SHARP', IMAGE, 'sh', '-c', "tr -d '\\r' < /src/scripts/desktop/linux/build-in-container.sh | sh"); // a Windows checkout may have CRLF
 
-const installer = join(root, 'dist/installer');
-mkdirSync(installer, { recursive: true });
+// Each package is named ${name}-${version}-${arch}.${ext} after its program (<program>/electron-builder.config.cjs).
 for (const f of readdirSync(out).filter((f) => /\.(deb|AppImage)$/.test(f))) {
+  const program = PROGRAM_NAMES.find((p) => f.startsWith(`${p}-`));
+  if (!program) throw new Error(`${f} is not named after either program: ${PROGRAM_NAMES.join(', ')}`);
+  const installer = join(root, 'dist/installer', program);
+  mkdirSync(installer, { recursive: true });
   cpSync(join(out, f), join(installer, f));
-  console.log(`dist/installer/${f}`);
+  console.log(`dist/installer/${program}/${f}`);
 }

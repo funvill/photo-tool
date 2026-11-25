@@ -29,7 +29,7 @@ const session_options = { intraOpNumThreads: threads, interOpNumThreads: 1 };
 const photosDir = resolve('fixtures/generated/trip');
 const photos = readdirSync(photosDir).filter((f) => /\.jpe?g$/i.test(f)).map((f) => join(photosDir, f));
 
-/** Draft vocabulary; the final list lives in src/gallery/server/tagging/vocabulary.ts. */
+/** Draft vocabulary; the final list lives in photo-tool/server/tagging/vocabulary.ts. */
 const DRAFT_VOCAB = [
   'beach', 'sea', 'harbour', 'boat', 'lake', 'river', 'mountain', 'forest', 'trail', 'garden', 'flower', 'tree',
   'sky', 'sunset', 'sunrise', 'night', 'city', 'street', 'building', 'market', 'cafe', 'restaurant', 'food',

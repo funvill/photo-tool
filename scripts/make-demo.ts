@@ -1,18 +1,18 @@
 // Makes the web version's demo photos: an illustrated, made-up trip along the Amalfi Coast, 22
 // pictures over three days. Flat illustrations, not photographs of anyone or anywhere real.
 //
-//   npm run demo-photos   → src/web/public/demo/*.jpg + manifest.json
+//   npm run demo-photos   → photobook-editor/web/public/demo/*.jpg + manifest.json
 //
 // Each JPEG carries EXIF with a placeholder date (2000:01:0D HH:MM:SS, D = trip day). The demo
-// rewrites those bytes relative to today when it loads (src/web/demo/sample.ts), so the trip is
+// rewrites those bytes relative to today when it loads (photobook-editor/web/demo/sample.ts), so the trip is
 // always a few weeks old, and the photos still go through the real import (EXIF, analysis).
 
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import sharp from 'sharp';
-import { mulberry32 } from '../src/core/random';
+import { mulberry32 } from '../photobook-editor/core/random';
 
-const OUT = 'src/web/public/demo';
+const OUT = 'photobook-editor/web/public/demo';
 
 type Shape = 'land' | 'portrait' | 'pano';
 const SIZE: Record<Shape, [number, number]> = { land: [2400, 1800], portrait: [1800, 2400], pano: [4800, 1600] };

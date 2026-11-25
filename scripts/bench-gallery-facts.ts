@@ -1,8 +1,8 @@
 // How long the gallery takes to work its shown list out again after one photo is hidden (what H does),
 // on a folder of 5,000 analysed photos with stacks on. Run: npx tsx scripts/bench-gallery-facts.ts
 // Not part of the test suite: the first build alone takes seconds.
-import type { GalleryItem } from '../src/gallery/server/app';
-import { selectVisible } from '../src/gallery/web/store';
+import type { GalleryItem } from '../photo-tool/server/app';
+import { selectVisible } from '../photo-tool/web/store';
 
 const N = Number(process.argv[2] ?? 5000);
 const ROUNDS = 5;

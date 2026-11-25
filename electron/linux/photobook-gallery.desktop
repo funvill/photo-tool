@@ -1,8 +1,0 @@
-[Desktop Entry]
-Name=Photobook Gallery
-Comment=Look through a folder of photos, star the best ones and drag them into other programs. Uses the network only for map tiles, and only if you choose Load maps.
-Exec=photobook-studio --gallery %F
-Icon=photobook-studio
-Terminal=false
-Type=Application
-Categories=Graphics;Viewer;

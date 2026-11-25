@@ -1,38 +1,60 @@
-// `npm run dev:desktop`: the desktop window onto the Vite dev server (hot reload for the editor),
-// with the API server running inside the app as it does when installed.
+// `npm run dev:desktop:editor` and `npm run dev:desktop:photo-tool`: a program's desktop window
+// onto its Vite dev server (hot reload for the page), with its API server running inside the app as it
+// does when installed.
 //
-// Same ports and data folder as `npm run dev` (PHOTOBOOK_WEB_PORT 5173, PHOTOBOOK_PORT 5174,
-// ./data or PHOTOBOOK_DATA_DIR), so run one or the other, not both. Changes under electron/ or
-// src/server need this command restarted; changes to the editor reload by themselves.
+//   node scripts/desktop/dev.mjs --program photobook-editor|photo-tool [args for the app]
 //
-// `npm run dev:desktop -- --gallery [folder]` is the gallery program the same way, on the ports of
-// the gallery's own dev server (src/gallery/server/main.ts: PHOTOBOOK_GALLERY_WEB_PORT 5175,
-// PHOTOBOOK_GALLERY_PORT 5176) and with its data in ./data/gallery (or PHOTOBOOK_GALLERY_DATA_DIR),
-// so it runs beside the editor's. Its stars for read-only folders go to the editor's data folder.
+// Each program uses the ports and data folder of its own `npm run dev:*`, so run one or the other, not
+// both: the editor PHOTOBOOK_WEB_PORT 5173 / PHOTOBOOK_PORT 5174 and ./data/photobook-editor (or
+// PHOTOBOOK_DATA_DIR); Photo Tool PHOTO_TOOL_WEB_PORT 5175 / PHOTO_TOOL_PORT 5176 and ./data/photo-tool
+// (or PHOTO_TOOL_DATA_DIR). Both keep stars for read-only folders in ./data/photoinfo-shared (or
+// PHOTOINFO_FALLBACK_DIR). The old one-folder ./data layout is split into these first, once
+// (scripts/carry-over-dev-data.ts), unless any of those folders is set by hand. Both programs' data and profile folders are always given, so neither ever
+// moves an old data folder under %APPDATA%. Changes to a program's electron/ or server/ need this
+// command restarted; changes to its page reload by themselves. Photo Tool opens a folder given after
+// the program name: `npm run dev:desktop:photo-tool -- D:\Pictures`.
 import { execFileSync, spawn } from 'node:child_process';
 import { connect } from 'node:net';
 import { join, resolve } from 'node:path';
 import { ensureElectron } from './ensure-electron.mjs';
+import { programArg, withoutProgramArg } from './programs.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
-const gallery = process.argv.includes('--gallery');
-const webPort = Number((gallery ? process.env.PHOTOBOOK_GALLERY_WEB_PORT : process.env.PHOTOBOOK_WEB_PORT) ?? (gallery ? 5175 : 5173));
-const apiPort = Number((gallery ? process.env.PHOTOBOOK_GALLERY_PORT : process.env.PHOTOBOOK_PORT) ?? (gallery ? 5176 : 5174));
+const program = programArg(process.argv);
+const photoTool = program === 'photo-tool';
+const prefix = photoTool ? 'PHOTO_TOOL' : 'PHOTOBOOK';
+const webPort = Number(process.env[`${prefix}_WEB_PORT`] ?? (photoTool ? 5175 : 5173));
+const apiPort = Number(process.env[`${prefix}_PORT`] ?? (photoTool ? 5176 : 5174));
 const env = {
   ...process.env,
   // Vite and the app's server both read these.
-  PHOTOBOOK_WEB_PORT: String(webPort),
-  PHOTOBOOK_PORT: String(apiPort),
-  PHOTOBOOK_DATA_DIR: resolve(process.env.PHOTOBOOK_DATA_DIR ?? join(root, 'data')),
-  ...(gallery ? { PHOTOBOOK_GALLERY_DATA_DIR: resolve(process.env.PHOTOBOOK_GALLERY_DATA_DIR ?? join(root, 'data', 'gallery')) } : {}),
-  PHOTOBOOK_DESKTOP_DEV_URL: `http://127.0.0.1:${webPort}/`,
+  [`${prefix}_WEB_PORT`]: String(webPort),
+  [`${prefix}_PORT`]: String(apiPort),
+  // Only a profile folder given: the data goes beside it (<profile>-data), as in the servers' dirs.ts
+  // and the installed programs, not into the ./data folder whose carry-over that variable skips.
+  PHOTOBOOK_DATA_DIR: resolve(process.env.PHOTOBOOK_DATA_DIR || (process.env.PHOTOBOOK_PROFILE_DIR ? `${resolve(process.env.PHOTOBOOK_PROFILE_DIR)}-data` : join(root, 'data', 'photobook-editor'))),
+  PHOTOBOOK_PROFILE_DIR: resolve(process.env.PHOTOBOOK_PROFILE_DIR ?? join(root, 'data', 'photobook-editor-browser')),
+  PHOTO_TOOL_DATA_DIR: resolve(process.env.PHOTO_TOOL_DATA_DIR || (process.env.PHOTO_TOOL_PROFILE_DIR ? `${resolve(process.env.PHOTO_TOOL_PROFILE_DIR)}-data` : join(root, 'data', 'photo-tool'))),
+  PHOTO_TOOL_PROFILE_DIR: resolve(process.env.PHOTO_TOOL_PROFILE_DIR ?? join(root, 'data', 'photo-tool-browser')),
+  PHOTOINFO_FALLBACK_DIR: resolve(process.env.PHOTOINFO_FALLBACK_DIR ?? join(root, 'data', 'photoinfo-shared')),
+  [`${prefix}_DESKTOP_DEV_URL`]: `http://127.0.0.1:${webPort}/`,
 };
 delete env.ELECTRON_RUN_AS_NODE;
 
-const electron = ensureElectron();
-execFileSync(process.execPath, [join(root, 'scripts/desktop/build.mjs'), '--dev'], { cwd: root, stdio: 'inherit' });
+// First the old one-folder ./data layout is split per program, once (shared/server/devData.ts, whose
+// devDataLayout the folders above match). It is given this command's own environment, before the
+// defaults above fill it in: a data or profile folder chosen by hand means nothing is moved.
+// A move that fails stops here, before anything opens a folder.
+try {
+  execFileSync(process.execPath, [join(root, 'node_modules/tsx/dist/cli.mjs'), join(root, 'scripts/carry-over-dev-data.ts')], { cwd: root, env: process.env, stdio: 'inherit' });
+} catch {
+  process.exit(1); // the script has said why
+}
 
-const vite = spawn(process.execPath, [join(root, 'node_modules/vite/bin/vite.js')], { cwd: root, env, stdio: 'inherit' });
+const electron = ensureElectron();
+execFileSync(process.execPath, [join(root, 'scripts/desktop/build.mjs'), '--program', program, '--dev'], { cwd: root, stdio: 'inherit' });
+
+const vite = spawn(process.execPath, [join(root, 'node_modules/vite/bin/vite.js'), '--config', join(root, program, 'vite.config.ts')], { cwd: root, env, stdio: 'inherit' });
 let app = null;
 const stop = (code) => {
   vite.kill();
@@ -54,5 +76,6 @@ const listening = (port) =>
   });
 for (let i = 0; i < 120 && !(await listening(webPort)); i++) await new Promise((d) => setTimeout(d, 250));
 
-app = spawn(electron, [join(root, 'dist/desktop/dev'), ...process.argv.slice(2)], { cwd: root, env, stdio: 'inherit' });
+// What is left after --program goes to the app (Photo Tool: a folder to open).
+app = spawn(electron, [join(root, 'dist', program, 'desktop', 'dev'), ...withoutProgramArg(process.argv.slice(2))], { cwd: root, env, stdio: 'inherit' });
 app.on('exit', (code) => stop(code ?? 0));
