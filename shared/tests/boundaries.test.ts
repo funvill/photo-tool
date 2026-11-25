@@ -1,6 +1,6 @@
 // Folder rules for the program split. Each later task adds a rule here.
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { pathToFileURL } from 'node:url';
@@ -43,5 +43,28 @@ describe('photo-tool', () => {
       expect(existsSync(index)).toBe(true);
       expect(readFileSync(index, 'utf8')).toMatch(/<script[^>]+src="[^"]*assets\/[^"]+\.js"/);
     });
+  });
+});
+
+describe('photobook-editor', () => {
+  it('imports only shared', async () => {
+    expect(existsSync(resolve(root, 'photobook-editor/server/main.ts'))).toBe(true);
+    const { crossings } = await loadGraph();
+    expect(crossings(root, [{ from: 'photobook-editor', mayImport: ['shared'] }])).toEqual([]);
+  });
+});
+
+describe('src', () => {
+  it('is empty', () => {
+    const files: string[] = [];
+    const walk = (dir: string) => {
+      if (!existsSync(dir)) return;
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.isDirectory()) walk(resolve(dir, entry.name));
+        else files.push(resolve(dir, entry.name));
+      }
+    };
+    walk(resolve(root, 'src'));
+    expect(files).toEqual([]);
   });
 });

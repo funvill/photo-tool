@@ -45,7 +45,7 @@ interface Pkg {
 }
 
 // In the production tree but not in the app: pdfjs-dist's optional canvas for Node. The app uses
-// pdfjs only in the browser build of the editor (src/web/backend/browser/raster.ts).
+// pdfjs only in the browser build of the editor (photobook-editor/web/backend/browser/raster.ts).
 const NOT_SHIPPED = /^@napi-rs\/canvas(-|$)/;
 
 const RULE = '='.repeat(78);

@@ -18,6 +18,6 @@ if [ -f "$PIDFILE" ]; then
 fi
 # Anything of ours still listening on the port.
 for pid in $(lsof -nP -t -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null); do
-  ps -o command= -p "$pid" | grep -q "src/server/main.ts" && kill "$pid" 2>/dev/null
+  ps -o command= -p "$pid" | grep -q "photobook-editor/server/main.ts" && kill "$pid" 2>/dev/null
 done
 exit 0

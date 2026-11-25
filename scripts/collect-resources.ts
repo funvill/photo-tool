@@ -15,7 +15,7 @@
 
 import { copyFileSync, cpSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
-import { FONT_FAMILIES, fontFilePath } from '../src/core';
+import { FONT_FAMILIES, fontFilePath } from '../photobook-editor/core';
 import { fontFile, libheifFile, pdfiumDir, projectRoot, setResourceRoot, webDir, worldAtlasFile } from '../shared/server/resources';
 import { makeNotices, reportNotices } from './make-notices';
 

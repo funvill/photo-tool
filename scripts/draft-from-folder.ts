@@ -8,8 +8,8 @@
 import { resolve } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
-import { generateDraft, printablePages, type BookDocument, type PhotoAsset } from '../src/core';
-import { createApp } from '../src/server/app';
+import { generateDraft, printablePages, type BookDocument, type PhotoAsset } from '../photobook-editor/core';
+import { createApp } from '../photobook-editor/server/app';
 
 const [folderArg, title = 'Untitled book', pagesArg = '86', style = 'collage'] = process.argv.slice(2);
 if (!folderArg) {

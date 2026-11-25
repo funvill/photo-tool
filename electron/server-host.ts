@@ -1,4 +1,4 @@
-// Runs the local server (src/server/app.ts, the same one `npm start` runs) inside an Electron
+// Runs the local server (photobook-editor/server/app.ts, the same one `npm start` runs) inside an Electron
 // utility process, so a long PDF export never freezes the window; with `kind: 'gallery'`, the
 // gallery's server (photo-tool/server/app.ts) instead. The main process sends
 // { type: 'start', ... }, gets { type: 'ready', port } or { type: 'error', error } back, and sends
@@ -12,7 +12,7 @@ import { taggingWorkerPath } from './config';
 
 export interface StartMessage {
   type: 'start';
-  /** Which server: the editor's (src/server/app.ts) or the gallery's (photo-tool/server/app.ts). */
+  /** Which server: the editor's (photobook-editor/server/app.ts) or the gallery's (photo-tool/server/app.ts). */
   kind: 'editor' | 'gallery';
   dataDir: string;
   /** Gallery only: where photo info for read-only folders is kept (the editor's `<dataDir>/photoinfo`). */
@@ -58,7 +58,7 @@ async function createServer(msg: StartMessage, post: (m: HostReply) => void): Pr
       ...(msg.resourceRoot ? { resourceRoot: msg.resourceRoot, staticDir: join(msg.resourceRoot, 'web'), staticPage: 'gallery.html' } : { devWebUrl: msg.devWebUrl }),
     });
   }
-  const { createApp } = await import('../src/server/app');
+  const { createApp } = await import('../photobook-editor/server/app');
   const restart = () => post({ type: 'restart' });
   const { app, store } = createApp(
     msg.dataDir,

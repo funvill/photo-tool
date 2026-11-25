@@ -33,7 +33,7 @@ fi
 # previous launch). Only processes running this project's server are touched.
 "$PROJECT/scripts/launcher/stop.sh" >/dev/null 2>&1
 for pid in $(lsof -nP -t -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null); do
-  if ps -o command= -p "$pid" | grep -q "src/server/main.ts"; then
+  if ps -o command= -p "$pid" | grep -q "photobook-editor/server/main.ts"; then
     kill "$pid" 2>/dev/null
   else
     echo "Port $PORT is in use by another program ($(basename "$(ps -o comm= -p "$pid")")). Close it and try again." >&2
@@ -56,7 +56,7 @@ if [ ! -f "$BUILT" ] || [ -n "$(find src -newer "$BUILT" -type f -print -quit 2>
 fi
 
 NODE_ENV=production PHOTOBOOK_PORT="$PORT" PHOTOBOOK_DATA_DIR="$DATA" \
-  nohup ./node_modules/.bin/tsx src/server/main.ts >> "$LOG" 2>&1 < /dev/null &
+  nohup ./node_modules/.bin/tsx photobook-editor/server/main.ts >> "$LOG" 2>&1 < /dev/null &
 echo $! > "$PIDFILE"
 
 for _ in $(seq 1 120); do

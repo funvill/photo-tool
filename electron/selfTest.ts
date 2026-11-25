@@ -179,7 +179,7 @@ export async function runSelfTest(ctx: SelfTestContext): Promise<Record<string, 
   });
 
   await step('draft', async () => {
-    const { generateDraft, printablePages } = await import('../src/core');
+    const { generateDraft, printablePages } = await import('../photobook-editor/core');
     const assets = await api<any[]>('GET', `/api/projects/${projectId}/assets`);
     const doc = (await api('GET', `/api/projects/${projectId}`)).doc;
     doc.settings.trimWidthMm = BLURB_LARGE_SQUARE_TRIM_MM;
@@ -291,7 +291,7 @@ export async function runSelfTest(ctx: SelfTestContext): Promise<Record<string, 
   // A poster with one photo (a HEIC one when there is one), exported as PNG and JPEG: the print
   // PDF rendered by the bundled PDFium, measured in the page.
   await step('exportImage', async () => {
-    const { addPhotoAt } = await import('../src/core');
+    const { addPhotoAt } = await import('../photobook-editor/core');
     const created = await api('POST', '/api/projects', { title: 'Self-test poster', product: 'poster', sizeId: 'p11x14' });
     const id = created.doc.id;
     const job = await waitForJob(await api('POST', `/api/projects/${id}/import`, { folder: ctx.photos }));
@@ -316,7 +316,7 @@ export async function runSelfTest(ctx: SelfTestContext): Promise<Record<string, 
 
   // The flipbook: every page of the book rendered by PDFium and embedded in one HTML file.
   await step('exportFlipbook', async () => {
-    const { printablePages } = await import('../src/core');
+    const { printablePages } = await import('../photobook-editor/core');
     const doc = (await api('GET', `/api/projects/${projectId}`)).doc;
     const r = await api('POST', `/api/projects/${projectId}/export-flipbook`, { size: 'standard' });
     const html = await (await fetch(base + r.url)).text();

@@ -261,7 +261,7 @@ describe('gallery mode', () => {
     const gallery = csp('photo-tool/web/index.html');
     expect(gallery).toBeTruthy();
     expect(gallery).toContain("img-src 'self' blob: data: https://tile.openstreetmap.org;");
-    expect(gallery!.replace(' https://tile.openstreetmap.org', '')).toBe(csp('src/web/index.html'));
+    expect(gallery!.replace(' https://tile.openstreetmap.org', '')).toBe(csp('photobook-editor/web/index.html'));
     // The gallery server's header says the same: the tile server for images, nothing else from outside.
     const header = /'Content-Security-Policy',\s*"([^"]+)"/.exec(readFileSync('photo-tool/server/app.ts', 'utf8'))?.[1];
     expect(header).toContain("img-src 'self' blob: data: https://tile.openstreetmap.org;");

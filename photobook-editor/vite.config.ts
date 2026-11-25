@@ -1,0 +1,42 @@
+import { defineConfig } from 'vite';
+import react from '@vitejs/plugin-react';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+// The web UI talks only to the local API server (127.0.0.1). Nothing is fetched from the internet.
+// Ports can be moved with PHOTOBOOK_WEB_PORT / PHOTOBOOK_PORT (e.g. to run a second copy).
+//
+// `--mode pages` builds the web version instead: the backend runs in the browser (IndexedDB,
+// workers), there is no server, and the files are served from GitHub Pages under /photobook_studio/.
+const apiPort = Number(process.env.PHOTOBOOK_PORT ?? 5174);
+const webPort = Number(process.env.PHOTOBOOK_WEB_PORT ?? 5173);
+
+const projectDir = resolve(import.meta.dirname, '..');
+const appVersion = (JSON.parse(readFileSync(resolve(projectDir, 'package.json'), 'utf8')) as { version: string }).version;
+
+export default defineConfig(({ mode }) => {
+  const pages = mode === 'pages';
+  return {
+    root: resolve(import.meta.dirname, 'web'),
+    base: pages ? '/photobook_studio/' : '/',
+    // The web version's demo (sample photos, the portfolio's demo-welcome.js) ships only there.
+    // `--mode pages` goes away with the pages build (Task 10); until then it keeps its public/ folder, relative to root.
+    publicDir: pages ? 'public' : false,
+    plugins: [react()],
+    // The version the pages show, so a build can be named exactly.
+    define: { __BROWSER_BACKEND__: JSON.stringify(pages), __APP_VERSION__: JSON.stringify(appVersion) },
+    worker: { format: 'es' },
+    server: {
+      host: '127.0.0.1',
+      port: webPort,
+      strictPort: true,
+      proxy: pages ? undefined : { '/api/': `http://127.0.0.1:${apiPort}` },
+      fs: { allow: [projectDir] },
+    },
+    build: {
+      outDir: resolve(projectDir, pages ? 'dist/pages' : 'dist/photobook-editor/web'),
+      emptyOutDir: true,
+      target: 'es2022',
+    },
+  };
+});

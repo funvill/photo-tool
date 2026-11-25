@@ -3,7 +3,7 @@
 //
 // Same ports and data folder as `npm run dev` (PHOTOBOOK_WEB_PORT 5173, PHOTOBOOK_PORT 5174,
 // ./data or PHOTOBOOK_DATA_DIR), so run one or the other, not both. Changes under electron/ or
-// src/server need this command restarted; changes to the editor reload by themselves.
+// photobook-editor/server need this command restarted; changes to the editor reload by themselves.
 //
 // `npm run dev:desktop -- --gallery [folder]` is the gallery program the same way, on the ports of
 // the gallery's own dev server (photo-tool/server/main.ts: PHOTOBOOK_GALLERY_WEB_PORT 5175,
@@ -32,7 +32,7 @@ delete env.ELECTRON_RUN_AS_NODE;
 const electron = ensureElectron();
 execFileSync(process.execPath, [join(root, 'scripts/desktop/build.mjs'), '--dev'], { cwd: root, stdio: 'inherit' });
 
-const vite = spawn(process.execPath, [join(root, 'node_modules/vite/bin/vite.js')], { cwd: root, env, stdio: 'inherit' });
+const vite = spawn(process.execPath, [join(root, 'node_modules/vite/bin/vite.js'), '--config', join(root, 'photobook-editor/vite.config.ts')], { cwd: root, env, stdio: 'inherit' });
 let app = null;
 const stop = (code) => {
   vite.kill();
