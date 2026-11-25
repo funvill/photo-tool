@@ -1130,3 +1130,49 @@ test('Settings: download a tagging model with progress, choose it, remove it', a
     removeTrip(dir);
   }
 });
+
+test("What's in it shows the description and chips; clicking a keyword filters the grid; × clears it", async ({ page, request }) => {
+  // Both fake models downloaded and chosen before the folder is opened: tagging starts once it is read.
+  for (const id of ['fake-describe-small', 'fake-keywords-small']) {
+    expect((await request.post(`/api/gallery/models/${id}/download`)).status()).toBe(202);
+    await expect.poll(async () => (await (await request.get('/api/gallery/models')).json()).downloading, { timeout: 10_000 }).toBeFalsy();
+  }
+  expect((await request.put('/api/gallery/tagging/settings', { data: { describe: 'fake-describe-small', keywords: 'fake-keywords-small', paused: false } })).ok()).toBe(true);
+  const dir = await openTrip(page, request);
+  try {
+    const tiles = page.locator('.gallery-tile');
+    const all = await tiles.count();
+    await page.locator('.gallery-tile', { has: page.locator('img[alt="day2-04-lake.jpg"]') }).click();
+    const panel = page.locator('#gallery-section-whatsinit');
+    // The fake models read the file name: "lake".
+    await expect(panel).toContainText('A picture of lake.', { timeout: 20_000 });
+    await expect(page.getByRole('status', { name: 'Photo tagging' })).toHaveCount(0, { timeout: 20_000 });
+    await expect(panel.getByRole('group', { name: 'Objects' }).getByRole('button', { name: 'lake ×2' })).toBeVisible();
+    const keyword = panel.getByRole('group', { name: 'Keywords' }).getByRole('button', { name: 'lake', exact: true });
+    await keyword.click();
+    await expect(keyword).toHaveAttribute('aria-pressed', 'true');
+    await expect(tiles).toHaveCount(1);
+    await expect(page.locator('.gallery-tile img')).toHaveAttribute('alt', 'day2-04-lake.jpg');
+    await page.getByRole('button', { name: 'Remove filter lake' }).click();
+    await expect(tiles).toHaveCount(all);
+    await expect(page.getByRole('button', { name: 'Remove filter lake' })).toHaveCount(0);
+  } finally {
+    await request.put('/api/gallery/tagging/settings', { data: { describe: null, keywords: null, paused: false } });
+    for (const id of ['fake-describe-small', 'fake-keywords-small']) await request.delete(`/api/gallery/models/${id}`);
+    removeTrip(dir);
+  }
+});
+
+test("What's in it says tagging is off, with a way to Settings", async ({ page, request }) => {
+  await request.put('/api/gallery/tagging/settings', { data: { describe: null, keywords: null, paused: false } });
+  const dir = await openTrip(page, request);
+  try {
+    await page.locator('.gallery-tile').first().click();
+    const panel = page.locator('#gallery-section-whatsinit');
+    await expect(panel).toContainText('Tagging is off.');
+    await panel.getByRole('link', { name: 'Settings' }).click();
+    await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
+  } finally {
+    removeTrip(dir);
+  }
+});

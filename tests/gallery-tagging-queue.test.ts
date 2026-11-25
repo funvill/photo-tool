@@ -223,6 +223,26 @@ describe('tagging queue', () => {
     expect(q.status()).toMatchObject({ job: null, running: false });
   });
 
+  it('a deleted photo does not stop another photo with the same content from being tagged, in this job or a later one', async () => {
+    await install(describeSmall);
+    const t = testBackend();
+    const q = makeQueue(t.backend);
+    q.setSettings(settings({ describe: describeSmall.id }));
+    // a and a-copy are the same picture; a is deleted after the scan.
+    const gone = photo('a');
+    rmSync(gone.path);
+    q.focus([gone.path]);
+    q.startJob('j1', () => [gone, photo('b')]);
+    await idle(q);
+    expect(t.calls).toEqual(['describe:b']);
+    expect(q.status()).toMatchObject({ total: 2, done: 2 });
+    // Another folder with a copy of it: looked at, as its content was never tagged.
+    q.startJob('j2', () => [photo('a-copy', 'ck-a')]);
+    await idle(q);
+    expect(t.calls).toEqual(['describe:b', 'describe:a-copy']);
+    expect(catalog.tagsFor(['ck-a'], [describeSmall.id]).get('ck-a')?.[0].description).toBe('About a-copy.');
+  });
+
   it('a model that fails to load is reported in notWorking and that part does not run', async () => {
     await install(describeSmall, keywordsSmall);
     const t = testBackend();

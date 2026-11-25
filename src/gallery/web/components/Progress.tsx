@@ -15,3 +15,22 @@ export function Progress() {
     </div>
   );
 }
+
+/** While photo tagging runs or is paused: "Tagging 120 of 2,140", with Pause or Resume. Nothing when done or off. */
+export function TaggingProgress() {
+  const t = useGallery((s) => s.tagging);
+  if (!t || t.total === 0 || !(t.running || (t.paused && t.done + t.failed < t.total))) return null;
+  const pause = () => void useGallery.getState().setTaggingPaused(!t.paused);
+  return (
+    <div className="gallery-progress gallery-tagging-progress" role="status" aria-label="Photo tagging">
+      <div className="gallery-progress-bar"><span style={{ width: `${(t.done / t.total) * 100}%` }} /></div>
+      <span className="muted small">
+        Tagging {t.done.toLocaleString()} of {t.total.toLocaleString()}
+        {t.paused ? ' · paused' : ''}
+      </span>
+      <button type="button" className="btn btn-small" onClick={pause}>
+        {t.paused ? 'Resume' : 'Pause'}
+      </button>
+    </div>
+  );
+}

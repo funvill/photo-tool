@@ -19,6 +19,7 @@ import { LocationInput } from './LocationInput';
 import { PeopleInput } from './PeopleInput';
 import { ScoreCard } from './ScoreCard';
 import { Section } from './Section';
+import { WhatsInIt } from './WhatsInIt';
 
 /** The country list is the same for every photo: fetched once. */
 let allPlaces: Promise<{ id: string; name: string }[]> | null = null;
@@ -231,6 +232,10 @@ function DetailsFor({ item }: { item: GalleryItem }) {
             <Row label="Format">{item.format && item.format !== 'unknown' ? item.format.toUpperCase() : 'Unknown'}</Row>
             {item.relDir && <Row label="Folder">{item.relDir}</Row>}
           </div>
+        </Section>
+
+        <Section id="whatsinit" title="What's in it">
+          <WhatsInIt item={item} />
         </Section>
 
         <Section id="camera" title="Camera">

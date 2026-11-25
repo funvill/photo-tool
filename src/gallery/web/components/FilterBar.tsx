@@ -108,6 +108,14 @@ export function FilterBar() {
         value={filter.text ?? ''}
         onChange={(e) => set({ text: e.target.value || undefined })}
       />
+      {filter.tags?.map((t) => (
+        <span key={`${t.kind}:${t.value}`} className="gallery-chip on gallery-filter-chip">
+          {t.value}
+          <button type="button" aria-label={`Remove filter ${t.value}`} onClick={() => useGallery.getState().toggleTagFilter(t)}>
+            ×
+          </button>
+        </span>
+      ))}
       <span className="muted gallery-count" aria-live="polite">{countText(shown, items.length, active)}</span>
       <button type="button" className="btn" disabled={!active} onClick={() => useGallery.getState().clearFilter()}>
         Clear

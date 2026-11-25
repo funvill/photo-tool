@@ -144,6 +144,17 @@ describe('filterItems', () => {
     const other = item({ width: 3000, height: 4000, info: { star: true, description: 'forest' } });
     expect(run([hit, notStar, landscape, other], { starred: 'yes', orientation: 'portrait', text: 'BEACH' })).toEqual([hit]);
   });
+  it('filterItems with tags keeps photos having every keyword/object; isFilterActive true', () => {
+    const tags = (keywords: string[], objects: string[]) => ({ keywords, objects: objects.map((label) => ({ label, count: 1 })) });
+    const both = item({ tags: tags(['lake', 'boat'], ['person']) });
+    const lakeOnly = item({ tags: tags(['lake'], []) });
+    const untagged = item({});
+    const f: GalleryFilter = { tags: [{ kind: 'keyword', value: 'lake' }, { kind: 'object', value: 'person' }] };
+    expect(run([both, lakeOnly, untagged], f)).toEqual([both]);
+    expect(run([both, lakeOnly, untagged], { tags: [{ kind: 'keyword', value: 'lake' }] })).toEqual([both, lakeOnly]);
+    expect(isFilterActive(f)).toBe(true);
+    expect(isFilterActive({ tags: [] })).toBe(false);
+  });
   it('starred no, location, people', () => {
     const a = item({ info: { star: true } });
     const b = item({ effectiveLat: 10, info: { people: ['Ann'] } });

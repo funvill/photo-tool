@@ -1,12 +1,12 @@
 import { create } from 'zustand';
 import type { DesktopApi } from '../../shared/desktopApi';
-import { filterItems, galleryFacts, sortItems, type GalleryFacts, type GalleryFilter, type GallerySortKey } from '../../core/gallerySort';
+import { filterItems, galleryFacts, sortItems, type GalleryFacts, type GalleryFilter, type GallerySortKey, type TagFilter } from '../../core/gallerySort';
 import { clickSelect, dragPaths, flagTargets, nextAfterRemoval } from '../../core/galleryViewer';
 import { stackItems, type StackInfo } from '../../core/galleryStacks';
 import { IDENTITY_EDIT, isIdentityEdit, parseEdit, type PhotoEdit } from '../../core/photoEdit';
 import { photoScores, scoreAdjustOf, type PhotoScore } from '../../core/photoScore';
 import { loadEditTarget, saveEditTarget, type EditTarget } from './editSettings';
-import { galleryApi, type GalleryItem, type JobUpdate, type RecentFolder } from './api';
+import { galleryApi, type GalleryItem, type JobUpdate, type RecentFolder, type TaggingStatus } from './api';
 
 // The gallery's state: the open folder, its photos (filled in while the folder is read), the
 // selection, thumbnail size and toasts. Photo info lives in photoinfo.json files that other
@@ -91,6 +91,8 @@ export interface GalleryState {
   undoStack: UndoStep[];
   /** The Up/Down toast on the preview, or null. */
   scoreToast: ScoreToast | null;
+  /** Photo tagging of the open folder (null: nothing known yet, or it is tagging another folder). */
+  tagging: TaggingStatus | null;
 
   loadRecent(): Promise<void>;
   open(folder: string, recursive: boolean): Promise<void>;
@@ -116,6 +118,10 @@ export interface GalleryState {
   /** Change some filters; a key set to undefined is cleared. */
   setFilter(patch: Partial<GalleryFilter>): void;
   clearFilter(): void;
+  /** Add a keyword or object filter, or take it away when it is set already. */
+  toggleTagFilter(f: TagFilter): void;
+  /** Pause or resume photo tagging (kept in Settings). */
+  setTaggingPaused(paused: boolean): Promise<void>;
   setRecursive(recursive: boolean): void;
   setStacked(on: boolean): void;
   toggleStack(id: string): void;
@@ -245,6 +251,13 @@ const JOB_POLL_MS = 500;
 /** A failed scan poll is retried this many times (1 s, 2 s, 4 s apart) before giving up. */
 const JOB_RETRIES = 3;
 const STAMP_POLL_MS = 3000;
+/** Photo tagging's status is read this often while it runs (STAMP_POLL_MS otherwise). */
+const TAG_POLL_MS = 1000;
+/** While tagging runs, the photos are reloaded for their new tags at most this often (and once when it stops). */
+const TAG_REFRESH_MS = 10_000;
+/** The photos tagging is asked to look at first: the selected one, then this many of the grid's. */
+const FOCUS_COUNT = 200;
+const FOCUS_DEBOUNCE_MS = 500;
 
 const clampThumb = (px: number) => Math.min(THUMB_MAX, Math.max(THUMB_MIN, Math.round(Number.isFinite(px) ? px : THUMB_DEFAULT)));
 
@@ -287,6 +300,12 @@ let generation = 0;
 let jobTimer: ReturnType<typeof setTimeout> | null = null;
 let stampTimer: ReturnType<typeof setInterval> | null = null;
 let lastStamp: string | null = null;
+let tagTimer: ReturnType<typeof setTimeout> | null = null;
+// The tagging stamp the photos were last reloaded for (null: no baseline yet), and when.
+let tagSeen: number | null = null;
+let tagRefreshedAt = 0;
+let focusTimer: ReturnType<typeof setTimeout> | null = null;
+let lastFocus = '';
 // Info saved by this page while a reload is on its way, numbered, so that older reload cannot undo it.
 let saveSeq = 0;
 let saved: { seq: number; item: GalleryItem }[] = [];
@@ -426,8 +445,13 @@ function stopTimers() {
   generation++;
   if (jobTimer) clearTimeout(jobTimer);
   if (stampTimer) clearInterval(stampTimer);
-  jobTimer = stampTimer = null;
+  if (tagTimer) clearTimeout(tagTimer);
+  if (focusTimer) clearTimeout(focusTimer);
+  jobTimer = stampTimer = tagTimer = focusTimer = null;
   lastStamp = null;
+  tagSeen = null;
+  tagRefreshedAt = 0;
+  lastFocus = '';
   saved = [];
   draft = null;
 }
@@ -543,6 +567,34 @@ export const useGallery = create<GalleryState>()((set, get) => {
         // The server may be busy; try again next time.
       }
     }, STAMP_POLL_MS);
+  };
+
+  /**
+   * Read photo tagging's status every 3 s (every 1 s while it runs). When photos got new tags (the stamp moved)
+   * they are reloaded, at most every 10 s while tagging runs and once when it stops; not while the folder is read.
+   * Tagging starts once the folder is read, so this folder's status is first seen after that.
+   */
+  const watchTagging = async (gen: number, job: string) => {
+    tagTimer = null;
+    let st: TaggingStatus | null = null;
+    try {
+      st = await galleryApi.taggingStatus();
+    } catch {
+      // Not there (an older server) or busy: try again next time.
+    }
+    if (!current(gen, job)) return;
+    const mine = st?.job === job ? st : null;
+    if (st) set({ tagging: mine });
+    // The first reading of this folder's tagging reloads too: it may have finished before this page first looked.
+    if (mine && mine.stamp !== tagSeen && get().progress === null) {
+      if (tagSeen === null || !mine.running || Date.now() - tagRefreshedAt >= TAG_REFRESH_MS) {
+        tagSeen = mine.stamp;
+        tagRefreshedAt = Date.now();
+        await get().refreshInfo();
+        if (!current(gen, job)) return;
+      }
+    }
+    tagTimer = setTimeout(() => void watchTagging(gen, job), st?.running ? TAG_POLL_MS : STAMP_POLL_MS);
   };
 
   /** A photo's file name, as the list has it. */
@@ -676,6 +728,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
     saving: false,
     savingPaths: [],
     settingsOpen: false,
+    tagging: null,
 
     async loadRecent() {
       try {
@@ -704,6 +757,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
       if (gen !== generation) return;
       set({ job });
       void get().loadRecent();
+      void watchTagging(gen, job);
       await pollJob(gen, job);
     },
 
@@ -834,6 +888,24 @@ export const useGallery = create<GalleryState>()((set, get) => {
       settleSelection(before);
     },
 
+    toggleTagFilter(f) {
+      const tags = get().filter.tags ?? [];
+      const has = tags.some((t) => t.kind === f.kind && t.value === f.value);
+      const next = has ? tags.filter((t) => !(t.kind === f.kind && t.value === f.value)) : [...tags, f];
+      get().setFilter({ tags: next.length ? next : undefined });
+    },
+
+    async setTaggingPaused(paused) {
+      try {
+        const { settings } = await galleryApi.models();
+        await galleryApi.setTaggingSettings({ ...settings, paused });
+        const t = get().tagging;
+        if (t) set({ tagging: { ...t, paused, running: t.running && !paused } });
+      } catch (e) {
+        get().toast('error', message(e));
+      }
+    },
+
     setRecursive(recursive) {
       set({ recursive });
     },
@@ -892,7 +964,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
     close() {
       cancelScan();
       stopTimers();
-      set({ job: null, root: null, items: [], openStacks: [], progress: null, ...noSelection, ...noEdits, tidyOpen: false });
+      set({ job: null, root: null, items: [], openStacks: [], progress: null, ...noSelection, ...noEdits, tidyOpen: false, tagging: null });
     },
 
     async requestOpen(folder, recursive) {
@@ -1293,6 +1365,29 @@ export function selectStackPlace(s: VisibleInput, path: string): { place: number
   const at = order.indexOf(path);
   return at < 0 ? null : { place: at + 1, size: order.length };
 }
+
+/**
+ * Tell photo tagging which photos to look at first: the selected one, then the first 200 the grid shows.
+ * Sent 0.5 s after the selection or the grid's list last changed, and only when that order changed.
+ */
+useGallery.subscribe((s, prev) => {
+  if (!s.job) return;
+  if (s.job === prev.job && s.selected === prev.selected && s.items === prev.items && s.filter === prev.filter && s.sort === prev.sort && s.stacked === prev.stacked && s.openStacks === prev.openStacks) return;
+  if (focusTimer) clearTimeout(focusTimer);
+  focusTimer = setTimeout(() => {
+    focusTimer = null;
+    const now = useGallery.getState();
+    if (!now.job) return;
+    const shown = selectVisible(now).slice(0, FOCUS_COUNT).map((i) => i.path);
+    const paths = now.selected === null ? shown : [now.selected, ...shown.filter((p) => p !== now.selected)];
+    const key = [now.job, ...paths].join('\n');
+    if (!paths.length || key === lastFocus) return;
+    lastFocus = key;
+    galleryApi.taggingFocus(now.job, paths).catch(() => {
+      // Only an order of work: nothing to tell the person.
+    });
+  }, FOCUS_DEBOUNCE_MS);
+});
 
 /** The photos to show, in order: the grid and the viewer step through this one list. */
 export const useVisibleItems = (): GalleryItem[] => useGallery((s) => selectVisible(s));

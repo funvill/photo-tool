@@ -7,7 +7,7 @@ import { Grid } from './components/Grid';
 import { MapView } from './components/MapView';
 import { PhotoMenu } from './components/PhotoMenu';
 import { Preview } from './components/Preview';
-import { Progress } from './components/Progress';
+import { Progress, TaggingProgress } from './components/Progress';
 import { LeaveDialog } from './components/LeaveDialog';
 import { Splitter, saveWidth, savedWidth } from './components/Splitter';
 import { TidyDialog } from './components/TidyDialog';
@@ -46,6 +46,7 @@ export function GalleryApp() {
     <div className="gallery">
       <FolderBar />
       <Progress />
+      {root && <TaggingProgress />}
       {root && !empty && <FilterBar />}
       {!root ? <RecentFolders /> : empty ? <p className="muted pad">No photos in this folder.</p> : <ReviewScreen root={root} />}
       {root && !empty && <Viewer />}

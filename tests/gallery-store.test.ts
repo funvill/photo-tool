@@ -1536,3 +1536,87 @@ describe('gallery store: sort by photo score', () => {
     expect(selectVisible(nudged).map((i) => i.path)).toEqual(['b', 'a', 'c']);
   });
 });
+
+describe('gallery store: photo tagging', () => {
+  const status = (over: Record<string, unknown> = {}) => ({ job: 'j1', total: 2, done: 0, failed: 0, paused: false, running: true, notWorking: [], stamp: 0, ...over });
+
+  async function openTagged(reply: () => ReturnType<typeof status>) {
+    routes['POST /api/gallery/open'] = () => ({ status: 202, json: { jobId: 'j1' } });
+    routes['GET /api/gallery/recent'] = () => ({ json: [] });
+    routes['GET /api/gallery/jobs/j1'] = () => ({
+      json: { total: 2, processed: 2, startedAt: 0, done: true, errors: [], items: [item(), item({ path: 'D:\\Trip\\b.jpg', fileName: 'b.jpg', key: 'k2' })] },
+    });
+    routes['GET /api/gallery/stamp'] = () => ({ json: { stamp: 's' } });
+    routes['GET /api/gallery/items'] = () => ({ json: [item(), item({ path: 'D:\\Trip\\b.jpg', fileName: 'b.jpg', key: 'k2' })] });
+    routes['GET /api/gallery/tagging/status'] = () => ({ json: reply() });
+    routes['POST /api/gallery/tagging/focus'] = () => ({ json: {} });
+    await useGallery.getState().open('D:\\Trip', true);
+  }
+
+  it('toggleTagFilter adds then removes', () => {
+    useGallery.getState().toggleTagFilter({ kind: 'keyword', value: 'lake' });
+    useGallery.getState().toggleTagFilter({ kind: 'object', value: 'person' });
+    expect(useGallery.getState().filter.tags).toEqual([{ kind: 'keyword', value: 'lake' }, { kind: 'object', value: 'person' }]);
+    useGallery.getState().toggleTagFilter({ kind: 'keyword', value: 'lake' });
+    expect(useGallery.getState().filter.tags).toEqual([{ kind: 'object', value: 'person' }]);
+    useGallery.getState().toggleTagFilter({ kind: 'object', value: 'person' });
+    expect(useGallery.getState().filter).toEqual({});
+  });
+
+  it('a stamp change reloads the photos, at most every 10 s while tagging runs, and once when it stops', async () => {
+    vi.useFakeTimers();
+    let stamp = 0;
+    let running = true;
+    await openTagged(() => status({ stamp, running, done: stamp }));
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(useGallery.getState().tagging).toEqual(expect.objectContaining({ job: 'j1', running: true }));
+    const base = count('GET', '/api/gallery/items');
+    // A photo is tagged every 0.5 s for 20 s: two or three reloads, not forty.
+    for (let t = 0; t < 40; t++) {
+      stamp++;
+      await vi.advanceTimersByTimeAsync(500);
+    }
+    const during = count('GET', '/api/gallery/items') - base;
+    expect(during).toBeGreaterThanOrEqual(1);
+    expect(during).toBeLessThanOrEqual(3);
+    // Done: one more reload brings the last photos' tags in.
+    stamp++;
+    running = false;
+    await vi.advanceTimersByTimeAsync(3100);
+    expect(count('GET', '/api/gallery/items') - base).toBe(during + 1);
+    expect(useGallery.getState().tagging?.running).toBe(false);
+    // Nothing changes after that: no more reloads.
+    await vi.advanceTimersByTimeAsync(9100);
+    expect(count('GET', '/api/gallery/items') - base).toBe(during + 1);
+  });
+
+  it('tagging that finished before the page first looked still brings its tags in (one reload)', async () => {
+    vi.useFakeTimers();
+    await openTagged(() => status({ running: false, done: 2, stamp: 20 }));
+    await vi.advanceTimersByTimeAsync(3200);
+    // One reload for the info watch's baseline, one for tagging's new tags; none after.
+    expect(count('GET', '/api/gallery/items')).toBe(2);
+    await vi.advanceTimersByTimeAsync(9100);
+    expect(count('GET', '/api/gallery/items')).toBe(2);
+  });
+
+  it('focus posts the selected photo first', async () => {
+    vi.useFakeTimers();
+    await openTagged(() => status());
+    // After tagging's first reload of the photos (a reload starts the half second again).
+    await vi.advanceTimersByTimeAsync(1600);
+    useGallery.getState().select('D:\\Trip\\b.jpg');
+    await vi.advanceTimersByTimeAsync(600);
+    const posts = calls.filter((c) => c.method === 'POST' && c.url === '/api/gallery/tagging/focus');
+    expect(posts.at(-1)?.body).toEqual({ job: 'j1', paths: ['D:\\Trip\\b.jpg', 'D:\\Trip\\a.jpg'] });
+    // Debounced: several quick changes post once.
+    const before = posts.length;
+    useGallery.getState().select('D:\\Trip\\a.jpg');
+    useGallery.getState().select('D:\\Trip\\b.jpg');
+    useGallery.getState().select('D:\\Trip\\a.jpg');
+    await vi.advanceTimersByTimeAsync(600);
+    const after = calls.filter((c) => c.method === 'POST' && c.url === '/api/gallery/tagging/focus');
+    expect(after.length).toBe(before + 1);
+    expect(after.at(-1)?.body).toEqual({ job: 'j1', paths: ['D:\\Trip\\a.jpg', 'D:\\Trip\\b.jpg'] });
+  });
+});

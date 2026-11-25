@@ -45,6 +45,11 @@ export class TaggingQueue {
   private failedKeys = new Map<string, Set<string>>();
   /** Content keys already asked of the catalogue, per model id (with a row or not): asked once. */
   private looked = new Map<string, Set<string>>();
+  /**
+   * Paths of this job's photos found gone (deleted since the scan): never picked again in this job. Kept by path,
+   * not content key, since another photo with the same picture (a copy here, or in another folder) still needs tags.
+   */
+  private gone = new Set<string>();
   /** Photos before this index in the job's list need nothing more from the current models. */
   private cursor = 0;
   private stamp = 0;
@@ -59,6 +64,7 @@ export class TaggingQueue {
   /** The open folder's scan is done: tag its photos. Replaces any earlier job. */
   startJob(jobId: string, photos: () => GalleryPhoto[]): void {
     // The focus the page sent while the scan ran is kept.
+    if (this.job?.id !== jobId) this.gone.clear();
     this.job = { id: jobId, photos };
     this.cursor = 0;
     this.kick();
@@ -68,6 +74,7 @@ export class TaggingQueue {
   clearJob(): void {
     this.job = null;
     this.focusPaths = [];
+    this.gone.clear();
   }
 
   /** Paths to look at first, in order (the selected photo, then the ones on screen). */
@@ -100,7 +107,8 @@ export class TaggingQueue {
     let failed = 0;
     if (models.length) {
       for (const p of photos) {
-        if (models.some((id) => this.failedKeys.get(id)?.has(p.contentKey!))) failed++;
+        if (this.gone.has(p.path)) done++;
+        else if (models.some((id) => this.failedKeys.get(id)?.has(p.contentKey!))) failed++;
         else if (models.every((id) => this.seen.get(id)?.has(p.contentKey!))) done++;
       }
     }
@@ -174,7 +182,7 @@ export class TaggingQueue {
   }
 
   private next(models: ModelChoice[], photos: GalleryPhoto[]): GalleryPhoto | undefined {
-    const todo = (p: GalleryPhoto) => !!p.contentKey && models.some((m) => !this.seen.get(m.id)?.has(p.contentKey!));
+    const todo = (p: GalleryPhoto) => !!p.contentKey && !this.gone.has(p.path) && models.some((m) => !this.seen.get(m.id)?.has(p.contentKey!));
     const byPath = new Map(photos.map((p) => [p.path, p]));
     for (const path of this.focusPaths) {
       const p = byPath.get(path);
@@ -221,7 +229,7 @@ export class TaggingQueue {
     const key = photo.contentKey!;
     if (!existsSync(photo.path)) {
       // Deleted since the scan: never picked again in this job.
-      for (const m of models) this.seen.get(m.id)?.add(key);
+      this.gone.add(photo.path);
       return;
     }
     const results:{ m: ModelChoice; row: Parameters<Catalog['putTags']>[0] }[] = [];
@@ -252,7 +260,7 @@ export class TaggingQueue {
     if (this.job !== job || this.stopped || !existsSync(photo.path) || !job.photos().some((p) => p.path === photo.path)) {
       if (this.job === job && !this.stopped) {
         // Gone from this folder: never pick it again in this job.
-        for (const m of models) this.seen.get(m.id)?.add(key);
+        this.gone.add(photo.path);
       }
       return;
     }

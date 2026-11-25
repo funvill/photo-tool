@@ -252,3 +252,16 @@
 .gallery-confirm { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border: 1px solid var(--accent); border-radius: var(--radius); }
 .gallery-confirm-buttons { display: flex; gap: 6px; }
 .gallery-settings-error { color: var(--error); margin: 0; }
+
+/* Photo tagging: the bar while it runs, "What's in it" and the keyword/object chips. */
+.gallery-tagging-progress .btn { margin-left: auto; }
+.gallery-whatsinit { display: flex; flex-direction: column; gap: 8px; }
+.gallery-whatsinit-description { margin: 0; line-height: 1.4; }
+.gallery-chip-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.gallery-chip-row > .muted { width: 100%; }
+.gallery-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border: 1px solid var(--line-soft); border-radius: 999px; background: var(--panel-3); color: inherit; font: inherit; font-size: 12px; cursor: pointer; }
+.gallery-chip:hover { border-color: var(--accent); }
+.gallery-chip.on { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+.gallery-filter-chip { cursor: default; }
+.gallery-filter-chip button { border: 0; background: none; color: inherit; font: inherit; padding: 0 0 0 2px; cursor: pointer; }
+.gallery-link-btn { border: 0; background: none; padding: 0; color: var(--accent); font: inherit; text-decoration: underline; cursor: pointer; }

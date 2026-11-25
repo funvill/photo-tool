@@ -26,11 +26,19 @@ export interface GalleryFilter {
   relDir?: string;
   /** Case-insensitive, over description and notes. */
   text?: string;
+  /** Keywords and objects found by photo tagging; a photo must have every one. */
+  tags?: TagFilter[];
+}
+
+/** One keyword or object chip. ('person' is added by the faces plan.) */
+export interface TagFilter {
+  kind: 'keyword' | 'object';
+  value: string;
 }
 
 /** True when any filter is set (an empty search box or a cleared option does not count). */
 export function isFilterActive(f: GalleryFilter): boolean {
-  return !!(f.starred || f.from || f.to || f.lowQuality || f.nearDuplicates || f.orientation || f.hasLocation || f.hasPeople || f.hidden || f.relDir !== undefined || f.text?.trim());
+  return !!(f.starred || f.from || f.to || f.lowQuality || f.nearDuplicates || f.orientation || f.hasLocation || f.hasPeople || f.hidden || f.relDir !== undefined || f.text?.trim() || f.tags?.length);
 }
 
 export type ColourBucket = 'red' | 'orange' | 'yellow' | 'green' | 'cyan' | 'blue' | 'purple' | 'pink' | 'neutral';
@@ -58,6 +66,8 @@ export interface GalleryItemLike {
   effectiveLat: number | null;
   info: { star?: boolean; description?: unknown; notes?: unknown; people?: unknown; [extra: string]: unknown };
   analysis: PhotoAnalysis | null;
+  /** What photo tagging found (only what the filters read). */
+  tags?: { keywords: string[]; objects: { label: string }[] };
 }
 
 // Perceptual hue ranges in degrees, lower bound inclusive; red wraps through 0.
@@ -188,6 +198,9 @@ export function sortItems<T extends GalleryItemLike>(items: T[], key: GallerySor
   });
 }
 
+const hasTag = (i: GalleryItemLike, t: TagFilter) =>
+  t.kind === 'keyword' ? !!i.tags?.keywords.includes(t.value) : !!i.tags?.objects.some((o) => o.label === t.value);
+
 const day = (date: string | null) => (date ? date.slice(0, 10) : null);
 
 /** The photos that pass every filter that is set. Keeps the order. */
@@ -217,6 +230,7 @@ export function filterItems<T extends GalleryItemLike>(items: T[], f: GalleryFil
       const hay = [i.info.description, i.info.notes].filter((v): v is string => typeof v === 'string').join('\n').toLowerCase();
       if (!hay.includes(text)) return false;
     }
+    if (f.tags?.length && !f.tags.every((t) => hasTag(i, t))) return false;
     return true;
   });
 }
