@@ -59,6 +59,14 @@ describe('query words in the search box', () => {
     expect(r.error).toContain('star:maybe');
   });
 
+  it('a value naming an Object.prototype member is a bad word, not swallowed', () => {
+    expect(take('star:constructor')).toEqual({ patch: {}, tags: [], rest: 'star:constructor', error: '"star:constructor" isn\'t a filter: try star:yes or star:no' });
+    expect(take('shape:__proto__')).toEqual({ patch: {}, tags: [], rest: 'shape:__proto__', error: '"shape:__proto__" isn\'t a filter: try shape:portrait or shape:landscape' });
+    expect(take('has:toString')).toEqual({ patch: {}, tags: [], rest: 'has:toString', error: '"has:toString" isn\'t a filter: try has:location or has:people' });
+    expect(take('hidden:valueOf').rest).toBe('hidden:valueOf');
+    expect(take('is:hasOwnProperty').rest).toBe('is:hasOwnProperty');
+  });
+
   it('unknown keys are plain text', () => {
     expect(take('http://x a:b')).toEqual({ patch: {}, tags: [], rest: 'http://x a:b', error: null });
   });

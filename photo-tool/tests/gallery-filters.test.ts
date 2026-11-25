@@ -31,6 +31,24 @@ describe('the list of filters', () => {
     for (const d of FILTERS) expect(d.group === null).toBe(d.id === 'text');
   });
 
+  it('every panel filter brings its own panel controls, for its own keys', () => {
+    for (const d of FILTERS) {
+      if (d.group === null) {
+        expect(d.controls, d.id).toBeUndefined();
+        continue;
+      }
+      expect(d.controls.length, d.id).toBeGreaterThan(0);
+      for (const c of d.controls) {
+        if ('key' in c) expect(d.keys, `${d.id} ${c.kind}`).toContain(c.key);
+        if (c.kind === 'folder') expect(d.keys).toEqual(['relDir']);
+        if (c.kind === 'tags') expect(d.keys).toEqual(['tags']);
+      }
+    }
+    // Today's labels, in panel order.
+    const labels = FILTERS.flatMap((d) => (d.group === null ? [] : d.controls.map((c) => ('label' in c ? c.label : c.kind))));
+    expect(labels).toEqual(['Stars', 'Shape', 'Hidden', 'From', 'To', 'Folder', 'Has location', 'Has people', 'tags', 'Low quality', 'Near-duplicates']);
+  });
+
   it('chip text', () => {
     expect(chipTexts({ starred: 'yes' })).toEqual(['Starred']);
     expect(chipTexts({ starred: 'no' })).toEqual(['Not starred']);

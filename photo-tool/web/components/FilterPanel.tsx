@@ -1,19 +1,9 @@
 import { useEffect, useRef, type ReactNode, type RefObject } from 'react';
-import { FILTER_GROUPS, FILTERS } from '../../core/galleryFilters';
+import { FILTER_GROUPS, FILTERS, type PanelControl } from '../../core/galleryFilters';
 import type { GalleryFilter } from '../../core/gallerySort';
 import { useGallery } from '../store';
 
 const set = (patch: Partial<GalleryFilter>) => useGallery.getState().setFilter(patch);
-
-function Toggle({ label, field }: { label: string; field: 'lowQuality' | 'nearDuplicates' | 'hasLocation' | 'hasPeople' }) {
-  const on = useGallery((s) => s.filter[field] === true);
-  return (
-    <label className="row gallery-check">
-      <input type="checkbox" checked={on} onChange={(e) => set({ [field]: e.target.checked || undefined })} />
-      {label}
-    </label>
-  );
-}
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -24,55 +14,46 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-/** Each panel filter's control, by its id in the list of filters (today's controls and labels). */
-function Control({ id, filter, dirs }: { id: string; filter: GalleryFilter; dirs: string[] }) {
-  switch (id) {
-    case 'starred':
+/**
+ * Draws one control the list of filters asks for. The switch covers every PanelControl kind (a new kind is a
+ * compile error until it is drawn here), and every panel filter must bring its controls, so none is left out.
+ */
+function Control({ c, filter, dirs }: { c: PanelControl; filter: GalleryFilter; dirs: string[] }) {
+  switch (c.kind) {
+    case 'select':
       return (
-        <Field label="Stars">
-          <select value={filter.starred ?? ''} onChange={(e) => set({ starred: (e.target.value || undefined) as GalleryFilter['starred'] })}>
-            <option value="">All</option>
-            <option value="yes">Starred</option>
-            <option value="no">Not starred</option>
+        <Field label={c.label}>
+          <select value={filter[c.key] ?? ''} onChange={(e) => set({ [c.key]: e.target.value || undefined })}>
+            {c.options.map((o) => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
           </select>
         </Field>
       );
-    case 'orientation':
+    case 'date':
       return (
-        <Field label="Shape">
-          <select value={filter.orientation ?? ''} onChange={(e) => set({ orientation: (e.target.value || undefined) as GalleryFilter['orientation'] })}>
-            <option value="">Any</option>
-            <option value="portrait">Portrait</option>
-            <option value="landscape">Landscape</option>
-          </select>
+        <Field label={c.label}>
+          <input
+            type="date"
+            value={filter[c.key] ?? ''}
+            max={c.key === 'from' ? filter.to : undefined}
+            min={c.key === 'to' ? filter.from : undefined}
+            onChange={(e) => set({ [c.key]: e.target.value || undefined })}
+          />
         </Field>
       );
-    case 'hidden':
+    case 'check':
       return (
-        <Field label="Hidden">
-          <select value={filter.hidden ?? ''} onChange={(e) => set({ hidden: (e.target.value || undefined) as GalleryFilter['hidden'] })}>
-            <option value="">Leave out</option>
-            <option value="show">Show</option>
-            <option value="only">Only</option>
-          </select>
-        </Field>
+        <label className="row gallery-check">
+          <input type="checkbox" checked={filter[c.key] === true} onChange={(e) => set({ [c.key]: e.target.checked || undefined })} />
+          {c.label}
+        </label>
       );
-    case 'dates':
-      return (
-        <>
-          <Field label="From">
-            <input type="date" value={filter.from ?? ''} max={filter.to} onChange={(e) => set({ from: e.target.value || undefined })} />
-          </Field>
-          <Field label="To">
-            <input type="date" value={filter.to ?? ''} min={filter.from} onChange={(e) => set({ to: e.target.value || undefined })} />
-          </Field>
-        </>
-      );
-    case 'relDir':
+    case 'folder':
       // Only when the open folder has subfolders.
       if (dirs.length < 2) return null;
       return (
-        <Field label="Folder">
+        <Field label={c.label}>
           <select value={filter.relDir === undefined ? '' : `d:${filter.relDir}`} onChange={(e) => set({ relDir: e.target.value === '' ? undefined : e.target.value.slice(2) })}>
             <option value="">All folders</option>
             {dirs.map((d) => (
@@ -81,10 +62,6 @@ function Control({ id, filter, dirs }: { id: string; filter: GalleryFilter; dirs
           </select>
         </Field>
       );
-    case 'hasLocation':
-      return <Toggle label="Has location" field="hasLocation" />;
-    case 'hasPeople':
-      return <Toggle label="Has people" field="hasPeople" />;
     case 'tags':
       return filter.tags?.length ? (
         <div className="gallery-chip-row" aria-label="Keywords and objects">
@@ -100,12 +77,10 @@ function Control({ id, filter, dirs }: { id: string; filter: GalleryFilter; dirs
       ) : (
         <p className="muted gallery-filter-note">Pick a keyword under What's in it, or type tag:word in the search box.</p>
       );
-    case 'lowQuality':
-      return <Toggle label="Low quality" field="lowQuality" />;
-    case 'nearDuplicates':
-      return <Toggle label="Near-duplicates" field="nearDuplicates" />;
-    default:
-      return null;
+    default: {
+      const unknown: never = c;
+      return unknown;
+    }
   }
 }
 
@@ -149,9 +124,9 @@ export function FilterPanel({ id, dirs, button, onClose }: { id: string; dirs: s
       {FILTER_GROUPS.map((g) => (
         <fieldset key={g} className="gallery-filter-group">
           <legend>{g}</legend>
-          {FILTERS.filter((d) => d.group === g).map((d) => (
-            <Control key={d.id} id={d.id} filter={filter} dirs={dirs} />
-          ))}
+          {FILTERS.flatMap((d) =>
+            d.group === g ? d.controls.map((c, i) => <Control key={`${d.id}:${i}`} c={c} filter={filter} dirs={dirs} />) : [],
+          )}
         </fieldset>
       ))}
     </div>
