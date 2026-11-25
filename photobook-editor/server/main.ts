@@ -1,15 +1,18 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { createApp } from './app';
+import { resolveDirs } from './dirs';
+import { carryOverDevDataOrQuit } from '../../shared/server/devData';
 import { projectRoot, webDir } from '../../shared/server/resources';
 
 // `--production` is the same as NODE_ENV=production, for shells that can't set a variable inline (Windows).
 const production = process.env.NODE_ENV === 'production' || process.argv.includes('--production');
 const root = projectRoot();
-const dataDir = resolve(process.env.PHOTOBOOK_DATA_DIR ?? join(root ?? process.cwd(), 'data', 'photobook-editor'));
-// Read-only photo folders keep their info in a folder shared with Photo Tool, so a star set there reaches the editor.
-const photoInfoFallbackDir = resolve(process.env.PHOTOINFO_FALLBACK_DIR ?? join(root ?? process.cwd(), 'data', 'photoinfo-shared'));
+// ./data/photobook-editor and ./data/photoinfo-shared, or the folders the environment names (dirs.ts).
+const { dataDir, photoInfoFallbackDir, carryOver } = resolveDirs(process.env, root ?? process.cwd());
+// On the default folders, the old one-folder ./data layout is split per program first, once.
+if (carryOver) carryOverDevDataOrQuit(root ?? process.cwd());
 const port = Number(process.env.PHOTOBOOK_PORT ?? 5174);
 
 const webPort = Number(process.env.PHOTOBOOK_WEB_PORT ?? 5173);

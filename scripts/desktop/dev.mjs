@@ -8,7 +8,8 @@
 // both: the editor PHOTOBOOK_WEB_PORT 5173 / PHOTOBOOK_PORT 5174 and ./data/photobook-editor (or
 // PHOTOBOOK_DATA_DIR); Photo Tool PHOTO_TOOL_WEB_PORT 5175 / PHOTO_TOOL_PORT 5176 and ./data/photo-tool
 // (or PHOTO_TOOL_DATA_DIR). Both keep stars for read-only folders in ./data/photoinfo-shared (or
-// PHOTOINFO_FALLBACK_DIR). Both programs' data and profile folders are always given, so neither ever
+// PHOTOINFO_FALLBACK_DIR). The old one-folder ./data layout is split into these first, once
+// (scripts/carry-over-dev-data.ts), unless any of those folders is set by hand. Both programs' data and profile folders are always given, so neither ever
 // moves an old data folder under %APPDATA%. Changes to a program's electron/ or server/ need this
 // command restarted; changes to its page reload by themselves. Photo Tool opens a folder given after
 // the program name: `npm run dev:desktop:photo-tool -- D:\Pictures`.
@@ -37,6 +38,16 @@ const env = {
   [`${prefix}_DESKTOP_DEV_URL`]: `http://127.0.0.1:${webPort}/`,
 };
 delete env.ELECTRON_RUN_AS_NODE;
+
+// First the old one-folder ./data layout is split per program, once (shared/server/devData.ts, whose
+// devDataLayout the folders above match). It is given this command's own environment, before the
+// defaults above fill it in: a data or profile folder chosen by hand means nothing is moved.
+// A move that fails stops here, before anything opens a folder.
+try {
+  execFileSync(process.execPath, [join(root, 'node_modules/tsx/dist/cli.mjs'), join(root, 'scripts/carry-over-dev-data.ts')], { cwd: root, env: process.env, stdio: 'inherit' });
+} catch {
+  process.exit(1); // the script has said why
+}
 
 const electron = ensureElectron();
 execFileSync(process.execPath, [join(root, 'scripts/desktop/build.mjs'), '--program', program, '--dev'], { cwd: root, stdio: 'inherit' });
