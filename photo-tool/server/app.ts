@@ -15,7 +15,7 @@ import { MODEL_CATALOGUE, type ModelChoice } from '../core/tagModels';
 import { modelRoutes } from './models/routes';
 import { readTaggingSettings } from './models/store';
 import { workerBackend, type TaggerBackend } from './tagging/backend';
-import { TaggingQueue } from './tagging/queue';
+import { NoDescriptionError, TaggingQueue } from './tagging/queue';
 import { cpus } from 'node:os';
 
 // The gallery's HTTP API. Bound to 127.0.0.1 by main.ts (or the desktop shell) — never reachable from the network.
@@ -45,6 +45,8 @@ export interface PhotoTags {
   description: string | null;
   keywords: string[];
   objects: { label: string; count: number }[];
+  /** True when the description is the chosen descriptions model's own (so Regenerate can replace it); else absent. */
+  canRegenerate?: true;
 }
 
 /** The most keywords a photo shows. */
@@ -179,6 +181,7 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
         description: d?.status === 'done' ? d.description : null,
         keywords: k?.status === 'done' ? [...k.keywords].sort((a, b) => b.score - a.score).slice(0, MAX_KEYWORDS).map((w) => w.label) : [],
         objects: d?.status === 'done' ? d.objects : [],
+        ...(d?.status === 'done' && d.modelId === s.describe ? { canRegenerate: true as const } : {}),
       };
     };
   };
@@ -545,6 +548,23 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     if (typeof job !== 'string' || !Array.isArray(paths) || !paths.every((p) => typeof p === 'string')) throw new HttpError(400, 'Send the job and a list of paths.');
     if (jobIds.at(-1) === job) tagging.focus(paths as string[]);
     res.status(204).end();
+  }));
+
+  // Regenerate: the chosen descriptions model writes a new description of one photo of the open folder (only the
+  // sentence changes, in this catalogue). Replies with the photo's tags.
+  app.post('/api/gallery/tagging/regenerate', wrap(async (req, res) => {
+    const { job, path } = req.body ?? {};
+    if (typeof job !== 'string' || typeof path !== 'string') throw new HttpError(400, 'Send the job and the photo path.');
+    if (jobIds.at(-1) !== job) throw new HttpError(404, 'That folder is no longer open. Open it again.');
+    const photo = openPhoto(path);
+    if (!existsSync(photo.path)) throw new HttpError(404, 'That photo is not in the open folder any more.');
+    try {
+      await tagging.regenerate(photo);
+    } catch (e) {
+      if (e instanceof NoDescriptionError) throw new HttpError(409, e.message);
+      throw e;
+    }
+    res.json(tagsOf([photo])(photo));
   }));
 
   app.get('/api/places', (_req, res) => res.json(listPlaces()));

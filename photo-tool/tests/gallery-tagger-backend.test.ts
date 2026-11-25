@@ -44,6 +44,14 @@ describe('worker backend', () => {
     await expect(call).rejects.toBeInstanceOf(BackendLostError);
     await backend.close();
   });
+
+  it('a caption (Regenerate) before load is refused as a lost descriptions model, not hung', async () => {
+    const backend = workerBackend(1, taggingWorkerSource());
+    const call = backend.caption(join(TRIP, 'day2-04-lake.jpg'));
+    await expect(call).rejects.toThrow(/descriptions model is not loaded/i);
+    await expect(call).rejects.toBeInstanceOf(BackendLostError);
+    await backend.close();
+  });
 });
 
 describe.skipIf(!MODELS)('real models', () => {
@@ -60,6 +68,13 @@ describe.skipIf(!MODELS)('real models', () => {
     expect(d.description.length).toBeGreaterThan(20);
     expect(d.description).not.toMatch(/<|>/);
     expect(Array.isArray(d.objects)).toBe(true);
+    // Regenerate samples: a few tries give at least one other wording, and never the tags.
+    const captions = [await backend.caption(lake), await backend.caption(lake), await backend.caption(lake)];
+    for (const c of captions) {
+      expect(c.length).toBeGreaterThan(10);
+      expect(c).not.toMatch(/<|>/);
+    }
+    expect(new Set([d.description, ...captions]).size).toBeGreaterThan(1);
     const k = await backend.keywords(lake);
     expect(k.keywords.length).toBeGreaterThan(0);
     expect(k.keywords.length).toBeLessThanOrEqual(12);

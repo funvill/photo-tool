@@ -139,6 +139,96 @@ describe('photo tagging routes', () => {
       expect(lake.tags.state).toBe('waiting');
       expect(lake.tags.description).toBe('A picture of lake.');
       expect(lake.tags.objects).toEqual([{ label: 'lake', count: 2 }]);
+      // Another model's sentence: Regenerate is not offered for it.
+      expect(lake.tags).not.toHaveProperty('canRegenerate');
+    } finally {
+      await s.stop();
+    }
+  });
+});
+
+describe('#2 POST /api/gallery/tagging/regenerate', () => {
+  type Tags = { state: string; description: string | null; objects: unknown[]; canRegenerate?: boolean };
+  const itemsOf = async (s: Awaited<ReturnType<typeof serve>>, job: string) =>
+    (await s.api('GET', `/api/gallery/items?job=${job}`)).body as { fileName: string; path: string; tags: Tags }[];
+
+  it("replaces the chosen model's description with a new one and returns the photo's tags; objects kept; it lasts", async () => {
+    const s = await serve();
+    try {
+      await s.download(describeSmall.id);
+      await s.choose({ describe: describeSmall.id });
+      const job = await s.open('trip');
+      await s.until((st) => st.job === job && st.done === 3);
+      const lake = (await itemsOf(s, job)).find((i) => i.fileName === 'lake.jpg')!;
+      expect(lake.tags).toMatchObject({ description: 'A picture of lake.', canRegenerate: true });
+      const first = await s.api('POST', '/api/gallery/tagging/regenerate', { job, path: lake.path });
+      expect(first.status).toBe(200);
+      expect(first.body).toEqual({ state: 'done', description: expect.stringMatching(/^Another look at lake \(\d+\)\.$/), keywords: [], objects: [{ label: 'lake', count: 2 }], canRegenerate: true });
+      const second = await s.api('POST', '/api/gallery/tagging/regenerate', { job, path: lake.path });
+      expect(second.body.description).not.toBe(first.body.description);
+      // Kept in the catalogue: the items say the same.
+      expect((await itemsOf(s, job)).find((i) => i.fileName === 'lake.jpg')!.tags.description).toBe(second.body.description);
+    } finally {
+      await s.stop();
+    }
+  });
+
+  it('works while tagging is paused', async () => {
+    const s = await serve();
+    try {
+      await s.download(describeSmall.id);
+      await s.choose({ describe: describeSmall.id });
+      const job = await s.open('trip');
+      await s.until((st) => st.job === job && st.done === 3);
+      await s.choose({ describe: describeSmall.id, paused: true });
+      const lake = (await itemsOf(s, job)).find((i) => i.fileName === 'lake.jpg')!;
+      const r = await s.api('POST', '/api/gallery/tagging/regenerate', { job, path: lake.path });
+      expect(r.status).toBe(200);
+      expect(r.body.description).toMatch(/^Another look at lake/);
+    } finally {
+      await s.stop();
+    }
+  });
+
+  it('400 for a bad body; 404 for a folder no longer open or a photo not in it; 409 with no working descriptions model', async () => {
+    const s = await serve();
+    try {
+      await s.download(describeSmall.id);
+      const job = await s.open('trip');
+      await s.until((st) => st.job === job);
+      const lake = (await itemsOf(s, job)).find((i) => i.fileName === 'lake.jpg')!;
+      expect((await s.api('POST', '/api/gallery/tagging/regenerate', { job })).status).toBe(400);
+      expect((await s.api('POST', '/api/gallery/tagging/regenerate', { job: 'nope', path: lake.path })).status).toBe(404);
+      expect((await s.api('POST', '/api/gallery/tagging/regenerate', { job, path: join(root, 'trip', 'gone.jpg') })).status).toBe(404);
+      // No describe model chosen.
+      const none = await s.api('POST', '/api/gallery/tagging/regenerate', { job, path: lake.path });
+      expect(none.status).toBe(409);
+      expect(none.body.error).toMatch(/no working descriptions model/i);
+      // Chosen, but paused before it looked at the photo: nothing to replace yet.
+      await s.choose({ describe: describeSmall.id, paused: true });
+      expect((await s.api('POST', '/api/gallery/tagging/regenerate', { job, path: lake.path })).status).toBe(409);
+      // Another folder opened: the first one's job is gone.
+      const other = await s.open('other');
+      await s.until((st) => st.job === other);
+      expect((await s.api('POST', '/api/gallery/tagging/regenerate', { job, path: lake.path })).status).toBe(404);
+    } finally {
+      await s.stop();
+    }
+  });
+
+  it('a backend failure is a 500 with its message, and the old text stays', async () => {
+    const real = fakeBackend();
+    const s = await serve({ ...real, caption: async () => { throw new Error('out of memory'); } });
+    try {
+      await s.download(describeSmall.id);
+      await s.choose({ describe: describeSmall.id });
+      const job = await s.open('trip');
+      await s.until((st) => st.job === job && st.done === 3);
+      const lake = (await itemsOf(s, job)).find((i) => i.fileName === 'lake.jpg')!;
+      const r = await s.api('POST', '/api/gallery/tagging/regenerate', { job, path: lake.path });
+      expect(r.status).toBe(500);
+      expect(r.body.error).toMatch(/out of memory/);
+      expect((await itemsOf(s, job)).find((i) => i.fileName === 'lake.jpg')!.tags.description).toBe('A picture of lake.');
     } finally {
       await s.stop();
     }

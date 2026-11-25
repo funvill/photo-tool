@@ -1712,3 +1712,43 @@ describe('gallery store: search by meaning', () => {
     useGallery.getState().clearFilter();
   });
 });
+
+describe('#2 gallery store: regenerate a description', () => {
+  const tags = { state: 'done' as const, description: 'A picture of lake.', keywords: ['lake'], objects: [{ label: 'lake', count: 2 }], canRegenerate: true as const };
+  const lake = (over: Partial<GalleryItem> = {}) => item({ path: 'D:\Trip\lake.jpg', fileName: 'lake.jpg', key: 'k-lake', tags, ...over });
+
+  it("puts the new description on that photo only, from the server's reply", async () => {
+    const fresh = { ...tags, description: 'Another look at lake (1).' };
+    routes['POST /api/gallery/tagging/regenerate'] = () => ({ json: fresh });
+    useGallery.setState({ job: 'j1', root: 'D:\Trip', items: [item(), lake()] });
+
+    expect(await useGallery.getState().regenerateDescription('D:\Trip\lake.jpg')).toBe(true);
+
+    expect(calls.find((c) => c.url === '/api/gallery/tagging/regenerate')?.body).toEqual({ job: 'j1', path: 'D:\Trip\lake.jpg' });
+    expect(useGallery.getState().items[1].tags).toEqual(fresh);
+    expect(useGallery.getState().items[0].tags.state).toBe('off');
+    expect(useGallery.getState().toasts).toEqual([]);
+  });
+
+  it("a refusal keeps the old text and toasts the server's message", async () => {
+    routes['POST /api/gallery/tagging/regenerate'] = () => ({ status: 409, json: { error: 'There is no working descriptions model. Choose one in Settings.' } });
+    useGallery.setState({ job: 'j1', root: 'D:\Trip', items: [lake()] });
+
+    expect(await useGallery.getState().regenerateDescription('D:\Trip\lake.jpg')).toBe(false);
+
+    expect(useGallery.getState().items[0].tags).toEqual(tags);
+    expect(useGallery.getState().toasts).toEqual([expect.objectContaining({ kind: 'error', text: expect.stringMatching(/no working descriptions model/) })]);
+  });
+
+  it('a reply after another folder was opened changes nothing', async () => {
+    let answer: (r: Reply) => void = () => {};
+    routes['POST /api/gallery/tagging/regenerate'] = () => new Promise<Reply>((r) => (answer = r));
+    useGallery.setState({ job: 'j1', root: 'D:\Trip', items: [lake()] });
+    const done = useGallery.getState().regenerateDescription('D:\Trip\lake.jpg');
+    await new Promise((r) => setTimeout(r, 0));
+    useGallery.setState({ job: 'j2', items: [lake()] });
+    answer({ json: { ...tags, description: 'Too late.' } });
+    expect(await done).toBe(false);
+    expect(useGallery.getState().items[0].tags.description).toBe('A picture of lake.');
+  });
+});

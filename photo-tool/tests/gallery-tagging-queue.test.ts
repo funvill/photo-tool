@@ -8,7 +8,7 @@ import { Catalog, type GalleryPhoto } from '../server/catalog';
 import { downloadModel } from '../server/models/download';
 import { modelDir, type TaggingSettings } from '../server/models/store';
 import { BackendLostError, ModelLoadError, type TaggerBackend } from '../server/tagging/backend';
-import { TaggingQueue } from '../server/tagging/queue';
+import { NoDescriptionError, TaggingQueue } from '../server/tagging/queue';
 import { FAKE_CATALOGUE, fakeFetch } from './support/fakeTagging';
 
 const [describeSmall, describeLarge, keywordsSmall, keywordsLarge] = FAKE_CATALOGUE;
@@ -45,6 +45,13 @@ function testBackend() {
       if (gate) await gate;
       if (failOn.has(name(path))) throw new Error('unreadable');
       return { description: `About ${name(path)}.`, objects: [{ label: 'thing', count: 1 }] };
+    },
+    async caption(path) {
+      if (!inWorker.has('describe')) throw new BackendLostError('The tagging worker stopped.');
+      calls.push(`caption:${name(path)}`);
+      if (gate) await gate;
+      if (failOn.has(name(path))) throw new Error('unreadable');
+      return `Again ${name(path)} (${calls.filter((c) => c.startsWith('caption:')).length}).`;
     },
     async keywords(path) {
       if (!inWorker.has('keywords')) throw new BackendLostError('The tagging worker stopped.');
@@ -420,6 +427,130 @@ describe('tagging queue', () => {
     q.startJob('j1', () => [photo('a')]);
     await idle(q);
     expect(t.loads).toEqual([`describe:${describeSmall.id}`]);
+  });
+});
+
+describe('#2 regenerate a description', () => {
+  const described = async (q: TaggingQueue, list: GalleryPhoto[]) => {
+    q.startJob('j1', () => list);
+    await idle(q);
+  };
+  const row = (key: string, id = describeSmall.id) => catalog.tagsFor([key], [id]).get(key)?.[0];
+
+  it('new text replaces the old in the catalogue; objects are kept; stamp bumps; nothing else is looked at again', async () => {
+    await install(describeSmall, keywordsSmall);
+    const t = testBackend();
+    const q = makeQueue(t.backend);
+    q.setSettings(settings({ describe: describeSmall.id, keywords: keywordsSmall.id }));
+    const a = photo('a');
+    await described(q, [a]);
+    const before = q.status().stamp;
+    expect(await q.regenerate(a)).toBe('Again a (1).');
+    expect(row('ck-a')).toMatchObject({ status: 'done', description: 'Again a (1).', objects: [{ label: 'thing', count: 1 }] });
+    expect(await q.regenerate(a)).toBe('Again a (2).');
+    expect(row('ck-a')?.description).toBe('Again a (2).');
+    expect(row('ck-a', keywordsSmall.id)?.keywords).toEqual([{ label: 'a', score: 0.9 }]);
+    expect(q.status().stamp).toBe(before + 2);
+    expect(t.calls).toEqual(['describe:a', 'keywords:a', 'caption:a', 'caption:a']);
+  });
+
+  it('an error when no describe model is chosen, it is not installed, or it is broken; and when this photo has no description from it yet', async () => {
+    const t = testBackend();
+    const q = makeQueue(t.backend);
+    const a = photo('a');
+    q.setSettings(settings({}));
+    await expect(q.regenerate(a)).rejects.toBeInstanceOf(NoDescriptionError);
+    q.setSettings(settings({ describe: describeSmall.id }));
+    await expect(q.regenerate(a)).rejects.toThrow(/no working descriptions model/i); // chosen, not installed
+    await install(describeSmall);
+    q.setSettings(settings({ describe: describeSmall.id, paused: true }));
+    await expect(q.regenerate(a)).rejects.toThrow(/has not described this photo yet/i); // installed, but not looked at yet
+    t.failLoadOf('describe');
+    q.setSettings(settings({ describe: describeSmall.id, paused: true }));
+    catalog.putTags({ contentKey: 'ck-a', modelId: describeSmall.id, status: 'done', description: 'Old.', keywords: [], objects: [], embedding: null, error: null });
+    await expect(q.regenerate(a)).rejects.toBeInstanceOf(NoDescriptionError); // will not load
+    expect(q.status().notWorking).toEqual(['describe']);
+    expect(row('ck-a')?.description).toBe('Old.');
+    expect(t.calls).toEqual([]);
+  });
+
+  it('a backend error keeps the old text and is thrown as it is (not a missing model)', async () => {
+    await install(describeSmall);
+    const t = testBackend();
+    const q = makeQueue(t.backend);
+    q.setSettings(settings({ describe: describeSmall.id }));
+    const a = photo('a');
+    await described(q, [a]);
+    t.failOn.add('a');
+    const err = await q.regenerate(a).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(NoDescriptionError);
+    expect((err as Error).message).toBe('unreadable');
+    expect(row('ck-a')?.description).toBe('About a.');
+  });
+
+  it('an empty or blank caption is an error, and the old text stays; a caption is saved trimmed', async () => {
+    await install(describeSmall);
+    const t = testBackend();
+    let reply = '  \n ';
+    const q = makeQueue({ ...t.backend, caption: async () => reply });
+    q.setSettings(settings({ describe: describeSmall.id }));
+    const a = photo('a');
+    await described(q, [a]);
+    const before = q.status().stamp;
+    const err = await q.regenerate(a).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(NoDescriptionError);
+    expect((err as Error).message).toMatch(/empty description/i);
+    expect(row('ck-a')?.description).toBe('About a.');
+    expect(q.status().stamp).toBe(before);
+    reply = '';
+    await expect(q.regenerate(a)).rejects.toThrow(/empty description/i);
+    expect(row('ck-a')?.description).toBe('About a.');
+    reply = '  A boat at dusk. \n';
+    expect(await q.regenerate(a)).toBe('A boat at dusk.');
+    expect(row('ck-a')?.description).toBe('A boat at dusk.');
+  });
+
+  it('a lost backend: the model is loaded again and the caption asked once more', async () => {
+    await install(describeSmall);
+    const t = testBackend();
+    const q = makeQueue(t.backend);
+    q.setSettings(settings({ describe: describeSmall.id }));
+    const a = photo('a');
+    await described(q, [a]);
+    t.restart(); // the worker restarted since: it forgot the model
+    expect(await q.regenerate(a)).toBe('Again a (1).');
+    expect(t.loads).toEqual([`describe:${describeSmall.id}`, `describe:${describeSmall.id}`]);
+    expect(row('ck-a')?.description).toBe('Again a (1).');
+  });
+
+  it('a backend lost on every try gives up with a clear error, old text kept', async () => {
+    await install(describeSmall);
+    const t = testBackend();
+    const q = makeQueue(t.backend);
+    q.setSettings(settings({ describe: describeSmall.id }));
+    const a = photo('a');
+    await described(q, [a]);
+    t.forgetAlways();
+    await expect(q.regenerate(a)).rejects.toBeInstanceOf(BackendLostError);
+    expect(row('ck-a')?.description).toBe('About a.');
+  });
+
+  it('works while tagging is paused, loading the model when tagging has not', async () => {
+    await install(describeSmall);
+    catalog.putTags({ contentKey: 'ck-a', modelId: describeSmall.id, status: 'done', description: 'Old.', keywords: [], objects: [{ label: 'boat', count: 1 }], embedding: null, error: null });
+    const t = testBackend();
+    const q = makeQueue(t.backend);
+    q.setSettings(settings({ describe: describeSmall.id, paused: true }));
+    const a = photo('a');
+    q.startJob('j1', () => [a, photo('b')]);
+    expect(await q.regenerate(a)).toBe('Again a (1).');
+    await idle(q);
+    expect(t.loads).toEqual([`describe:${describeSmall.id}`]);
+    expect(t.calls).toEqual(['caption:a']); // b stays untagged: still paused
+    expect(row('ck-a')).toMatchObject({ description: 'Again a (1).', objects: [{ label: 'boat', count: 1 }] });
+    expect(q.status()).toMatchObject({ paused: true, running: false });
   });
 });
 

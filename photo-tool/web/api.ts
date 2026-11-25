@@ -88,6 +88,8 @@ export const galleryApi = {
   setTaggingSettings: (s: TaggingSettings) => call<TaggingSettings>('PUT', '/api/gallery/tagging/settings', s),
   taggingStatus: () => call<TaggingStatus>('GET', '/api/gallery/tagging/status'),
   taggingFocus: (job: string, paths: string[]) => call<void>('POST', '/api/gallery/tagging/focus', { job, paths }),
+  /** A new description of the photo from the chosen descriptions model; replies with the photo's tags. */
+  regenerateDescription: (job: string, path: string) => call<PhotoTags>('POST', '/api/gallery/tagging/regenerate', { job, path }),
   search: (job: string, q: string) => call<{ paths: string[] }>('GET', `/api/gallery/search?job=${encodeURIComponent(job)}&q=${encodeURIComponent(q)}`),
 };
 

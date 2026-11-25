@@ -10,7 +10,11 @@ import {
 
 export type WorkerRequest =
   | { id: number; op: 'load'; part: 'describe' | 'keywords'; dir: string; dtype: string; threads: number; keywordThreshold: number; vocabulary: string[] }
-  | { id: number; op: 'describe' | 'keywords'; path: string }
+  /** describe with `sample`: the caption is sampled (a new wording each time); objects stay greedy. */
+  | { id: number; op: 'describe'; path: string; sample?: boolean }
+  | { id: number; op: 'keywords'; path: string }
+  /** The caption only, sampled: what Regenerate asks for (no object detection). */
+  | { id: number; op: 'caption'; path: string }
   | { id: number; op: 'embedText'; text: string };
 export type WorkerReply = { id: number; ok: true; result: unknown } | { id: number; ok: false; error: string; load?: boolean; lost?: boolean };
 /**
@@ -94,19 +98,33 @@ async function load(r: Extract<WorkerRequest, { op: 'load' }>) {
   return null;
 }
 
-async function florenceTask(image: Any, task: string, maxTokens: number) {
+/**
+ * Greedy decoding gives the same sentence every time; Regenerate samples instead (multinomial over the 50 likeliest
+ * tokens, a little cooler than the model's own spread), so each try can word it differently.
+ */
+const SAMPLING = { do_sample: true, temperature: 0.7, top_k: 50 };
+
+async function florenceTask(image: Any, task: string, maxTokens: number, sample = false) {
   const { model, processor, tokenizer } = florence!;
   const vision = await processor(image);
   const text = tokenizer(processor.construct_prompts(task));
-  const ids = await model.generate({ ...text, ...vision, max_new_tokens: maxTokens });
+  const ids = await model.generate({ ...text, ...vision, max_new_tokens: maxTokens, ...(sample ? SAMPLING : {}) });
   const out = tokenizer.batch_decode(ids, { skip_special_tokens: false })[0];
   return processor.post_process_generation(out, task, image.size)[task];
 }
 
-async function describe(path: string) {
+const captionOf = async (image: Any, sample: boolean) =>
+  String((await florenceTask(image, '<MORE_DETAILED_CAPTION>', 100, sample)) ?? '').replace(/<[^>]*>/g, '').trim();
+
+async function caption(path: string) {
+  if (!florence) throw new NotLoaded('The descriptions model is not loaded.');
+  return captionOf(await RawImage.read(path), true);
+}
+
+async function describe(path: string, sample = false) {
   if (!florence) throw new NotLoaded('The descriptions model is not loaded.');
   const image = await RawImage.read(path);
-  const caption = String((await florenceTask(image, '<MORE_DETAILED_CAPTION>', 100)) ?? '').replace(/<[^>]*>/g, '').trim();
+  const caption = await captionOf(image, sample);
   const od = (await florenceTask(image, '<OD>', 256)) as { labels?: string[] } | undefined;
   const counts = new Map<string, number>();
   for (const l of od?.labels ?? []) {
@@ -143,7 +161,9 @@ async function handle(r: WorkerRequest): Promise<WorkerReply> {
     let result: unknown;
     if (r.op === 'load') result = await load(r);
     else if (r.op === 'embedText') result = await embedText(r.text);
-    else result = r.op === 'describe' ? await describe(r.path) : await keywords(r.path);
+    else if (r.op === 'describe') result = await describe(r.path, r.sample);
+    else if (r.op === 'caption') result = await caption(r.path);
+    else result = await keywords(r.path);
     return { id: r.id, ok: true, result };
   } catch (e) {
     return { id: r.id, ok: false, error: e instanceof Error ? e.message : String(e), load: r.op === 'load', lost: e instanceof NotLoaded };

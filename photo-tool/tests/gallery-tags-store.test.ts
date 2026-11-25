@@ -105,6 +105,23 @@ describe('tag rows', () => {
     expect([...catalog.embeddings(['k1', 'k2'], 'm1').entries()]).toEqual([['k1', embedding]]);
     catalog.close();
   });
+
+  it('setDescription replaces only the description of a done row (objects, keywords and embedding kept); a failed or missing row is left alone', () => {
+    const catalog = new Catalog(dataDir);
+    const embedding = new Float32Array([0.6, 0.8]);
+    catalog.putTags(tagRow('k1', 'm1', { description: 'A dog.', keywords: [{ label: 'dog', score: 0.9 }], objects: [{ label: 'dog', count: 2 }], embedding }));
+    catalog.putTags(tagRow('k2', 'm1', { status: 'failed', error: 'unreadable' }));
+    expect(catalog.setDescription('k1', 'm1', 'A brown dog on grass.')).toBe(true);
+    expect(catalog.tagsFor(['k1'], ['m1']).get('k1')![0]).toEqual(
+      tagRow('k1', 'm1', { description: 'A brown dog on grass.', keywords: [{ label: 'dog', score: 0.9 }], objects: [{ label: 'dog', count: 2 }], embedding: null }),
+    );
+    expect([...catalog.embeddings(['k1'], 'm1').values()]).toEqual([embedding]);
+    expect(catalog.setDescription('k2', 'm1', 'Nope.')).toBe(false);
+    expect(catalog.tagsFor(['k2'], ['m1']).get('k2')![0]).toMatchObject({ status: 'failed', description: null });
+    expect(catalog.setDescription('k3', 'm1', 'Nope.')).toBe(false);
+    expect(catalog.tagsFor(['k3'], ['m1']).size).toBe(0);
+    catalog.close();
+  });
 });
 
 describe('items carry tags', () => {
@@ -154,7 +171,7 @@ describe('items carry tags', () => {
     catalog.putTags(tagRow(a.contentKey, describeSmall.id.replace('small', 'large'), { description: 'From the other model.' }));
     catalog.close();
     const got = await items();
-    expect(got.find((i) => i.fileName === 'a.jpg')!.tags).toEqual({ state: 'done', description: 'A red square.', keywords: [], objects: [{ label: 'square', count: 1 }] });
+    expect(got.find((i) => i.fileName === 'a.jpg')!.tags).toEqual({ state: 'done', description: 'A red square.', keywords: [], objects: [{ label: 'square', count: 1 }], canRegenerate: true });
     expect(got.find((i) => i.fileName === 'b.jpg')!.tags).toEqual({ state: 'waiting', description: null, keywords: [], objects: [] });
   });
 
