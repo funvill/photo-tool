@@ -279,7 +279,10 @@ describe('architecture boundaries', () => {
       const allowed = (u: string) =>
         /^https?:\/\/(127\.0\.0\.1|localhost)/.test(u) ||
         (tileFiles.has(join(f)) && /^https:\/\/tile\.openstreetmap\.org(\/\{z\}\/\{x\}\/\{y\}\.png)?$/.test(u)) ||
-        (join(f) === join('photo-tool/server/models/download.ts') && u === 'https://huggingface.co/${m.repo}/resolve/${m.revision}/${f.path}');
+        (join(f) === join('photo-tool/server/models/download.ts') && u === 'https://huggingface.co/${m.repo}/resolve/${m.revision}/${f.path}') ||
+        // The third: checking for updates and leaving feedback, both on GitHub, the address written down once
+        // (shared/electron/updateRules.ts). Only the desktop shell uses it; the window's guard is unchanged.
+        (join(f) === join('shared/electron/updateRules.ts') && u === 'https://github.com');
       expect(urls.filter((u) => !allowed(u)), f).toEqual([]);
     }
   });
