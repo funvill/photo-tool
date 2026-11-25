@@ -112,10 +112,12 @@ Three were considered.
 Electron main process
  ├─ picks data folder (per-user app data, or PHOTOBOOK_DATA_DIR)
  ├─ starts the server in a utility process ──► createApp(dataDir, { staticDir, resourceRoot })
- │                                              listening on 127.0.0.1:<free port>
+ │                                              listening on 127.0.0.1:<last port, else a free one>
  ├─ opens a window at http://127.0.0.1:<port>   (same React build as the web interface)
  └─ preload script exposes a few native extras: folder picker, "show in folder", relaunch
 ```
+
+- **The server keeps its port.** The page's origin includes the port, and the browser keeps `localStorage` per origin, so a new port at each start would lose the page's own settings (thumbnail size, panel widths, the editor's last folder). The shell saves the port the server got in `<profile folder>/server-port.json` and asks for it again next time. If that port is taken (`EADDRINUSE`) or refused (`EACCES`), the server takes any free port: that one start loses the settings, and the next start keeps the new port. The window always loads from the port the server reports in its `ready` message, never from the saved number, so another program on the remembered port can never serve the app's page. Development keeps its fixed ports, and a self-test takes any free port and saves nothing. (Issue #11.)
 
 - **Server in a utility process, not the main process.** PDF export is minutes of CPU-bound JavaScript (184 s for the 2023 trial); in the main process it would freeze the window.
 - **The page stays a normal web page:** context isolation on, Node integration off. The preload exposes a handful of functions, and the editor checks for them (`window.desktop?.pickFolder`) so the same build runs in a plain browser.

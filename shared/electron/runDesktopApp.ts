@@ -1,5 +1,5 @@
 // The desktop shell both programs run in: starts the program's local server in a utility process on a
-// free port of 127.0.0.1, shows its page from it in one window, and stops the server when the app quits.
+// port of 127.0.0.1 (the one it had last time, so the page keeps its origin and settings), shows its page from it in one window, and stops the server when the app quits.
 // Everything that differs between the editor and Photo Tool (names, page, menu, IPC, network
 // exceptions, self-test) comes in through a DesktopProgram; nothing here imports a program.
 //
@@ -11,7 +11,7 @@ import { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, screen, session, 
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { LICENCE_FILE, MIN_WINDOW, NOTICES_BUTTON, NOTICES_FILE, describeAbout, describeFailure, parseSelfTest, restoreWindow, type ProgramNames, type SelfTestArgs, type WindowState } from './config';
+import { LICENCE_FILE, MIN_WINDOW, NOTICES_BUTTON, NOTICES_FILE, describeAbout, describeFailure, parseSavedPort, parseSelfTest, restoreWindow, serverPortRequest, type ProgramNames, type SelfTestArgs, type WindowState } from './config';
 import { CarryOverError, carryOverRefusal, prepareProgramFolders } from './dataFolders';
 import { isAppNavigation, requestHost, type GuardOptions } from './netGuard';
 import { SELF_TEST_CONTROL_URLS, type SelfTestContext, type Step } from './selfTest';
@@ -237,6 +237,29 @@ export function runDesktopApp(program: DesktopProgram): void {
     resourceRoot,
   };
 
+  // The page's origin includes the port, and localStorage is kept per origin: the installed app asks
+  // for the port it had last time so the page keeps its settings. Never in development (fixed ports)
+  // or a self-test (any free port). The window still loads only from the port the server reports.
+  const rememberPort = !devUrl && !selfTest;
+  const portFile = () => join(layout.profileDir, 'server-port.json');
+  function readSavedPort(): number | null {
+    try {
+      return parseSavedPort(JSON.parse(readFileSync(portFile(), 'utf8')));
+    } catch {
+      return null;
+    }
+  }
+  function saveServerPort(port: number) {
+    try {
+      mkdirSync(layout.profileDir, { recursive: true });
+      const tmp = `${portFile()}.tmp`;
+      writeFileSync(tmp, JSON.stringify({ port }));
+      renameSync(tmp, portFile());
+    } catch (e) {
+      log('could not save the server port', String(e));
+    }
+  }
+
   function startServer(): Promise<number> {
     return new Promise((done, fail) => {
       let ready = false;
@@ -272,13 +295,15 @@ export function runDesktopApp(program: DesktopProgram): void {
         if (!ready) fail(new Error(`The local server stopped while starting (exit code ${code}).\n${serverOutput}`));
         else if (!quitting) void fatal('run', `The local server stopped unexpectedly (exit code ${code}).\n${serverOutput}`);
       });
+      // In development the Vite dev server sends the API to a fixed port: ${PREFIX}_PORT, or by default the one
+      // above the page's (5173/5174 for the editor, 5175/5176 for Photo Tool).
+      const portRequest = serverPortRequest({ devUrl, envPort: envVar('PORT'), selfTest: !!selfTest, saved: rememberPort ? readSavedPort() : null });
+      log('asking the server for port', portRequest);
       const start: HostMessage = {
         type: 'start',
         dataDir: layout.dataDir,
         photoInfoFallbackDir: sharedPhotoInfo,
-        // In development the Vite dev server sends the API to this port: ${PREFIX}_PORT, or by default the one
-        // above the page's (5173/5174 for the editor, 5175/5176 for Photo Tool).
-        port: devUrl ? Number(envVar('PORT') ?? Number(new URL(devUrl).port) + 1) : 0,
+        ...portRequest,
         resourceRoot: resourceRoot(),
         devWebUrl: devUrl,
         ...program.startMessage(ctx),
@@ -589,6 +614,7 @@ export function runDesktopApp(program: DesktopProgram): void {
       return fatal('start', String((e as Error)?.message ?? e));
     }
     log('server ready', { port: serverPort });
+    if (rememberPort) saveServerPort(serverPort);
     win = createWindow();
     program.onWindow?.(win);
     const base = devUrl ?? `http://127.0.0.1:${serverPort}/`;

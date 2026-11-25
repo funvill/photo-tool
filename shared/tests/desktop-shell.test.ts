@@ -91,6 +91,43 @@ describe('the window', () => {
   });
 });
 
+describe('the local server\'s port', () => {
+  const main = read('shared/electron/runDesktopApp.ts');
+  const code = main
+    .split('\n')
+    .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+    .join('\n');
+
+  it('asks for the port serverPortRequest gives, with its fallback flag', () => {
+    expect(code).toMatch(/serverPortRequest\(\{[^}]*saved:/);
+    expect(code).toMatch(/\.\.\.portRequest,/);
+    expect(code).not.toMatch(/port: devUrl \?/);
+    // The program's own fields come after, as before.
+    expect(code.indexOf('...portRequest,')).toBeLessThan(code.indexOf('...program.startMessage(ctx)'));
+  });
+
+  it('keeps it in server-port.json beside window-state.json, written to a temp file and renamed', () => {
+    expect(code).toContain("join(layout.profileDir, 'server-port.json')");
+    expect(code).toMatch(/parseSavedPort\(JSON\.parse\(readFileSync\(portFile\(\)/);
+    expect(code).toMatch(/writeFileSync\(tmp, JSON\.stringify\(\{ port \}\)\)[\s\S]{0,80}renameSync\(tmp, portFile\(\)\)/);
+    expect(code).toContain("log('could not save the server port'");
+  });
+
+  it('saves the port from ready only outside development and self-tests', () => {
+    expect(code).toContain('const rememberPort = !devUrl && !selfTest;');
+    expect(code).toMatch(/saved: rememberPort \? readSavedPort\(\) : null/);
+    expect(code).toMatch(/serverPort = await startServer\(\);[\s\S]{0,300}if \(rememberPort\) saveServerPort\(serverPort\);/);
+    // Exactly one call site, behind that guard.
+    expect(code.match(/saveServerPort\(/g)).toHaveLength(2); // the definition and the guarded call
+  });
+
+  it('loads the window from the port in ready, never the saved number', () => {
+    expect(code).toContain('const base = devUrl ?? `http://127.0.0.1:${serverPort}/`;');
+    expect(code).toContain('`http://127.0.0.1:${serverPort}`');
+    expect(code).not.toMatch(/127\.0\.0\.1:\$\{(saved|portRequest)/);
+  });
+});
+
 describe('the shell', () => {
   it('has no updater and no crash reporter', () => {
     const code = ['runDesktopApp', 'serverHost', 'selfTest', 'dataFolders', 'config', 'netGuard']

@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_WINDOW, MIN_WINDOW, NOTICES_BUTTON, dataLayout, describeAbout, describeFailure, launchFolder, parseSelfTest, photoInfoFallbackDir, restoreWindow, selfTestOverlap } from '../electron/config';
+import { DEFAULT_WINDOW, MIN_WINDOW, NOTICES_BUTTON, dataLayout, describeAbout, describeFailure, launchFolder, parseSelfTest, parseSavedPort, photoInfoFallbackDir, restoreWindow, selfTestOverlap, serverPortRequest } from '../electron/config';
 
 const root = resolve(__dirname, '../..');
 
@@ -160,6 +160,34 @@ describe('remembered window place', () => {
 
   it('never opens smaller than the minimum', () => {
     expect(restoreWindow({ bounds: { x: 0, y: 0, width: 10, height: 10 } }, screens).bounds).toMatchObject(MIN_WINDOW);
+  });
+});
+
+describe('remembered server port', () => {
+  it('accepts only a whole port number from 1024 to 65535', () => {
+    expect(parseSavedPort({ port: 52659 })).toBe(52659);
+    expect(parseSavedPort({ port: 1024 })).toBe(1024);
+    expect(parseSavedPort({ port: 65535 })).toBe(65535);
+    for (const raw of [{ port: '52659' }, { port: 80 }, { port: 1023 }, { port: 70000 }, { port: 65536 }, { port: 52659.5 }, { port: NaN }, { port: null }, {}, [], null, undefined, 'x', 52659]) {
+      expect(parseSavedPort(raw), JSON.stringify(raw)).toBeNull();
+    }
+  });
+
+  it('in development keeps the port the Vite dev server sends the API to, with no fallback', () => {
+    expect(serverPortRequest({ devUrl: 'http://127.0.0.1:5175/', selfTest: false, saved: 52659 })).toEqual({ port: 5176, fallbackToAny: false });
+    expect(serverPortRequest({ devUrl: 'http://127.0.0.1:5173/', envPort: '6000', selfTest: false, saved: null })).toEqual({ port: 6000, fallbackToAny: false });
+  });
+
+  it('in a self-test takes any free port, whatever was saved', () => {
+    expect(serverPortRequest({ selfTest: true, saved: 52659 })).toEqual({ port: 0, fallbackToAny: false });
+  });
+
+  it('asks for the saved port, falling back to any free one', () => {
+    expect(serverPortRequest({ selfTest: false, saved: 52659 })).toEqual({ port: 52659, fallbackToAny: true });
+  });
+
+  it('with nothing saved takes any free port', () => {
+    expect(serverPortRequest({ selfTest: false, saved: null })).toEqual({ port: 0, fallbackToAny: false });
   });
 });
 
