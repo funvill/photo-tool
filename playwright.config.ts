@@ -5,15 +5,14 @@ import { defineConfig } from '@playwright/test';
 // moved (PHOTOBOOK_E2E_PORT, PHOTOBOOK_E2E_DATA_DIR) when something else is using them.
 const PORT = Number(process.env.PHOTOBOOK_E2E_PORT ?? 5185);
 const DATA_DIR = process.env.PHOTOBOOK_E2E_DATA_DIR ?? 'test-results/e2e-data';
-// The gallery program (tests/e2e/gallery.spec.ts) has its own server, port and throwaway folder.
-const GALLERY_PORT = Number(process.env.PHOTOBOOK_E2E_GALLERY_PORT ?? 5186);
-const GALLERY_DIR = process.env.PHOTOBOOK_E2E_GALLERY_DIR ?? 'test-results/e2e-gallery';
+// Photo Tool (photo-tool/tests/e2e/gallery.spec.ts) has its own server, port and throwaway folders.
+const PHOTO_TOOL_PORT = Number(process.env.PHOTO_TOOL_E2E_PORT ?? 5186);
+const PHOTO_TOOL_DIR = 'test-results/e2e-photo-tool';
+const PHOTO_TOOL_PHOTOINFO_DIR = 'test-results/e2e-photo-tool-photoinfo';
 
 // One command line that both cmd.exe and sh run: no `rm`, and no `NAME=value` in front (the
 // variables go in `env` below). The folder is emptied by Node, which reads it from the environment.
 const emptyDir = (name: string) => `node -e "require('node:fs').rmSync(process.env.${name}, { recursive: true, force: true })"`;
-// The gallery's server does not build: stop at once, saying why, when the editor's build has not made its page.
-const needGalleryPage = `node -e "if (!require('node:fs').existsSync('dist/web/gallery.html')) { console.error('dist/web/gallery.html is missing: the editor web server (vite build) must start first'); process.exit(1) }"`;
 
 export default defineConfig({
   testDir: 'tests/e2e',
@@ -23,11 +22,10 @@ export default defineConfig({
   workers: 1,
   use: { baseURL: `http://127.0.0.1:${PORT}`, channel: 'chrome', viewport: { width: 1440, height: 900 } },
   projects: [
-    { name: 'editor', testIgnore: /gallery\.spec\.ts$/ },
-    { name: 'gallery', testMatch: /gallery\.spec\.ts$/, use: { baseURL: `http://127.0.0.1:${GALLERY_PORT}` } },
+    { name: 'editor' },
+    { name: 'photo-tool', testDir: 'photo-tool/tests/e2e', use: { baseURL: `http://127.0.0.1:${PHOTO_TOOL_PORT}` } },
   ],
-  // Started one after the other, in this order: the editor's command builds dist/web (the gallery's
-  // page included), so the gallery's server only has to start.
+  // Started one after the other, in this order. Each program builds its own page.
   webServer: [
     {
       command: `${emptyDir('PHOTOBOOK_DATA_DIR')} && vite build && tsx src/server/main.ts`,
@@ -37,11 +35,10 @@ export default defineConfig({
       timeout: 120_000,
     },
     {
-      command: `${needGalleryPage} && ${emptyDir('PHOTOBOOK_GALLERY_DATA_DIR')} && tsx src/gallery/server/main.ts`,
-      // The editor data folder (where photo info for read-only folders goes) is inside the throwaway one too.
-      // Photo tagging with fake models served from memory (tests/support/fakeTagging.ts): never the network.
-      env: { NODE_ENV: 'production', PHOTOBOOK_GALLERY_PORT: String(GALLERY_PORT), PHOTOBOOK_GALLERY_DATA_DIR: GALLERY_DIR, PHOTOBOOK_DATA_DIR: `${GALLERY_DIR}/editor`, PHOTOBOOK_GALLERY_FAKE_TAGGING: '1' },
-      url: `http://127.0.0.1:${GALLERY_PORT}/api/health`,
+      command: `${emptyDir('PHOTO_TOOL_DATA_DIR')} && ${emptyDir('PHOTOINFO_FALLBACK_DIR')} && vite build --config photo-tool/vite.config.ts && tsx photo-tool/server/main.ts`,
+      // Photo tagging with fake models served from memory (photo-tool/tests/support/fakeTagging.ts): never the network.
+      env: { NODE_ENV: 'production', PHOTO_TOOL_PORT: String(PHOTO_TOOL_PORT), PHOTO_TOOL_DATA_DIR: PHOTO_TOOL_DIR, PHOTOINFO_FALLBACK_DIR: PHOTO_TOOL_PHOTOINFO_DIR, PHOTO_TOOL_FAKE_TAGGING: '1' },
+      url: `http://127.0.0.1:${PHOTO_TOOL_PORT}/api/health`,
       reuseExistingServer: false,
       timeout: 120_000,
     },

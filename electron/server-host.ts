@@ -1,6 +1,6 @@
 // Runs the local server (src/server/app.ts, the same one `npm start` runs) inside an Electron
 // utility process, so a long PDF export never freezes the window; with `kind: 'gallery'`, the
-// gallery's server (src/gallery/server/app.ts) instead. The main process sends
+// gallery's server (photo-tool/server/app.ts) instead. The main process sends
 // { type: 'start', ... }, gets { type: 'ready', port } or { type: 'error', error } back, and sends
 // { type: 'stop' } before quitting so the database is closed properly.
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
@@ -12,7 +12,7 @@ import { taggingWorkerPath } from './config';
 
 export interface StartMessage {
   type: 'start';
-  /** Which server: the editor's (src/server/app.ts) or the gallery's (src/gallery/server/app.ts). */
+  /** Which server: the editor's (src/server/app.ts) or the gallery's (photo-tool/server/app.ts). */
   kind: 'editor' | 'gallery';
   dataDir: string;
   /** Gallery only: where photo info for read-only folders is kept (the editor's `<dataDir>/photoinfo`). */
@@ -48,13 +48,14 @@ async function createServer(msg: StartMessage, post: (m: HostReply) => void): Pr
   // this way the reason reaches the main process as a message.
   if (msg.kind === 'gallery') {
     if (!msg.photoInfoFallbackDir) throw new Error('The gallery needs photoInfoFallbackDir.');
-    const { createGalleryApp } = await import('../src/gallery/server/app');
+    const { createGalleryApp } = await import('../photo-tool/server/app');
     return createGalleryApp(msg.dataDir, {
       photoInfoFallbackDir: msg.photoInfoFallbackDir,
       // Built beside this bundle by scripts/desktop/build.mjs (both the packaged and the development build); run
       // from app.asar.unpacked in the installed app.
       tagging: { workerFile: taggingWorkerPath(__dirname) },
-      ...(msg.resourceRoot ? { resourceRoot: msg.resourceRoot, staticDir: join(msg.resourceRoot, 'web') } : { devWebUrl: msg.devWebUrl }),
+      // The desktop build keeps Photo Tool's page beside the editor's as web/gallery.html (until the programs are packaged apart).
+      ...(msg.resourceRoot ? { resourceRoot: msg.resourceRoot, staticDir: join(msg.resourceRoot, 'web'), staticPage: 'gallery.html' } : { devWebUrl: msg.devWebUrl }),
     });
   }
   const { createApp } = await import('../src/server/app');

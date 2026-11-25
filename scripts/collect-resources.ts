@@ -33,16 +33,19 @@ delete process.env.PHOTOBOOK_RESOURCE_ROOT;
 setResourceRoot(null);
 const fonts = [...new Set(FONT_FAMILIES.flatMap((f) => f.weights.flatMap((w) => [fontFilePath(f.family, w, false), fontFilePath(f.family, w, true)])))].map(fontFile);
 const atlas = worldAtlasFile();
-const web = webDir();
+const web = webDir('photobook-editor');
+// Photo Tool's own build. Until the programs are packaged apart (a temporary bridge), the desktop app carries its page
+// beside the editor's as web/gallery.html, its assets in the same assets/ folder.
+const galleryWeb = webDir('photo-tool');
 const libheif = libheifFile();
 // The licence texts travel with the engines: libheif-js and libheif itself (LGPL), PDFium's wrapper (MIT).
 const libheifFiles = [libheif, join(dirname(libheif), 'LICENSE'), [join(dirname(dirname(libheif)), 'LICENSE'), 'LICENSE.libheif-js'] as const];
 const pdfiumFiles = [join(pdfiumDir(), 'index.cjs'), join(pdfiumDir(), 'pdfium.wasm'), join(dirname(pdfiumDir()), 'LICENSE.md')];
 const engines = [...libheifFiles, ...pdfiumFiles].map((f) => (typeof f === 'string' ? f : f[0]));
 const licence = join(projectRoot() ?? process.cwd(), 'LICENSE');
-const missing = [...fonts, atlas, ...engines, licence, ...(withWeb ? [join(web, 'index.html')] : [])].filter((f) => !existsSync(f));
+const missing = [...fonts, atlas, ...engines, licence, ...(withWeb ? [join(web, 'index.html'), join(galleryWeb, 'index.html')] : [])].filter((f) => !existsSync(f));
 if (missing.length) {
-  console.error(`Missing (run \`npm install\`${withWeb ? ' and `npm run build`' : ''} first):\n  ${missing.join('\n  ')}`);
+  console.error(`Missing (run \`npm install\`${withWeb ? ' and `npm run build` and `npm run build:photo-tool`' : ''} first):\n  ${missing.join('\n  ')}`);
   process.exit(1);
 }
 
@@ -60,7 +63,11 @@ for (const [dir, files] of [['libheif', libheifFiles], ['pdfium', pdfiumFiles]] 
 // package.json says "type": "module" (dist/desktop/resources here), Node would otherwise load it
 // as an ES module and the decoder would not start.
 writeFileSync(join(out, 'libheif', 'package.json'), '{ "type": "commonjs" }\n');
-if (withWeb) cpSync(web, join(out, 'web'), { recursive: true });
+if (withWeb) {
+  cpSync(web, join(out, 'web'), { recursive: true });
+  cpSync(galleryWeb, join(out, 'web'), { recursive: true, filter: (src) => basename(src) !== 'index.html' || dirname(src) !== galleryWeb });
+  copyFileSync(join(galleryWeb, 'index.html'), join(out, 'web', 'gallery.html'));
+}
 // With .txt, so that a double-click (or Help > About) opens them in the system's text viewer.
 copyFileSync(licence, join(out, 'LICENSE.txt'));
 const notices = makeNotices();

@@ -2,14 +2,14 @@ import { existsSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 
 // Where the files the server reads at run time live: the font .woff files the PDF export embeds,
-// the world-atlas outlines, the built editor, and the two WebAssembly engines (libheif for HEIC
+// the world-atlas outlines, the built page, and the two WebAssembly engines (libheif for HEIC
 // photos, PDFium for turning the print PDF into pictures). Nothing here runs when the module loads, so a
 // host (a packaged app, a bundle) can point it somewhere else before the first use.
 //
 // From source (the default, no configuration): the project's own folders.
 //   <project>/node_modules/@fontsource/<pkg>/files/<name>.woff
 //   <project>/node_modules/world-atlas/countries-10m.json
-//   <project>/dist/web
+//   <project>/dist/<program>/web   (the built page of photo-tool or photobook-editor)
 //   <project>/node_modules/libheif-js/libheif-wasm/libheif-bundle.js
 //   <project>/node_modules/@hyzyla/pdfium/dist/{index.cjs,pdfium.wasm}
 // With a resource root (createApp's `resourceRoot`, setResourceRoot(), or PHOTOBOOK_RESOURCE_ROOT),
@@ -66,10 +66,10 @@ export function worldAtlasFile(): string {
   return root ? join(root, 'world-atlas', 'countries-10m.json') : sourcePath('node_modules', 'world-atlas', 'countries-10m.json');
 }
 
-/** The built editor (`npm run build`). */
-export function webDir(): string {
+/** The built page of `program`: `<project>/dist/<program>/web` from source, `<root>/web` in a packaged app. */
+export function webDir(program: 'photo-tool' | 'photobook-editor'): string {
   const root = resourceRoot();
-  return root ? join(root, 'web') : sourcePath('dist', 'web');
+  return root ? join(root, 'web') : sourcePath('dist', program, 'web');
 }
 
 /**

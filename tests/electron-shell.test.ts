@@ -258,15 +258,15 @@ describe('gallery mode', () => {
 
   it('builds the gallery page beside the editor\'s, with the same content security policy except map tiles as images', () => {
     const csp = (f: string) => /<meta http-equiv="Content-Security-Policy" content="([^"]+)"/.exec(readFileSync(f, 'utf8'))?.[1];
-    const gallery = csp('src/gallery/web/index.html');
+    const gallery = csp('photo-tool/web/index.html');
     expect(gallery).toBeTruthy();
     expect(gallery).toContain("img-src 'self' blob: data: https://tile.openstreetmap.org;");
     expect(gallery!.replace(' https://tile.openstreetmap.org', '')).toBe(csp('src/web/index.html'));
     // The gallery server's header says the same: the tile server for images, nothing else from outside.
-    const header = /'Content-Security-Policy',\s*"([^"]+)"/.exec(readFileSync('src/gallery/server/app.ts', 'utf8'))?.[1];
+    const header = /'Content-Security-Policy',\s*"([^"]+)"/.exec(readFileSync('photo-tool/server/app.ts', 'utf8'))?.[1];
     expect(header).toContain("img-src 'self' blob: data: https://tile.openstreetmap.org;");
     expect(header!.replace(' https://tile.openstreetmap.org', '')).not.toMatch(/https?:/);
-    expect(readFileSync('vite.config.ts', 'utf8')).toContain('gallery.html');
+    expect(readFileSync('photo-tool/vite.config.ts', 'utf8')).toContain('dist/photo-tool/web');
   });
 
   it('only the gallery may reach the tile server, and only through the map guard', () => {
@@ -276,10 +276,10 @@ describe('gallery mode', () => {
     expect(main).not.toContain('MAP * ~NOTFOUND');
   });
 
-  // The built page (dist/web, made by `vite build`; the e2e run and desktop:build make it): Leaflet and
+  // The built page (dist/photo-tool/web, made by `vite build --config photo-tool/vite.config.ts`; the e2e run and desktop:build make it): Leaflet and
   // its styles are bundled, so no script, style sheet or font comes from the internet.
-  it.skipIf(!existsSync('dist/web/gallery.html'))('the built gallery page loads no script or style from the internet', () => {
-    const html = readFileSync('dist/web/gallery.html', 'utf8');
+  it.skipIf(!existsSync('dist/photo-tool/web/index.html'))('the built gallery page loads no script or style from the internet', () => {
+    const html = readFileSync('dist/photo-tool/web/index.html', 'utf8');
     expect(html).not.toMatch(/\b(src|href)=["']?(https?:)?\/\//);
     const assets = [...html.matchAll(/(?:src|href)="\/?(assets\/[^"]+\.(?:js|css))"/g)].map((m) => m[1]);
     expect(assets.length).toBeGreaterThan(0);
@@ -287,7 +287,7 @@ describe('gallery mode', () => {
     const visit = (asset: string) => {
       if (seen.has(asset)) return;
       seen.add(asset);
-      const text = readFileSync(join('dist/web', asset), 'utf8');
+      const text = readFileSync(join('dist/photo-tool/web', asset), 'utf8');
       // Style sheets: no @import or url() of a remote file.
       expect(text, asset).not.toMatch(/@import\s+(url\()?["']?(https?:)?\/\//);
       expect(text, asset).not.toMatch(/url\(\s*["']?(https?:)?\/\//);
@@ -297,7 +297,7 @@ describe('gallery mode', () => {
       expect(text, asset).not.toMatch(/\.(src|href)\s*=\s*["'`]https?:/);
       // The only remote address in a template the page fills in is the map tile server's.
       for (const m of text.matchAll(/["'`](https?:\/\/[^"'`\s]*\{[^"'`\s]*)["'`]/g)) expect(m[1], asset).toMatch(/^https:\/\/tile\.openstreetmap\.org\//);
-      for (const m of text.matchAll(/["'(]\.{0,2}\/?(assets\/[^"')]+\.(?:js|css))["')]/g)) if (existsSync(join('dist/web', m[1]))) visit(m[1]);
+      for (const m of text.matchAll(/["'(]\.{0,2}\/?(assets\/[^"')]+\.(?:js|css))["')]/g)) if (existsSync(join('dist/photo-tool/web', m[1]))) visit(m[1]);
     };
     assets.forEach(visit);
   });

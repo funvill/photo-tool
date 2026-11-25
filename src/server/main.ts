@@ -23,7 +23,7 @@ const restart = launcher && existsSync(launcher)
       }).unref();
     }
   : undefined;
-const { app, store } = createApp(dataDir, production ? { staticDir: webDir(), restart } : { devWebUrl: `http://127.0.0.1:${webPort}/` });
+const { app, store } = createApp(dataDir, production ? { staticDir: webDir('photobook-editor'), restart } : { devWebUrl: `http://127.0.0.1:${webPort}/` });
 
 // 127.0.0.1 only: the API is never exposed to the local network.
 const server = app.listen(port, '127.0.0.1', () => {

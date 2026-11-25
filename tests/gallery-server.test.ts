@@ -6,7 +6,7 @@ import type { Server } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { statSync } from 'node:fs';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createGalleryApp, type GalleryAppOptions } from '../src/gallery/server/app';
+import { createGalleryApp, type GalleryAppOptions } from '../photo-tool/server/app';
 import { PhotoInfoIndex } from '../src/server/photoInfoIndex';
 import { updatePhotoInfo } from '../shared/photoinfo';
 
@@ -440,13 +440,22 @@ describe('gallery server', () => {
     expect(Array.isArray(res.body)).toBe(true);
   });
 
-  it('serves staticDir with a gallery.html fallback', async () => {
+  it('serves staticDir with an index.html fallback', async () => {
     const web = join(root, 'web');
     mkdirSync(web);
-    writeFileSync(join(web, 'gallery.html'), '<p>gallery</p>');
+    writeFileSync(join(web, 'index.html'), '<p>gallery</p>');
     await start({ staticDir: web });
     const res = await fetch(base + '/some/route');
     expect(await res.text()).toBe('<p>gallery</p>');
     expect((await fetch(base + '/api/nope')).status).toBe(404);
+  });
+
+  it('serves the staticPage it is told to (the desktop build keeps the page as gallery.html beside the editor index.html)', async () => {
+    const web = join(root, 'web');
+    mkdirSync(web);
+    writeFileSync(join(web, 'index.html'), '<p>editor</p>');
+    writeFileSync(join(web, 'gallery.html'), '<p>gallery</p>');
+    await start({ staticDir: web, staticPage: 'gallery.html' });
+    expect(await (await fetch(base + '/some/route')).text()).toBe('<p>gallery</p>');
   });
 });

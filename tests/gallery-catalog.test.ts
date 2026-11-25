@@ -4,9 +4,9 @@ import { readdir as fsReaddir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { Catalog } from '../src/gallery/server/catalog';
-import { GalleryFolderError, Scanner } from '../src/gallery/server/scanner';
-import { listPhotos, type ReadDir } from '../src/gallery/server/walk';
+import { Catalog } from '../photo-tool/server/catalog';
+import { GalleryFolderError, Scanner } from '../photo-tool/server/scanner';
+import { listPhotos, type ReadDir } from '../photo-tool/server/walk';
 import { scanFolder } from '../src/server/importer';
 import { analyze, readMetadata } from '../shared/server/media';
 

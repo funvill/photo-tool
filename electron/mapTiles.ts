@@ -4,7 +4,7 @@
 // unit-tested in tests/gallery-map.test.ts; main.ts wires them in.
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { OSM_TILE_ORIGIN } from '../src/core/galleryMap';
+import { OSM_TILE_ORIGIN } from '../photo-tool/core/galleryMap';
 import { isAllowedRequest, type GuardOptions } from './netGuard';
 
 export { OSM_TILE_ORIGIN };

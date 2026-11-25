@@ -4,7 +4,7 @@
 //                            node_modules that cannot be bundled (sharp, pdfkit, fontkit and
 //                            what they need)
 //   dist/desktop/resources/  fonts, world-atlas, the built editor and gallery (web/index.html,
-//                            web/gallery.html) and the icon (the server's resource root, see
+//                            web/gallery.html, which is Photo Tool's own build) and the icon (the server's resource root, see
 //                            shared/server/resources.ts)
 //   dist/desktop/icon.png    the installer's icon
 //   dist/desktop/icons/      the same icon in the sizes a Linux desktop looks for
@@ -65,8 +65,8 @@ mkdirSync(appDir, { recursive: true });
 const common = { bundle: true, platform: 'node', format: 'cjs', target: 'node24', sourcemap: false, legalComments: 'none', logLevel: 'warning', absWorkingDir: root };
 await build({ ...common, entryPoints: ['electron/main.ts'], outfile: join(appDir, 'main.cjs'), external: ['electron'] });
 await build({ ...common, entryPoints: ['electron/server-host.ts'], outfile: join(appDir, 'server-host.cjs'), external: ['electron', ...EXTERNAL] });
-// The gallery's tagging worker thread (src/gallery/server/tagging/worker.ts), started by its server.
-await build({ ...common, entryPoints: ['src/gallery/server/tagging/worker.ts'], outfile: join(appDir, 'tagging-worker.cjs'), external: ['@huggingface/transformers'] });
+// The gallery's tagging worker thread (photo-tool/server/tagging/worker.ts), started by its server.
+await build({ ...common, entryPoints: ['photo-tool/server/tagging/worker.ts'], outfile: join(appDir, 'tagging-worker.cjs'), external: ['@huggingface/transformers'] });
 // The preload runs in the sandboxed page process: it may only require 'electron'.
 await build({ ...common, platform: 'browser', entryPoints: ['electron/preload.ts'], outfile: join(appDir, 'preload.cjs'), external: ['electron'] });
 
@@ -153,9 +153,11 @@ if (dev) {
   const run = (...args) => execFileSync(process.execPath, [tsx, ...args], { cwd: root, stdio: 'inherit' });
   const resources = join(out, 'resources');
   rmSync(resources, { recursive: true, force: true });
+  // Photo Tool's page is its own build (temporary: until each program is packaged apart, the desktop app carries both).
+  execFileSync(process.execPath, [join(root, 'node_modules/vite/bin/vite.js'), 'build', '--config', 'photo-tool/vite.config.ts'], { cwd: root, stdio: 'inherit' });
   run('scripts/collect-resources.ts', resources, '--web');
-  // `--gallery` starts the gallery program from the same build: its page must be there too.
-  if (!existsSync(join(resources, 'web', 'gallery.html'))) throw new Error('The web build has no gallery.html. Run `npm run build` first.');
+  // `--gallery` starts the gallery program from the same build: its page (web/gallery.html) must be there too.
+  if (!existsSync(join(resources, 'web', 'gallery.html'))) throw new Error('The web build has no gallery.html. Run `npm run build:photo-tool` first.');
   run('scripts/launcher/make-icon.ts', join(out, 'icon.png'));
   cpSync(join(out, 'icon.png'), join(resources, 'icon.png'));
   // Linux launchers look an icon up by size in the "hicolor" theme, which has no 1024 px folder:

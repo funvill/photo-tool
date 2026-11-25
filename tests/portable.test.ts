@@ -53,7 +53,8 @@ describe('resource paths', () => {
     expect(existsSync(fontFile(fontFilePath('Lora', 700, true)))).toBe(true);
     expect(worldAtlasFile()).toBe(join(process.cwd(), 'node_modules/world-atlas/countries-10m.json'));
     expect(existsSync(worldAtlasFile())).toBe(true);
-    expect(webDir()).toBe(join(process.cwd(), 'dist/web'));
+    expect(webDir('photobook-editor')).toBe(join(process.cwd(), 'dist/photobook-editor/web'));
+    expect(webDir('photo-tool')).toBe(join(process.cwd(), 'dist/photo-tool/web'));
   });
 
   it('with a resource root: one flat folder, set by the host or by PHOTOBOOK_RESOURCE_ROOT', () => {
@@ -62,7 +63,8 @@ describe('resource paths', () => {
     expect(resourceRoot()).toBe(root);
     expect(fontFile(fontFilePath('Playfair Display', 700, true))).toBe(join(root, 'fonts', 'playfair-display-latin-700-italic.woff'));
     expect(worldAtlasFile()).toBe(join(root, 'world-atlas', 'countries-10m.json'));
-    expect(webDir()).toBe(join(root, 'web'));
+    expect(webDir('photobook-editor')).toBe(join(root, 'web'));
+    expect(webDir('photo-tool')).toBe(join(root, 'web'));
     // The host's own setting wins over the environment.
     const other = tmp('res-');
     setResourceRoot(other);

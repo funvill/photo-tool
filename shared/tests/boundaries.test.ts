@@ -1,7 +1,8 @@
 // Folder rules for the program split. Each later task adds a rule here.
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { pathToFileURL } from 'node:url';
 
 const root = resolve(__dirname, '../..');
@@ -18,9 +19,29 @@ describe('shared', () => {
   });
 
   it('is where the gallery page gets its styles from', () => {
-    const main = readFileSync(resolve(root, 'src/gallery/web/main.tsx'), 'utf8');
+    const main = readFileSync(resolve(root, 'photo-tool/web/main.tsx'), 'utf8');
     expect(main).toContain('shared/web/base.css');
     expect(main).toContain('shared/web/fonts.css');
     expect(main).not.toContain('web/styles.css');
+  });
+});
+
+describe('photo-tool', () => {
+  it('imports only shared', async () => {
+    expect(existsSync(resolve(root, 'photo-tool/server/main.ts'))).toBe(true);
+    const { crossings } = await loadGraph();
+    expect(crossings(root, [{ from: 'photo-tool', mayImport: ['shared'] }])).toEqual([]);
+  });
+
+  describe('builds its own page', () => {
+    beforeAll(() => {
+      execFileSync(process.execPath, [resolve(root, 'node_modules/vite/bin/vite.js'), 'build', '--config', 'photo-tool/vite.config.ts'], { cwd: root, stdio: 'pipe' });
+    }, 120_000);
+
+    it('photo-tool builds its own page', () => {
+      const index = resolve(root, 'dist/photo-tool/web/index.html');
+      expect(existsSync(index)).toBe(true);
+      expect(readFileSync(index, 'utf8')).toMatch(/<script[^>]+src="[^"]*assets\/[^"]+\.js"/);
+    });
   });
 });

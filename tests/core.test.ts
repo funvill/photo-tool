@@ -257,7 +257,7 @@ describe('architecture boundaries', () => {
     readdirSync(dir, { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? files(join(dir, d.name)) : [join(dir, d.name)]));
 
   it('core imports nothing from Node, React, the server, or the web UI', () => {
-    for (const f of files('src/core')) {
+    for (const f of [...files('src/core'), ...files('photo-tool/core')]) {
       const src = readFileSync(f, 'utf8');
       expect(src, f).not.toMatch(/from ['"](node:|fs|path|react|express|sharp|\.\.\/(server|web))/);
     }
@@ -265,20 +265,20 @@ describe('architecture boundaries', () => {
 
   it('no source file references a remote URL (local-first guarantee)', () => {
     // The one exception: the gallery's Map tab, after the user says yes, shows OpenStreetMap tiles.
-    // The tile address is written down once (core/galleryMap.ts) and allowed by the gallery page's
+    // The tile address is written down once (photo-tool/core/galleryMap.ts) and allowed by the gallery page's
     // content policy (its index.html and its server's header) for images only.
-    const tileFiles = new Set(['src/core/galleryMap.ts', 'src/gallery/web/index.html', 'src/gallery/server/app.ts'].map((f) => join(f)));
+    const tileFiles = new Set(['photo-tool/core/galleryMap.ts', 'photo-tool/web/index.html', 'photo-tool/server/app.ts'].map((f) => join(f)));
     // electron/ is the desktop shell, scripts/desktop builds it: neither may reach out either.
-    for (const f of [...files('src'), ...files('electron'), ...files('scripts/desktop'), 'electron-builder.config.cjs']) {
+    for (const f of [...files('src'), ...['core', 'server', 'web'].flatMap((d) => files(`photo-tool/${d}`)), ...files('electron'), ...files('scripts/desktop'), 'electron-builder.config.cjs']) {
       // Comments may cite documentation; code may not contain remote URLs.
       const src = readFileSync(f, 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
       const urls = src.match(/https?:\/\/[^\s'"`);]+/g) ?? [];
       // The second: photo-tagging models the person asks for in Settings, downloaded by the gallery server
-      // from Hugging Face, the address written down once (gallery/server/models/download.ts).
+      // from Hugging Face, the address written down once (photo-tool/server/models/download.ts).
       const allowed = (u: string) =>
         /^https?:\/\/(127\.0\.0\.1|localhost)/.test(u) ||
         (tileFiles.has(join(f)) && /^https:\/\/tile\.openstreetmap\.org(\/\{z\}\/\{x\}\/\{y\}\.png)?$/.test(u)) ||
-        (join(f) === join('src/gallery/server/models/download.ts') && u === 'https://huggingface.co/${m.repo}/resolve/${m.revision}/${f.path}');
+        (join(f) === join('photo-tool/server/models/download.ts') && u === 'https://huggingface.co/${m.repo}/resolve/${m.revision}/${f.path}');
       expect(urls.filter((u) => !allowed(u)), f).toEqual([]);
     }
   });

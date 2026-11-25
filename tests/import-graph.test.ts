@@ -55,10 +55,10 @@ describe('the gallery reaches no book code', () => {
   it('has no book modules in its closure', () => {
     const root = resolve(__dirname, '..');
     const closure = importClosure(
-      ['src/gallery/server/main.ts', 'src/gallery/web/index.html', 'src/gallery/web/main.tsx', 'src/gallery/server/tagging/worker.ts'],
+      ['photo-tool/server/main.ts', 'photo-tool/web/index.html', 'photo-tool/web/main.tsx', 'photo-tool/server/tagging/worker.ts'],
       root,
     );
-    for (const f of ['src/gallery/server/main.ts', 'src/gallery/web/index.html', 'src/gallery/web/main.tsx', 'src/gallery/server/tagging/worker.ts']) expect(closure.has(f)).toBe(true);
+    for (const f of ['photo-tool/server/main.ts', 'photo-tool/web/index.html', 'photo-tool/web/main.tsx', 'photo-tool/server/tagging/worker.ts']) expect(closure.has(f)).toBe(true);
     for (const f of ['book', 'templates', 'generator', 'index', 'model']) expect(closure.has(`src/core/${f}.ts`)).toBe(false);
   });
 });

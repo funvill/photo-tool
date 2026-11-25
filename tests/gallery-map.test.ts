@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { galleryRequestAllowed, hostResolverRules, isMapTileRequest, mapTileRequestHeaders, mapTileUserAgent, OSM_TILE_ORIGIN, readMapConsent, writeMapConsent } from '../electron/mapTiles';
-import { locatedItems, noLocationText, OSM_TILE_URL } from '../src/core/galleryMap';
+import { locatedItems, noLocationText, OSM_TILE_URL } from '../photo-tool/core/galleryMap';
 
 describe('map tile requests', () => {
   it('names the OpenStreetMap tile server', () => {
