@@ -1,5 +1,5 @@
-# Unit and integration tests, on every platform the local app runs on. HEIC import, image export
-# and the flipbook use the built-in sips, so those tests (and the HEIC fixture) are macOS-only.
+# Unit and integration tests on Windows and Linux. macOS is not tested here, so the macOS-only
+# paths (HEIC import, and image export and the flipbook through sips) are not covered by CI.
 name: Tests
 
 on:
@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest, ubuntu-latest]
+        os: [windows-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5

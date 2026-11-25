@@ -1,5 +1,5 @@
 // The sharp side of photo edits: the pixels follow the same plan the page previews.
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import exifr from 'exifr';
@@ -97,12 +97,13 @@ describe('renderEdited', () => {
     await halves(src, true);
     const out = join(dir, 'exif-out.jpg');
     await renderEdited(src, id({ rotate: 90 }), out, 'jpeg', { keepMetadata: true });
-    const tags = await exifr.parse(out, { pick: ['DateTimeOriginal'], reviveValues: false });
+    // exifr is given the bytes, as in media.ts: with a path it calls fileHandle.stat(path), which Node 26 rejects.
+    const tags = await exifr.parse(readFileSync(out), { pick: ['DateTimeOriginal'], reviveValues: false });
     expect(tags.DateTimeOriginal).toBeTruthy();
     expect([undefined, 1]).toContain((await sharp(out).metadata()).orientation);
     const plain = join(dir, 'plain-out.jpg');
     await renderEdited(src, id(), plain, 'jpeg');
-    expect((await exifr.parse(plain, { pick: ['DateTimeOriginal'] }))?.DateTimeOriginal).toBeUndefined();
+    expect((await exifr.parse(readFileSync(plain), { pick: ['DateTimeOriginal'] }))?.DateTimeOriginal).toBeUndefined();
   });
 });
 

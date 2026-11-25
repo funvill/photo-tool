@@ -386,8 +386,11 @@ describe('tagging queue', () => {
     await install(keywordsSmall);
     const t = testBackend();
     const q = makeQueue(t.backend);
-    const list = Array.from({ length: 2000 }, (_, i) => photo(`p${i}`, `ck${i}`));
-    for (let i = 0; i < 2000; i += 2) catalog.putTags({ contentKey: `ck${i}`, modelId: keywordsSmall.id, status: 'done', description: null, keywords: [], objects: [], embedding: null, error: null });
+    // Big enough to tell "once per photo" (N keys) from "once per photo tagged" (about N²/2), small
+    // enough that writing the files and catalogue rows fits a slow CI runner.
+    const N = 400;
+    const list = Array.from({ length: N }, (_, i) => photo(`p${i}`, `ck${i}`));
+    for (let i = 0; i < N; i += 2) catalog.putTags({ contentKey: `ck${i}`, modelId: keywordsSmall.id, status: 'done', description: null, keywords: [], objects: [], embedding: null, error: null });
     const keysAsked = { n: 0 };
     const real = catalog.tagsFor.bind(catalog);
     const spy = vi.spyOn(catalog, 'tagsFor').mockImplementation((keys, models) => {
@@ -400,14 +403,14 @@ describe('tagging queue', () => {
       listCalls++;
       return list;
     });
-    for (let i = 0; i < 2000 && q.status().done < 2000; i++) await new Promise((r) => setTimeout(r, 5));
+    await vi.waitFor(() => expect(q.status().done).toBe(N), { timeout: 30_000, interval: 5 });
     await idle(q);
     spy.mockRestore();
-    expect(t.calls).toHaveLength(1000);
-    expect(q.status()).toMatchObject({ done: 2000, total: 2000 });
-    expect(keysAsked.n).toBeLessThan(2 * 2000);
+    expect(t.calls).toHaveLength(N / 2);
+    expect(q.status()).toMatchObject({ done: N, total: N });
+    expect(keysAsked.n).toBeLessThan(2 * N);
     expect(listCalls).toBeGreaterThan(0);
-  }, 30_000);
+  });
 
   it('the large describe model is not used when the small one is chosen', async () => {
     await install(describeSmall, describeLarge);
