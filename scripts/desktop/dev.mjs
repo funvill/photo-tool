@@ -8,8 +8,9 @@
 // `npm run dev:desktop -- --gallery [folder]` is Photo Tool the same way, on the ports of its own
 // dev server (photo-tool/server/main.ts: PHOTO_TOOL_WEB_PORT 5175, PHOTO_TOOL_PORT 5176) and with
 // its data in ./data/photo-tool (or PHOTO_TOOL_DATA_DIR), so it runs beside the editor's. Both keep
-// stars for read-only folders in ./data/photoinfo-shared (or PHOTOINFO_FALLBACK_DIR). The data
-// folders are always given, so the app never moves an old data folder under %APPDATA%.
+// stars for read-only folders in ./data/photoinfo-shared (or PHOTOINFO_FALLBACK_DIR). Both programs'
+// data and profile folders are always given (the editor's File > Open Gallery starts Photo Tool with
+// this same environment), so neither ever moves an old data folder under %APPDATA%.
 import { execFileSync, spawn } from 'node:child_process';
 import { connect } from 'node:net';
 import { join, resolve } from 'node:path';
@@ -25,8 +26,10 @@ const env = {
   // Vite and the app's server both read these.
   [`${prefix}_WEB_PORT`]: String(webPort),
   [`${prefix}_PORT`]: String(apiPort),
-  [`${prefix}_DATA_DIR`]: resolve(process.env[`${prefix}_DATA_DIR`] ?? join(root, 'data', gallery ? 'photo-tool' : 'photobook-editor')),
-  [`${prefix}_PROFILE_DIR`]: resolve(process.env[`${prefix}_PROFILE_DIR`] ?? join(root, 'data', gallery ? 'photo-tool-browser' : 'photobook-editor-browser')),
+  PHOTOBOOK_DATA_DIR: resolve(process.env.PHOTOBOOK_DATA_DIR ?? join(root, 'data', 'photobook-editor')),
+  PHOTOBOOK_PROFILE_DIR: resolve(process.env.PHOTOBOOK_PROFILE_DIR ?? join(root, 'data', 'photobook-editor-browser')),
+  PHOTO_TOOL_DATA_DIR: resolve(process.env.PHOTO_TOOL_DATA_DIR ?? join(root, 'data', 'photo-tool')),
+  PHOTO_TOOL_PROFILE_DIR: resolve(process.env.PHOTO_TOOL_PROFILE_DIR ?? join(root, 'data', 'photo-tool-browser')),
   PHOTOINFO_FALLBACK_DIR: resolve(process.env.PHOTOINFO_FALLBACK_DIR ?? join(root, 'data', 'photoinfo-shared')),
   [`${prefix}_DESKTOP_DEV_URL`]: `http://127.0.0.1:${webPort}/`,
 };
