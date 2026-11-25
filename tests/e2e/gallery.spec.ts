@@ -1086,3 +1086,47 @@ test('Up and Down nudge the score with a green or red toast; Left and Right move
     removeTrip(dir);
   }
 });
+
+test('Settings: download a tagging model with progress, choose it, remove it', async ({ page, request }) => {
+  const dir = await openTrip(page, request);
+  try {
+    await page.getByRole('button', { name: 'Settings' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Settings' });
+    const describeGroup = dialog.getByRole('group', { name: 'Descriptions and objects' });
+    const keywordsGroup = dialog.getByRole('group', { name: 'Keywords and search by meaning' });
+    await expect(describeGroup.getByRole('radio', { name: 'Off' })).toBeChecked();
+    await expect(keywordsGroup.getByRole('radio', { name: 'Off' })).toBeChecked();
+    const small = describeGroup.getByRole('radio', { name: /Fake describe small/ });
+    await expect(small).toBeDisabled();
+    await expect(describeGroup).toContainText('0.2 MB');
+    await expect(describeGroup).toContainText('about 1 s a photo');
+    await expect(describeGroup).toContainText('MIT');
+    // Nothing is downloaded until the person says yes.
+    await describeGroup.getByRole('button', { name: 'Download Fake describe small' }).click();
+    const confirm = dialog.getByRole('alertdialog');
+    await expect(confirm).toContainText('Download Fake describe small, 0.2 MB, from Hugging Face?');
+    await confirm.getByRole('button', { name: 'Cancel' }).click();
+    await expect(confirm).toHaveCount(0);
+    await describeGroup.getByRole('button', { name: 'Download Fake describe small' }).click();
+    await dialog.getByRole('alertdialog').getByRole('button', { name: 'Download' }).click();
+    await expect(dialog.getByRole('progressbar', { name: 'Downloading Fake describe small' })).toBeVisible();
+    await expect(describeGroup.getByRole('button', { name: 'Remove Fake describe small' })).toBeVisible({ timeout: 10_000 });
+    await expect(small).toBeEnabled();
+    await small.check();
+    await expect(small).toBeChecked();
+    // Kept after a reload.
+    await page.reload();
+    await page.getByRole('button', { name: 'Settings' }).click();
+    await expect(page.getByRole('dialog', { name: 'Settings' }).getByRole('group', { name: 'Descriptions and objects' }).getByRole('radio', { name: /Fake describe small/ })).toBeChecked();
+    // Remove: back to Download, and the part is Off.
+    const group = page.getByRole('dialog', { name: 'Settings' }).getByRole('group', { name: 'Descriptions and objects' });
+    await group.getByRole('button', { name: 'Remove Fake describe small' }).click();
+    await expect(group.getByRole('button', { name: 'Download Fake describe small' })).toBeVisible();
+    await expect(group.getByRole('radio', { name: 'Off' })).toBeChecked();
+  } finally {
+    // Leave tagging off for the other tests.
+    await request.put('/api/gallery/tagging/settings', { data: { describe: null, keywords: null, paused: false } });
+    for (const id of ['fake-describe-small', 'fake-describe-large', 'fake-keywords-small', 'fake-keywords-large']) await request.delete(`/api/gallery/models/${id}`);
+    removeTrip(dir);
+  }
+});

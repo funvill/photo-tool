@@ -1,8 +1,21 @@
-import type { GalleryInfoReply, GalleryItem } from '../server/app';
+import type { GalleryInfoReply, GalleryItem, PhotoTags } from '../server/app';
+import type { ModelChoice } from '../../core/tagModels';
+import type { DownloadProgress } from '../server/models/download';
+import type { InstalledModel, TaggingSettings } from '../server/models/store';
+import type { TaggingStatus } from '../server/tagging/queue';
 
 // Thin client for the gallery's local server (same origin, 127.0.0.1). Errors carry the server's message.
 
-export type { GalleryInfoReply, GalleryItem };
+export type { GalleryInfoReply, GalleryItem, PhotoTags, ModelChoice, InstalledModel, TaggingSettings, TaggingStatus, DownloadProgress };
+
+/** GET /api/gallery/models. */
+export interface ModelsState {
+  catalogue: ModelChoice[];
+  installed: InstalledModel[];
+  settings: TaggingSettings;
+  downloading: DownloadProgress | null;
+  error: string | null;
+}
 
 export class GalleryApiError extends Error {
   constructor(readonly status: number, message: string) {
@@ -42,7 +55,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
     headers: body ? { 'content-type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
   });
-  const data = await res.json().catch(() => ({}));
+  const data = res.status === 204 ? {} : await res.json().catch(() => ({}));
   if (!res.ok) throw new GalleryApiError(res.status, (data as { error?: string }).error ?? res.statusText);
   return data as T;
 }
@@ -64,6 +77,14 @@ export const galleryApi = {
   /** With `job`, the reply carries that folder's stamp just before and after the write. */
   /** A null value deletes that field. */
   patchInfo: (path: string, patch: Record<string, unknown>, job?: string) => call<GalleryInfoReply>('PATCH', '/api/gallery/info', job ? { path, patch, job } : { path, patch }),
+  // Photo tagging.
+  models: () => call<ModelsState>('GET', '/api/gallery/models'),
+  downloadModel: (id: string) => call<{ id: string }>('POST', `/api/gallery/models/${encodeURIComponent(id)}/download`),
+  cancelDownload: () => call<void>('POST', '/api/gallery/models/download/cancel'),
+  removeModel: (id: string) => call<void>('DELETE', `/api/gallery/models/${encodeURIComponent(id)}`),
+  setTaggingSettings: (s: TaggingSettings) => call<TaggingSettings>('PUT', '/api/gallery/tagging/settings', s),
+  taggingStatus: () => call<TaggingStatus>('GET', '/api/gallery/tagging/status'),
+  taggingFocus: (job: string, paths: string[]) => call<void>('POST', '/api/gallery/tagging/focus', { job, paths }),
 };
 
 /** 's' is 400 px (the grid), 'm' is 1600 px (the hover preview). */

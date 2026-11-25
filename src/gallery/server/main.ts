@@ -19,7 +19,7 @@ const fake = process.env.PHOTOBOOK_GALLERY_FAKE_TAGGING === '1' ? await import('
 const { app, close } = createGalleryApp(dataDir, {
   photoInfoFallbackDir: join(editorDataDir, 'photoinfo'),
   tagging: fake
-    ? { fetch: fake.fakeFetch({ chunkDelayMs: 3 }), catalogue: fake.FAKE_CATALOGUE, backend: fake.fakeBackend({ delayMs: 40 }), imageOf: async (p: { path: string }) => p.path }
+    ? { fetch: fake.fakeFetch({ chunkDelayMs: 40 }), catalogue: fake.FAKE_CATALOGUE, backend: fake.fakeBackend({ delayMs: 40 }), imageOf: async (p: { path: string }) => p.path }
     : { workerFile: taggingWorkerSource() },
   ...(production ? { staticDir: webDir() } : { devWebUrl: `http://127.0.0.1:${webPort}/gallery.html` }),
 });

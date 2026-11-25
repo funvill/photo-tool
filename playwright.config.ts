@@ -39,7 +39,8 @@ export default defineConfig({
     {
       command: `${needGalleryPage} && ${emptyDir('PHOTOBOOK_GALLERY_DATA_DIR')} && tsx src/gallery/server/main.ts`,
       // The editor data folder (where photo info for read-only folders goes) is inside the throwaway one too.
-      env: { NODE_ENV: 'production', PHOTOBOOK_GALLERY_PORT: String(GALLERY_PORT), PHOTOBOOK_GALLERY_DATA_DIR: GALLERY_DIR, PHOTOBOOK_DATA_DIR: `${GALLERY_DIR}/editor` },
+      // Photo tagging with fake models served from memory (tests/support/fakeTagging.ts): never the network.
+      env: { NODE_ENV: 'production', PHOTOBOOK_GALLERY_PORT: String(GALLERY_PORT), PHOTOBOOK_GALLERY_DATA_DIR: GALLERY_DIR, PHOTOBOOK_DATA_DIR: `${GALLERY_DIR}/editor`, PHOTOBOOK_GALLERY_FAKE_TAGGING: '1' },
       url: `http://127.0.0.1:${GALLERY_PORT}/api/health`,
       reuseExistingServer: false,
       timeout: 120_000,

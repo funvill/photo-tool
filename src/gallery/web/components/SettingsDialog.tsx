@@ -1,6 +1,7 @@
 import { Modal } from '../../../web/components/Modal';
 import { desktop } from '../../../web/desktop';
 import { useGallery } from '../store';
+import { TaggingSettings } from './TaggingSettings';
 
 /**
  * Settings (the ⚙ in the top bar): "When I save an edit", change only the photo's info file or the photo
@@ -31,6 +32,7 @@ export function SettingsDialog({ onClose }: { onClose: () => void }) {
           </span>
         </label>
       </fieldset>
+      <TaggingSettings />
       <div className="modal-foot">
         <span />
         <button type="button" className="btn" onClick={onClose}>
