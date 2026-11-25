@@ -5,6 +5,7 @@ import { useGallery, useVisibleItems } from '../store';
 
 const SORTS: { key: GallerySortKey; label: string }[] = [
   { key: 'date', label: 'Date taken' },
+  { key: 'score', label: 'Photo score' },
   { key: 'interesting', label: 'Most interesting' },
   { key: 'colour', label: 'Main colour' },
   { key: 'name', label: 'File name' },

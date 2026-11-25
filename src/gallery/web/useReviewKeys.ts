@@ -80,7 +80,8 @@ export function useReviewKeys(onOpen: (path: string) => void) {
       if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
         if (s.selected === null && s.selection.length === 0) return;
         e.preventDefault();
-        s.nudgeScore(e.key === 'ArrowUp' ? 1 : -1);
+        // One press, one point: a held key does not repeat (each tap is its own write and undo step).
+        if (!e.repeat) s.nudgeScore(e.key === 'ArrowUp' ? 1 : -1);
         return;
       }
 

@@ -308,6 +308,9 @@ let draft: { path: string; edit: PhotoEdit | null } | null = null;
 // Score nudges shown in the page and not confirmed by the server yet, by photo path, with how many saves
 // of them are on their way: a quick run of Up presses counts from the newest value, not the saved one.
 const pendingAdjust = new Map<string, { value: number; waiting: number }>();
+// Info fields sent to the server and not confirmed yet, by photo path (the newest value of each): a change
+// made while a save is on its way (a second click on a star, H then Ctrl+Z) counts from what was sent.
+const inFlight = new Map<string, Record<string, unknown>>();
 let scoreToastId = 0;
 // Saves of edits on their way (the store's `saving` is true while any is).
 let savingCount = 0;
@@ -608,7 +611,15 @@ export const useGallery = create<GalleryState>()((set, get) => {
     }
     if (!r.ok && !r.saved) return fail(r.error ?? "Couldn't save the photo.");
     if (gen !== generation) return true;
-    // The file now carries the edit: an unsaved edit left on it (even one changed meanwhile) would be applied twice.
+    // The file now carries the edit: an unsaved edit left on it (even one changed meanwhile) would be applied twice,
+    // and so would an undo of Done putting an older unsaved edit back over it. Its crop steps are forgotten.
+    set((x) => ({
+      undoStack: x.undoStack.flatMap((st) => {
+        if (!st.edits?.some((e) => e.path === path)) return [st];
+        const edits = st.edits.filter((e) => e.path !== path);
+        return edits.length || st.info.length ? [{ ...st, edits }] : [];
+      }),
+    }));
     const now = get().pendingEdits[path];
     if (now && now !== edit && !sameEdit(now, edit)) get().toast('error', `A later change to ${nameOf(path)} was not saved`);
     set((x) => ({ pendingEdits: without(x.pendingEdits, path) }));
@@ -618,6 +629,12 @@ export const useGallery = create<GalleryState>()((set, get) => {
     // Replaced, but a later step failed (reading it again, say): said even in Save all, as the photo was saved.
     if (!r.ok) get().toast('error', r.error ?? 'The photo was saved, but the gallery could not read it again.');
     return true;
+  };
+
+  /** A photo's info as it will be once the saves on their way land (undefined: not in the list). */
+  const infoNow = (path: string): Record<string, unknown> | undefined => {
+    const item = get().items.find((i) => i.path === path);
+    return item ? { ...item.info, ...inFlight.get(path) } : undefined;
   };
 
   /**
@@ -693,10 +710,14 @@ export const useGallery = create<GalleryState>()((set, get) => {
     async saveInfo(path, patch, opts) {
       const job = get().job;
       const gen = generation;
-      // What Ctrl+Z puts back: the fields as they are now (nothing when the save changes nothing).
-      const was = opts?.undo === false ? undefined : get().items.find((i) => i.path === path);
-      const before = was ? fieldsBefore(was.info, patch) : null;
+      // What Ctrl+Z puts back: the fields as they are now, counting saves still on their way (nothing when
+      // the save changes nothing). Recorded at once, so a Ctrl+Z pressed before the reply takes this back.
+      const now = infoNow(path);
+      const before = opts?.undo === false || !now ? null : fieldsBefore(now, patch);
       const changes = !!before && Object.keys(patch).some((k) => !sameValue(before[k], patch[k]));
+      const step: UndoStep | null = changes && before && job ? { label: typeof opts?.undo === 'string' ? opts.undo : undoLabel(patch), info: [{ path, before }] } : null;
+      if (step) set((s) => ({ undoStack: pushUndo(s.undoStack, step) }));
+      inFlight.set(path, { ...inFlight.get(path), ...patch });
       let queue = saveQueues.get(path);
       if (!queue) saveQueues.set(path, (queue = { tail: Promise.resolve(), waiting: 0, latest: null }));
       const q = queue;
@@ -718,12 +739,11 @@ export const useGallery = create<GalleryState>()((set, get) => {
       const run = q.tail.then(send);
       q.tail = run;
       const ok = await run;
-      if (ok && changes && before && job && current(gen, job)) {
-        const step: UndoStep = { label: typeof opts?.undo === 'string' ? opts.undo : undoLabel(patch), info: [{ path, before }] };
-        set((s) => ({ undoStack: pushUndo(s.undoStack, step) }));
-      }
+      // Not saved: nothing to undo.
+      if (!ok && step) set((s) => ({ undoStack: s.undoStack.filter((x) => x !== step) }));
       if (--q.waiting > 0) return ok;
       if (saveQueues.get(path) === q) saveQueues.delete(path);
+      inFlight.delete(path);
       const updated = q.latest;
       if (updated) {
         set((s) => ({ items: s.items.map((i) => (i.path === path ? updated : i)) }));
@@ -840,17 +860,21 @@ export const useGallery = create<GalleryState>()((set, get) => {
 
     async toggleFlag(field) {
       const s = get();
-      const byPath = new Map(s.items.map((i) => [i.path, i]));
-      const targets = flagTargets(s.selection, s.selected, (p) => byPath.get(p)?.info[field] === true);
+      const targets = flagTargets(s.selection, s.selected, (p) => infoNow(p)?.[field] === true);
       if (!targets) return;
       const before = snapshot();
-      const gen = generation;
       const patch = { [field]: field === 'star' ? targets.value : targets.value ? true : null };
-      // One undo step for every photo changed (each as it was).
-      const was = targets.paths.map((p) => ({ path: p, before: fieldsBefore(byPath.get(p)?.info ?? {}, patch) }));
+      // One undo step for every photo changed (each as it was), recorded at once (see saveInfo).
+      const was = targets.paths.map((p) => ({ path: p, before: fieldsBefore(infoNow(p) ?? {}, patch) })).filter((w) => !sameValue(w.before[field], patch[field]));
+      const step: UndoStep = { label: field === 'star' ? 'favourite' : 'hide', info: was };
+      if (was.length) set((x) => ({ undoStack: pushUndo(x.undoStack, step) }));
       const oks = await Promise.all(targets.paths.map((p) => get().saveInfo(p, patch, { undo: false })));
-      const info = was.filter((w, n) => oks[n] && !sameValue(w.before[field], patch[field]));
-      if (info.length && gen === generation) set((s) => ({ undoStack: pushUndo(s.undoStack, { label: field === 'star' ? 'favourite' : 'hide', info }) }));
+      // A photo whose save failed is left out of the step (the whole step, when none was saved).
+      const failed = new Set(targets.paths.filter((_, n) => !oks[n]));
+      if (failed.size && was.length) {
+        const info = was.filter((w) => !failed.has(w.path));
+        set((x) => ({ undoStack: x.undoStack.flatMap((st) => (st !== step ? [st] : info.length ? [{ ...st, info }] : [])) }));
+      }
       settleSelection(before);
     },
 
@@ -1075,6 +1099,10 @@ export const useGallery = create<GalleryState>()((set, get) => {
       }
       set({ undoStack: s.undoStack.slice(0, -1) });
       const present = new Set(s.items.map((i) => i.path));
+      if (![...step.info.map((c) => c.path), ...(step.edits ?? []).map((e) => e.path)].some((p) => present.has(p))) {
+        get().toast('info', `Couldn't undo ${step.label}: the photo is no longer in the folder`);
+        return;
+      }
       if (step.edits?.length) {
         set((x) => {
           const pendingEdits = { ...x.pendingEdits };
@@ -1120,7 +1148,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
 // What the grid shows: the photos filtered and sorted. One list for the grid and the viewer, worked out
 // again only when the photos, sort or filter change. The facts (interesting score, colour, quality flags,
 // bursts) are costly on a big folder, so they are worked out only when a sort or filter reads them.
-const needsFacts = (sort: GallerySortKey, f: GalleryFilter, stacked?: boolean) => !!stacked || sort === 'interesting' || sort === 'colour' || !!f.lowQuality || !!f.nearDuplicates;
+const needsFacts = (sort: GallerySortKey, f: GalleryFilter, stacked?: boolean) => !!stacked || sort === 'interesting' || sort === 'colour' || sort === 'score' || !!f.lowQuality || !!f.nearDuplicates;
 const NO_FACTS = new Map<string, GalleryFacts>();
 const NO_STACKS = new Map<string, StackInfo>();
 let factsMemo: { items: GalleryItem[]; facts: Map<string, GalleryFacts>; at: number } | null = null;
@@ -1185,7 +1213,7 @@ export function selectVisible(s: VisibleInput): GalleryItem[] {
   if (m && m.items === s.items && m.sort === s.sort && m.filter === s.filter && m.stacked === stacked && m.openStacks === s.openStacks && !(m.stale && !s.progress)) return m.visible;
   const withFacts = needsFacts(s.sort, s.filter, stacked);
   const facts = withFacts ? currentFacts(s) : NO_FACTS;
-  const sorted = sortItems(filterItems(s.items, s.filter, facts), s.sort, facts);
+  const sorted = sortItems(filterItems(s.items, s.filter, facts), s.sort, facts, s.sort === 'score' ? selectScores(s) : undefined);
   const folded = stacked ? stackItems(sorted, facts, new Set(s.openStacks ?? [])) : null;
   const visible = folded ? folded.items : sorted;
   // Built from stale facts: remembered (the selector must return the same list for the same state), but redone once the scan ends.

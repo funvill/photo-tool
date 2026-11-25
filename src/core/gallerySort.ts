@@ -6,7 +6,7 @@ import { colourVariety } from './photoScore';
 // score, main colour, quality flags, bursts) are worked out once per list of photos; sorting and
 // filtering then only read them.
 
-export type GallerySortKey = 'date' | 'interesting' | 'colour' | 'name';
+export type GallerySortKey = 'date' | 'interesting' | 'colour' | 'name' | 'score';
 
 export interface GalleryFilter {
   starred?: 'yes' | 'no';
@@ -151,10 +151,18 @@ export function galleryFacts(items: GalleryItemLike[]): Map<string, GalleryFacts
 const byName = (a: GalleryItemLike, b: GalleryItemLike) =>
   a.fileName.localeCompare(b.fileName, undefined, { numeric: true }) || a.relDir.localeCompare(b.relDir) || (a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
 
-/** A sorted copy. Date: oldest first, undated last. Interesting: best first. Colour: red ... pink, neutral, then by lightness. Photos not analysed yet come last in the last two. */
-export function sortItems<T extends GalleryItemLike>(items: T[], key: GallerySortKey, facts: Map<string, GalleryFacts>): T[] {
+/**
+ * A sorted copy. Date: oldest first, undated last. Interesting: best first. Colour: red ... pink, neutral, then by
+ * lightness. Photos not analysed yet come last in those two. Score: highest photo score first (`scores`, from
+ * photoScores), ties by name; a photo without one comes last.
+ */
+export function sortItems<T extends GalleryItemLike>(items: T[], key: GallerySortKey, facts: Map<string, GalleryFacts>, scores?: Map<string, { total: number }>): T[] {
   const copy = [...items];
   if (key === 'name') return copy.sort(byName);
+  if (key === 'score') {
+    const total = (i: T) => scores?.get(i.path)?.total ?? -Infinity;
+    return copy.sort((a, b) => total(b) - total(a) || byName(a, b));
+  }
   if (key === 'date') {
     const time = new Map(copy.map((i) => [i.path, i.effectiveDate ? Date.parse(i.effectiveDate) : NaN]));
     return copy.sort((a, b) => {

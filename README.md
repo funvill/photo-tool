@@ -110,7 +110,7 @@ A second program in the desktop app, for looking through a folder of photos and 
 - **F**: favourite (star) the photo, or unfavourite it. With several photos selected, they all take the opposite of the state of the photo shown in the preview (the focused one). **H** works the same way.
 - **H**: hide the photo, or show it again. Hidden photos are left out of the grid until you change the **Hidden** filter. After H, the selection moves on to the next photo, so you can press H down a run of bad shots.
 - **Left** and **Right**: move to the previous or next photo.
-- **Up** and **Down**: add 1 to the photo score, or take 1 away (every selected photo when several are). A green "+1" or red "−1" with the new score shows on the preview for a moment. See Photo score below.
+- **Up** and **Down**: add 1 to the photo score, or take 1 away (every selected photo when several are). Each press counts once; holding the key doesn't repeat. A green "+1" or red "−1" with the new score shows on the preview for a moment. See Photo score below.
 - **Home** and **End**: the first or last photo.
 - **Ctrl+Z**: undo the last change: a favourite, a hide, a score nudge, Done in edit mode, Revert to original, a saved edit in the info file, or a field typed in the details. The last 100 changes are kept until you open another folder. It doesn't undo moving photos to the Recycle Bin or saving into the photo file; get those back from the Recycle Bin. In a text field, Ctrl+Z undoes your typing as usual.
 - **E**: edit the photo (see Editing photos below).
@@ -128,7 +128,7 @@ A second program in the desktop app, for looking through a folder of photos and 
 - **Burst**, −10: a near-identical shot when another in its burst is better.
 - **Favourite** +50, **Hidden** −50, and **your nudges** from Up and Down, kept in `photoinfo.json` as `scoreAdjust`.
 
-There is no top or bottom; a plain photo lands roughly between 30 and 90.
+There is no top or bottom; a plain photo lands roughly between 30 and 90. Choose **Sort → Photo score** to see the highest first; a photo moves as its score changes.
 
 **Editing photos.** Click **Edit** under the preview, press **E**, or right-click and choose **Edit**. The whole photo is shown with a crop box over it: drag a corner or an edge to resize it, or drag inside to move it. The bar under it has:
 

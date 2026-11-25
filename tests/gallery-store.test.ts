@@ -1420,3 +1420,119 @@ describe('gallery store: score nudges and undo', () => {
     await vi.waitFor(() => expect(count('PATCH', '/api/gallery/info')).toBe(105));
   });
 });
+
+describe('gallery store: undo while saves are on their way, and after saving into the file', () => {
+  const g = () => useGallery.getState();
+  const photos = (...names: string[]) => names.map((n) => item({ path: n, fileName: `${n}.jpg`, key: n }));
+  const setup = (items: GalleryItem[], selected: string | null) =>
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items, sort: 'name', filter: {}, stacked: false, openStacks: [], view: 'grid', selected, selection: selected ? [selected] : [], anchor: selected });
+  /** Replies held until released, one at a time, in order. */
+  const heldServer = () => {
+    const saved: { path: string; patch: Record<string, unknown> }[] = [];
+    const server = new Map<string, Record<string, unknown>>();
+    const waiting: (() => void)[] = [];
+    routes['PATCH /api/gallery/info'] = async (body) => {
+      const b = body as { path: string; patch: Record<string, unknown> };
+      saved.push({ path: b.path, patch: b.patch });
+      await new Promise<void>((r) => waiting.push(r));
+      const old = g().items.find((i) => i.path === b.path)!;
+      const info = { ...(server.get(b.path) ?? old.info), ...b.patch } as Record<string, unknown>;
+      for (const k of Object.keys(info)) if (info[k] === null) delete info[k];
+      server.set(b.path, info);
+      return { json: { ...old, info } };
+    };
+    const releaseAll = async () => {
+      for (let n = 0; n < 20; n++) {
+        waiting.splice(0).forEach((r) => r());
+        await new Promise((r) => setTimeout(r, 5));
+      }
+    };
+    return { saved, releaseAll };
+  };
+
+  it('H then Ctrl+Z before the server replies takes back the hide, not the change before it', async () => {
+    setup(photos('a', 'b'), 'a');
+    const { saved, releaseAll } = heldServer();
+    g().nudgeScore(1);
+    const hiding = g().toggleFlag('hidden');
+    expect(g().undoStack.map((st) => st.label)).toEqual(['score', 'hide']);
+    const undoing = g().undo();
+    await releaseAll();
+    await hiding;
+    await undoing;
+    expect(saved.map((s) => s.patch)).toEqual([{ scoreAdjust: 1 }, { hidden: true }, { hidden: null }]);
+    expect(g().items[0].info).toEqual({ scoreAdjust: 1 });
+    expect(g().undoStack.map((st) => st.label)).toEqual(['score']);
+  });
+
+  it('two quick clicks on a star make one undo step, not two', async () => {
+    setup(photos('a'), 'a');
+    const { releaseAll } = heldServer();
+    const one = g().setStar('a', true);
+    const two = g().setStar('a', true);
+    await releaseAll();
+    await Promise.all([one, two]);
+    expect(g().undoStack).toHaveLength(1);
+  });
+
+  it('H pressed twice quickly hides, then shows again (it counts from what was sent)', async () => {
+    setup(photos('a', 'b'), 'a');
+    const { saved, releaseAll } = heldServer();
+    useGallery.setState({ filter: { hidden: 'show' } });
+    const one = g().toggleFlag('hidden');
+    const two = g().toggleFlag('hidden');
+    await releaseAll();
+    await Promise.all([one, two]);
+    expect(saved.map((s) => s.patch)).toEqual([{ hidden: true }, { hidden: null }]);
+  });
+
+  it('a hide the server refuses is not left on the undo stack', async () => {
+    setup(photos('a', 'b'), 'a');
+    routes['PATCH /api/gallery/info'] = () => ({ status: 409, json: { error: 'in use' } });
+    await g().toggleFlag('hidden');
+    expect(g().undoStack).toEqual([]);
+  });
+
+  it('after Save into the photo file, Ctrl+Z does not put an older crop back over it', async () => {
+    const cropped = { rotate: 0 as const, straighten: 0, crop: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 } };
+    const turned = { rotate: 270 as const, straighten: 0, crop: { x: 0, y: 0, w: 1, h: 1 } };
+    const stop = connectDesktop({ saveEditToFile: async () => ({ ok: true, item: item({ path: 'a', key: 'a2' }) }) });
+    try {
+      setup(photos('a'), 'a');
+      useGallery.setState({ editTarget: 'file', pendingEdits: { a: cropped } });
+      g().startEdit('a');
+      g().finishEdit(turned);
+      expect(g().undoStack).toHaveLength(1);
+      expect(await g().saveEdit('a')).toBe(true);
+      expect(g().undoStack).toEqual([]);
+      await g().undo();
+      expect(g().pendingEdits).toEqual({});
+      expect(g().toasts.at(-1)?.text).toBe('Nothing to undo');
+    } finally {
+      stop();
+      useGallery.setState({ editTarget: 'info' });
+    }
+  });
+
+  it('undoing a change to a photo that has since gone says so and changes nothing', async () => {
+    setup(photos('a', 'b'), 'a');
+    routes['PATCH /api/gallery/info'] = (body) => ({ json: { ...g().items[0], info: (body as { patch: Record<string, unknown> }).patch } });
+    await g().setStar('a', true);
+    g().removeItems(['a']);
+    await g().undo();
+    expect(count('PATCH', '/api/gallery/info')).toBe(1);
+    expect(g().toasts.at(-1)?.text).toBe("Couldn't undo favourite: the photo is no longer in the folder");
+  });
+});
+
+describe('gallery store: sort by photo score', () => {
+  it('puts the highest score first; a favourite jumps up, a nudge moves it', () => {
+    const a = item({ path: 'a', fileName: 'a.jpg', key: 'a' });
+    const b = item({ path: 'b', fileName: 'b.jpg', key: 'b', info: { star: true } });
+    const c = item({ path: 'c', fileName: 'c.jpg', key: 'c', info: { scoreAdjust: 1 } });
+    const state = { items: [a, b, c], sort: 'score' as const, filter: {}, stacked: false };
+    expect(selectVisible(state).map((i) => i.path)).toEqual(['b', 'c', 'a']);
+    const nudged = { ...state, items: [{ ...a, info: { scoreAdjust: 2 } }, b, c] };
+    expect(selectVisible(nudged).map((i) => i.path)).toEqual(['b', 'a', 'c']);
+  });
+});
