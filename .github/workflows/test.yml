@@ -24,5 +24,4 @@ jobs:
       - run: npm run typecheck
       - run: npm run fixtures
       - run: npm test
-      - run: npm run build
-      - run: npx vite build --mode pages
+      - run: npm run build:editor && npm run build:photo-tool

@@ -13,6 +13,12 @@ export type WorkerRequest =
   | { id: number; op: 'describe' | 'keywords'; path: string }
   | { id: number; op: 'embedText'; text: string };
 export type WorkerReply = { id: number; ok: true; result: unknown } | { id: number; ok: false; error: string; load?: boolean; lost?: boolean };
+/**
+ * Outside the request queue, no model needed: is onnxruntime-node loaded? `ort` is its version (empty when
+ * Transformers.js did not load it). The desktop self-test asks this of the installed worker (taggingWorkerLoads).
+ */
+export type WorkerPing = { type: 'ping' };
+export type WorkerPong = { type: 'pong'; ort: string };
 
 /** Asked to use a model this worker has not loaded (it was restarted): the caller loads it again. */
 class NotLoaded extends Error {}
@@ -148,7 +154,12 @@ async function handle(r: WorkerRequest): Promise<WorkerReply> {
 // still loading, not for a photo being described (many seconds): the models' runs are async, so it fits in between.
 let chain: Promise<unknown> = Promise.resolve();
 let keywordsReady: Promise<unknown> = Promise.resolve();
-parentPort?.on('message', (r: WorkerRequest) => {
+parentPort?.on('message', (r: WorkerRequest | WorkerPing) => {
+  if ('type' in r) {
+    // Transformers.js loaded onnxruntime-node (its native binding) on import, before this message could arrive.
+    if (r.type === 'ping') parentPort!.postMessage({ type: 'pong', ort: String((env.backends.onnx as Any)?.versions?.node ?? '') } satisfies WorkerPong);
+    return;
+  }
   const reply = async () => parentPort!.postMessage(await handle(r));
   if (r.op === 'embedText') {
     void keywordsReady.then(reply);

@@ -1,6 +1,12 @@
-# Builds the desktop app's installers, each on its own platform (sharp's native part is chosen by
-# `npm ci` for the machine it runs on): the Windows .exe on Windows, the .deb and AppImage on Linux.
-# The installers are unsigned and are kept as workflow artifacts; nothing is published.
+# Builds the installers of both desktop programs, Photo Tool and Photobook Editor, each on its own
+# platform (sharp's native part is chosen by `npm ci` for the machine it runs on): the Windows .exe
+# on Windows, the .deb and AppImage on Linux. The installers are unsigned and are kept as workflow
+# artifacts; nothing is published.
+#
+# Each program is one matrix entry. `dist` is its package script (the editor's is dist:editor),
+# `product` the name a Windows user sees, `env_prefix` the prefix of its _DATA_DIR and _PROFILE_DIR,
+# and `required_step` a self-test step that must be in result.json and ok (overall "ok" alone would
+# pass if the step were missing).
 name: Desktop installers
 
 on:
@@ -11,7 +17,23 @@ on:
 
 jobs:
   windows:
+    name: windows (${{ matrix.program }})
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        program: [photo-tool, photobook-editor]
+        include:
+          - program: photo-tool
+            dist: dist:photo-tool
+            product: Photo Tool
+            env_prefix: PHOTO_TOOL
+            required_step: taggingWorkerLoads
+          - program: photobook-editor
+            dist: dist:editor
+            product: Photobook Editor
+            env_prefix: PHOTOBOOK
+            required_step: ''
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -19,35 +41,70 @@ jobs:
           node-version: 26
           cache: npm
       - run: npm ci
-      # Builds the editor, bundles the app, fetches the Electron program, then packages.
-      - run: npm run dist
-      - uses: actions/upload-artifact@v4
-        with:
-          name: photobook-studio-windows-x64
-          path: dist/installer/*.exe
-          if-no-files-found: error
-      # The packaged app tests itself: makes a book from the fixture photos, exports the PDFs,
-      # loads the editor, and fails if anything tried to reach a host other than 127.0.0.1.
-      - run: npm run fixtures
-      - name: Self-test the packaged app
+      # Builds the program's page, bundles the app, fetches the Electron program, then packages.
+      - run: npm run ${{ matrix.dist }}
+      - name: The installer and the program have their names
         shell: pwsh
         run: |
-          $env:PHOTOBOOK_DATA_DIR = "$env:RUNNER_TEMP\selftest\data"
-          $exe = (Get-ChildItem dist\installer\win-unpacked\*.exe | Where-Object Name -notlike 'Uninstall*' | Select-Object -First 1).FullName
-          $p = Start-Process -FilePath $exe -ArgumentList '--self-test', "`"$PWD\fixtures\generated\trip`"", '--self-test-out', "`"$env:RUNNER_TEMP\selftest\out`"" -Wait -PassThru
-          Get-Content "$env:RUNNER_TEMP\selftest\data\logs\desktop.log" -ErrorAction SilentlyContinue
+          $version = node -p "require('./package.json').version"
+          $dir = 'dist\installer\${{ matrix.program }}'
+          foreach ($f in "$dir\${{ matrix.product }} Setup $version.exe", "$dir\win-unpacked\${{ matrix.product }}.exe") {
+            if (-not (Test-Path -LiteralPath $f)) { Get-ChildItem -Recurse -Depth 1 $dir | Select-Object -ExpandProperty FullName; throw "Missing: $f" }
+            "found: $f"
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.program }}-windows-x64
+          path: dist/installer/${{ matrix.program }}/*.exe
+          if-no-files-found: error
+      # The packaged program tests itself (see <program>/electron/selfTest.ts) and fails if anything
+      # tried to reach a host other than 127.0.0.1. Its data, browser profile and shared photo info
+      # all go under the runner's temp folder.
+      - run: npm run fixtures
+      - name: Self-test the packaged program
+        shell: pwsh
+        run: |
+          $t = "$env:RUNNER_TEMP\selftest"
+          Set-Item 'env:${{ matrix.env_prefix }}_DATA_DIR' "$t\data"
+          Set-Item 'env:${{ matrix.env_prefix }}_PROFILE_DIR' "$t\profile"
+          $env:PHOTOINFO_FALLBACK_DIR = "$t\photoinfo"
+          $exe = (Resolve-Path -LiteralPath 'dist\installer\${{ matrix.program }}\win-unpacked\${{ matrix.product }}.exe').Path
+          $p = Start-Process -FilePath $exe -ArgumentList '--self-test', "`"$PWD\fixtures\generated\trip`"", '--self-test-out', "`"$t\out`"" -Wait -PassThru
+          Get-Content "$t\data\logs\desktop.log" -ErrorAction SilentlyContinue
+          $r = Get-Content "$t\out\result.json" -Raw -ErrorAction SilentlyContinue | ConvertFrom-Json
+          if ($r) { $r.steps.PSObject.Properties | ForEach-Object { "step $($_.Name): ok=$($_.Value.ok)" } }
+          $required = '${{ matrix.required_step }}'
+          if ($required -and $r.steps.$required.ok -ne $true) { Write-Output "::error::self-test step $required is missing or not ok"; exit 1 }
           exit $p.ExitCode
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: photobook-studio-windows-self-test
+          name: ${{ matrix.program }}-windows-self-test
           path: |
             ${{ runner.temp }}/selftest/out/result.json
             ${{ runner.temp }}/selftest/out/*.png
             ${{ runner.temp }}/selftest/data/logs/desktop.log
 
   linux:
+    name: linux (${{ matrix.program }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        program: [photo-tool, photobook-editor]
+        include:
+          - program: photo-tool
+            dist: dist:photo-tool
+            env_prefix: PHOTO_TOOL
+            required_step: taggingWorkerLoads
+          - program: photobook-editor
+            dist: dist:editor
+            env_prefix: PHOTOBOOK
+            required_step: ''
+    env:
+      # On Linux the package, the command, the install folder (/opt/<name>) and the .desktop file are
+      # all named after the program (see <program>/electron-builder.config.cjs).
+      P: ${{ matrix.program }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -56,40 +113,74 @@ jobs:
           cache: npm
       - run: npm ci
       # patchelf (with the runner's own gcc) is for scripts/desktop/linux/patch-sharp.mjs.
-      - run: sudo apt-get update && sudo apt-get install -y patchelf
-      - run: npm run dist
+      - run: sudo apt-get update && sudo apt-get install -y patchelf jq
+      - run: npm run ${{ matrix.dist }}
+      # artifactName is ${name}-${version}-${arch}.${ext}: amd64 for the .deb, x86_64 for the AppImage.
+      - name: The packages have their names
+        run: |
+          V=$(node -p "require('./package.json').version")
+          for f in "dist/installer/$P/$P-$V-amd64.deb" "dist/installer/$P/$P-$V-x86_64.AppImage"; do
+            [ -f "$f" ] || { ls -la "dist/installer/$P"; echo "::error::missing $f"; exit 1; }
+            echo "found: $f"
+          done
+          pkg=$(dpkg-deb -f "dist/installer/$P/$P-$V-amd64.deb" Package)
+          [ "$pkg" = "$P" ] || { echo "::error::the .deb's package is '$pkg', not '$P'"; exit 1; }
       - uses: actions/upload-artifact@v4
         with:
-          name: photobook-studio-linux-x64
+          name: ${{ matrix.program }}-linux-x64
           path: |
-            dist/installer/*.deb
-            dist/installer/*.AppImage
+            dist/installer/${{ matrix.program }}/*.deb
+            dist/installer/${{ matrix.program }}/*.AppImage
           if-no-files-found: error
-      # The same self-test as on Windows, on the app as a user gets it: installed from the .deb
+      # The same self-test as on Windows, on the program as a user gets it: installed from the .deb
       # (whose install script sets up what Chromium's sandbox needs on Ubuntu 24.04), then the
       # AppImage. There is no screen on the runner, so xvfb provides one.
       - run: npm run fixtures
-      - name: Install the .deb and self-test the installed app
+      - name: Install the .deb and self-test the installed program
         run: |
-          sudo apt-get install -y xvfb ./dist/installer/*.deb
-          export PHOTOBOOK_DATA_DIR="$RUNNER_TEMP/selftest-deb/data"
-          xvfb-run -a -s '-screen 0 1600x1000x24' photobook-studio --self-test "$PWD/fixtures/generated/trip" --self-test-out "$RUNNER_TEMP/selftest-deb/out"
+          V=$(node -p "require('./package.json').version")
+          sudo apt-get install -y xvfb "./dist/installer/$P/$P-$V-amd64.deb"
+          # Installed under /opt/<name> (no space: Chromium's setuid sandbox cuts the path at one),
+          # started by the command <name>.
+          [ -x "/opt/$P/$P" ] || { ls -la /opt; echo "::error::/opt/$P/$P is not there"; exit 1; }
+          [ "$(readlink -f "$(command -v "$P")")" = "/opt/$P/$P" ] || { echo "::error::the command $P does not start /opt/$P/$P"; exit 1; }
+          [ -f "/usr/share/applications/$P.desktop" ] || { echo "::error::no /usr/share/applications/$P.desktop"; exit 1; }
+          t="$RUNNER_TEMP/selftest-deb"
+          export ${{ matrix.env_prefix }}_DATA_DIR="$t/data" ${{ matrix.env_prefix }}_PROFILE_DIR="$t/profile" PHOTOINFO_FALLBACK_DIR="$t/photoinfo"
+          code=0
+          xvfb-run -a -s '-screen 0 1600x1000x24' "$P" --self-test "$PWD/fixtures/generated/trip" --self-test-out "$t/out" || code=$?
+          jq -r '.steps | to_entries[] | "step \(.key): ok=\(.value.ok)"' "$t/out/result.json" || true
+          [ "$(jq -r .app.execPath "$t/out/result.json")" = "/opt/$P/$P" ] || { echo "::error::the self-test did not run /opt/$P/$P"; exit 1; }
+          if [ -n "${{ matrix.required_step }}" ]; then
+            jq -e '.steps.${{ matrix.required_step }}.ok == true' "$t/out/result.json" > /dev/null || { echo "::error::self-test step ${{ matrix.required_step }} is missing or not ok"; exit 1; }
+          fi
+          exit $code
       - name: Self-test the AppImage
         if: always()
         run: |
+          V=$(node -p "require('./package.json').version")
+          app="dist/installer/$P/$P-$V-x86_64.AppImage"
+          t="$RUNNER_TEMP/selftest-appimage"
           # The runner lacks the libfuse2 the AppImage mounts itself with; unpack-and-run instead.
-          export PHOTOBOOK_DATA_DIR="$RUNNER_TEMP/selftest-appimage/data" APPIMAGE_EXTRACT_AND_RUN=1
-          chmod +x dist/installer/*.AppImage
-          xvfb-run -a -s '-screen 0 1600x1000x24' dist/installer/*.AppImage --self-test "$PWD/fixtures/generated/trip" --self-test-out "$RUNNER_TEMP/selftest-appimage/out"
+          export ${{ matrix.env_prefix }}_DATA_DIR="$t/data" ${{ matrix.env_prefix }}_PROFILE_DIR="$t/profile" PHOTOINFO_FALLBACK_DIR="$t/photoinfo" APPIMAGE_EXTRACT_AND_RUN=1
+          chmod +x "$app"
+          code=0
+          xvfb-run -a -s '-screen 0 1600x1000x24' "$app" --self-test "$PWD/fixtures/generated/trip" --self-test-out "$t/out" || code=$?
+          jq -r '.steps | to_entries[] | "step \(.key): ok=\(.value.ok)"' "$t/out/result.json" || true
+          if [ -n "${{ matrix.required_step }}" ]; then
+            jq -e '.steps.${{ matrix.required_step }}.ok == true' "$t/out/result.json" > /dev/null || { echo "::error::self-test step ${{ matrix.required_step }} is missing or not ok"; exit 1; }
+          fi
+          exit $code
       # The self-test passes even while sharp is mixing up two copies of glib and leaking memory
       # (see patch-sharp.mjs); these log lines are how that shows.
       - name: sharp must not be using the wrong glib
+        if: always()
         run: |
-          ! grep -l 'GLib-GObject-CRITICAL' "$RUNNER_TEMP"/selftest-*/data/logs/desktop.log
+          if grep -l 'GLib-GObject-CRITICAL' "$RUNNER_TEMP"/selftest-*/data/logs/desktop.log; then exit 1; fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: photobook-studio-linux-self-test
+          name: ${{ matrix.program }}-linux-self-test
           path: |
             ${{ runner.temp }}/selftest-*/out/result.json
             ${{ runner.temp }}/selftest-*/out/*.png

@@ -4,10 +4,13 @@
 //   "Photo Tool" --self-test <photo folder> --self-test-out <folder>
 //
 // It opens a copy of the folder (<folder>/photos: the photos given are never written), waits for it
-// to be read, stars one photo in the viewer and checks the star in that copy's photoinfo.json.
+// to be read, stars one photo in the viewer and checks the star in that copy's photoinfo.json. Then it
+// checks that the photo-tagging worker loads its runtime (onnxruntime-node), with no model.
 import { cpSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
-import { selfTestOverlap } from '../../shared/electron/config';
+import { Worker } from 'node:worker_threads';
+import { selfTestOverlap, taggingWorkerPath } from '../../shared/electron/config';
+import type { WorkerPing, WorkerPong } from '../server/tagging/worker';
 import { harness, offlineChecks, sleep, type SelfTestContext, type Step } from '../../shared/electron/selfTest';
 
 /** Every file under `dir` (relative path → size and time changed): to show the photos given were left alone. */
@@ -119,6 +122,38 @@ export async function runGallerySelfTest(ctx: SelfTestContext & { source: string
     return { ok: changed.length === 0 && !!starred, source: ctx.source, files: Object.keys(after).length, changed };
   });
 
+  await step('taggingWorkerLoads', () => pingTaggingWorker(taggingWorkerPath(__dirname), 30_000));
+
   await offlineChecks(h, ctx);
   return steps;
+}
+
+/**
+ * Photo tagging's runtime, without a model: starts the tagging worker the server would start (its unpacked copy
+ * in the installed app) and asks it which onnxruntime-node it loaded. Its ping reads nothing and downloads nothing.
+ */
+export function pingTaggingWorker(workerFile: string, timeoutMs: number): Promise<{ ok: boolean; ort?: string; error?: string; workerFile: string }> {
+  return new Promise((resolve) => {
+    let worker: Worker;
+    const done = (r: { ok: boolean; ort?: string; error?: string }) => {
+      clearTimeout(timer);
+      void worker?.terminate();
+      resolve({ ...r, workerFile });
+    };
+    const timer = setTimeout(() => done({ ok: false, error: `The tagging worker did not answer within ${timeoutMs / 1000} s.` }), timeoutMs);
+    try {
+      worker = new Worker(workerFile);
+    } catch (e) {
+      done({ ok: false, error: String((e as Error)?.message ?? e) });
+      return;
+    }
+    worker.on('message', (m: WorkerPong | unknown) => {
+      if ((m as WorkerPong)?.type !== 'pong') return;
+      const ort = (m as WorkerPong).ort;
+      done({ ok: /^\d+\.\d+\.\d+/.test(ort), ort, ...(ort ? {} : { error: 'onnxruntime-node did not load.' }) });
+    });
+    worker.on('error', (e) => done({ ok: false, error: String((e as Error)?.stack ?? e) }));
+    worker.on('exit', (code) => done({ ok: false, error: `The tagging worker stopped (code ${code}).` }));
+    worker.postMessage({ type: 'ping' } satisfies WorkerPing);
+  });
 }
