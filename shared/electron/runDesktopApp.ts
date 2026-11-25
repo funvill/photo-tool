@@ -8,11 +8,11 @@
 // A program may allow more through requestAllowed (Photo Tool's map tiles, once the user allows them).
 // There is deliberately no crash reporter and no updater.
 import { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, screen, session, shell, utilityProcess, type MenuItemConstructorOptions, type UtilityProcess, type WebContents } from 'electron';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
-import { LICENCE_FILE, MIN_WINDOW, NOTICES_BUTTON, NOTICES_FILE, dataLayout, describeAbout, describeFailure, parseSelfTest, photoInfoFallbackDir, restoreWindow, type ProgramNames, type SelfTestArgs, type WindowState } from './config';
-import { CarryOverError, carryOverAll } from './dataFolders';
+import { LICENCE_FILE, MIN_WINDOW, NOTICES_BUTTON, NOTICES_FILE, describeAbout, describeFailure, parseSelfTest, restoreWindow, type ProgramNames, type SelfTestArgs, type WindowState } from './config';
+import { CarryOverError, carryOverRefusal, prepareProgramFolders } from './dataFolders';
 import { isAppNavigation, requestHost, type GuardOptions } from './netGuard';
 import { SELF_TEST_CONTROL_URLS, type SelfTestContext, type Step } from './selfTest';
 import type { HostMessage, HostReply, StartMessage } from './serverHost';
@@ -69,6 +69,21 @@ export interface ProgramContext {
   resourceRoot(): string | undefined;
 }
 
+/**
+ * A move failed: say so in a window, then quit. The window waits for the app to be ready (before that,
+ * Linux only prints the message). Chromium is first pointed at a throwaway profile folder, so it never
+ * makes its default one (<appData>/<package.json productName>), which may be the folder to move to.
+ */
+function refuseToStart(names: ProgramNames, e: CarryOverError) {
+  console.error(e.message);
+  app.setPath('userData', mkdtempSync(join(tmpdir(), 'photo-tools-refused-')));
+  const { title, message } = carryOverRefusal(names, e);
+  void app.whenReady().then(() => {
+    dialog.showMessageBoxSync({ type: 'error', title, message, buttons: ['Close'], noLink: true });
+    app.exit(1);
+  });
+}
+
 /** Run `program` as this process's desktop app. Call once, at the top of the program's main. */
 export function runDesktopApp(program: DesktopProgram): void {
   const { names } = program;
@@ -86,26 +101,18 @@ export function runDesktopApp(program: DesktopProgram): void {
   const appData = app.getPath('appData');
 
   // The data of the program's old name moves to its new one, once, before anything is written
-  // (nothing above has made a folder). Never in a test run or when the folders are given.
-  let carried: ReturnType<typeof carryOverAll>;
+  // (nothing above has made a folder), and only then is Chromium given its profile folder: Chromium's
+  // own default (<appData>/<package.json productName>) is never used. Never in a test run or when the
+  // folders are given. Chromium's own files go beside the app's data, never into it.
+  let prepared: ReturnType<typeof prepareProgramFolders>;
   try {
-    carried = carryOverAll({ appData, packaged: app.isPackaged, oldProductName: names.oldProductName, productName: NAME, envPrefix: names.envPrefix, env, selfTest: !!selfTest });
+    prepared = prepareProgramFolders({ names, appData, packaged: app.isPackaged, env, selfTestOut: selfTest?.out, setUserData: (dir) => app.setPath('userData', dir) });
   } catch (e) {
     if (!(e instanceof CarryOverError)) throw e;
-    // Shown before the app is ready (showErrorBox may be), and nothing is written: the next start tries again.
-    console.error(String(e.message));
-    dialog.showErrorBox(
-      `${NAME} can't start yet`,
-      `${NAME} is the new name of ${names.oldProductName}. The first time it starts, it moves ${names.oldProductName}'s data to its new name, and it could not: ${names.oldProductName} may still be running.\n\nClose ${names.oldProductName}, then start ${NAME} again. Nothing was changed.\n\n${e.from}\n→ ${e.to}`,
-    );
-    app.exit(1);
+    refuseToStart(names, e);
     return;
   }
-
-  const layout = dataLayout({ appData, productName: NAME, packaged: app.isPackaged, env, envPrefix: names.envPrefix, selfTestOut: selfTest?.out });
-  const sharedPhotoInfo = photoInfoFallbackDir({ appData, packaged: app.isPackaged, env, selfTestOut: selfTest?.out });
-  // Chromium's own files go beside the app's data, never into it. Must be set before the app is ready.
-  app.setPath('userData', layout.profileDir);
+  const { layout, photoInfoFallbackDir: sharedPhotoInfo, carried } = prepared;
 
   // Chromium switches, all of them "do less on the network". The window only ever talks to
   // 127.0.0.1, so no proxy is wanted (this also stops the proxy auto-detect lookup at start).

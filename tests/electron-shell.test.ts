@@ -164,7 +164,7 @@ describe('gallery mode', () => {
     expect(GALLERY_PRODUCT_NAME).toBe('Photo Tool');
     expect(GALLERY_PRODUCT_NAME).not.toBe(product.productName);
     expect(main).toContain("names: { productName: GALLERY_PRODUCT_NAME, envPrefix: 'PHOTO_TOOL', oldProductName: 'Photobook Gallery' }");
-    expect(main).toContain("names: { productName: 'Photobook Editor', envPrefix: 'PHOTOBOOK', oldProductName: product.productName }");
+    expect(main).toContain("names: { productName: 'Photobook Editor', envPrefix: 'PHOTOBOOK', oldProductName: 'Photobook Studio' }");
     expect(main).not.toContain('PHOTOBOOK_GALLERY_');
   });
 
@@ -229,7 +229,8 @@ describe('desktop packaging', () => {
     expect(product.appId).toMatch(/^[a-z0-9]+(\.[a-z0-9]+)+$/);
     for (const f of ['electron-builder.config.cjs', 'electron/main.ts', 'electron/config.ts', 'shared/electron/runDesktopApp.ts', 'shared/electron/config.ts', 'scripts/desktop/build.mjs', 'package.json']) {
       expect(read(f), f).not.toContain(product.appId);
-      expect(read(f), f).not.toContain(`'${product.productName}'`);
+      // An old name to move data from is not the app's name (product.json may still carry it until T7).
+      expect(read(f).replace(/oldProductName: '[^']*'/g, ''), f).not.toContain(`'${product.productName}'`);
     }
   });
 

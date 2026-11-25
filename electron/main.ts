@@ -12,10 +12,11 @@ import { GALLERY_DESCRIPTION, galleryDrag, galleryEditActions, galleryFileAction
 import { OSM_TILE_ORIGIN, galleryRequestAllowed, hostResolverRules, isMapTileRequest, mapTileRequestHeaders } from './mapTiles';
 import product from './product.json';
 
-/** The editor. product.json still carries its old name until the programs are packaged apart. */
+/** The editor. */
 function editor(): DesktopProgram {
   return {
-    names: { productName: 'Photobook Editor', envPrefix: 'PHOTOBOOK', oldProductName: product.productName },
+    // The old names are written out: product.json takes the new name when the programs are packaged apart.
+    names: { productName: 'Photobook Editor', envPrefix: 'PHOTOBOOK', oldProductName: 'Photobook Studio' },
     appUserModelId: 'app.photobookeditor.desktop',
     description: product.description,
     repository: product.repository,
