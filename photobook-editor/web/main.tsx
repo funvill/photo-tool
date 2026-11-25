@@ -60,7 +60,7 @@ function VersionCheck() {
         const h = await fetch('/api/health', { cache: 'no-store' }).then((x) => x.json()).catch(() => null);
         if (h?.apiVersion === API_VERSION) return location.reload();
       }
-      throw new Error('The server did not come back with the new version. Quit and reopen the Photobook Studio app.');
+      throw new Error('The server did not come back with the new version. Quit and reopen Photobook Editor.');
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setState('failed');

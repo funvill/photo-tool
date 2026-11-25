@@ -1,4 +1,4 @@
-// `npm run dev:desktop` (the editor) and `npm run dev:desktop:photo-tool`: a program's desktop window
+// `npm run dev:desktop:editor` and `npm run dev:desktop:photo-tool`: a program's desktop window
 // onto its Vite dev server (hot reload for the page), with its API server running inside the app as it
 // does when installed.
 //

@@ -49,7 +49,7 @@ describe('photoinfo.json (server)', () => {
         },
       }),
     );
-    const { app, store } = createApp(dataDir);
+    const { app, store } = createApp(dataDir, { photoInfoFallbackDir: join(dataDir, 'photoinfo') });
     await new Promise<void>((r) => (server = app.listen(0, '127.0.0.1', () => r())));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     closeStore = () => store.close();
@@ -85,7 +85,7 @@ describe('photoinfo.json (server)', () => {
     expect(res.body.favorite).toBe(true);
     expect(JSON.parse(readFileSync(infoPath(), 'utf8')).photos['b.jpg'].star).toBe(true);
     // the stored column is untouched: a fresh app on the same data sees the file's value only
-    const { store } = createApp(dataDir);
+    const { store } = createApp(dataDir, { photoInfoFallbackDir: join(dataDir, 'photoinfo') });
     expect(store.assetById(b.id)!.favorite).toBe(0);
     store.close();
     expect((await byName('b.jpg')).favorite).toBe(true);

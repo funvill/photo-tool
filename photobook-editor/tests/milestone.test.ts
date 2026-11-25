@@ -23,7 +23,7 @@ let base: string;
 let close: () => void;
 
 async function start() {
-  const { app, store } = createApp(dataDir);
+  const { app, store } = createApp(dataDir, { photoInfoFallbackDir: join(dataDir, 'photoinfo') });
   await new Promise<void>((r) => {
     server = app.listen(0, '127.0.0.1', () => r());
   });

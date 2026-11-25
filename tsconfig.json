@@ -16,5 +16,5 @@
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["src", "electron", "shared", "photo-tool", "photobook-editor", "scripts", "tests", "vite.config.ts", "vitest.config.ts", "playwright.config.ts"]
+  "include": ["src", "shared", "photo-tool", "photobook-editor", "scripts", "tests", "vite.config.ts", "vitest.config.ts", "playwright.config.ts"]
 }

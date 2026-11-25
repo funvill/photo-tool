@@ -20,8 +20,8 @@ const loadNotices = () => import(/* @vite-ignore */ pathToFileURL(makeNotices).h
 const tmp = (name: string) => mkdtempSync(join(tmpdir(), name));
 const HEIC_FIXTURE = join(process.cwd(), 'fixtures', 'generated', 'trip', 'day2-06-heic-sunset.heic');
 
-async function serve(dataDir: string, opts: Parameters<typeof createApp>[1] = {}) {
-  const { app, store } = createApp(dataDir, opts);
+async function serve(dataDir: string, opts: Partial<Parameters<typeof createApp>[1]> = {}) {
+  const { app, store } = createApp(dataDir, { photoInfoFallbackDir: join(dataDir, 'photoinfo'), ...opts });
   const server = app.listen(0, '127.0.0.1');
   await new Promise((r) => server.once('listening', r));
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

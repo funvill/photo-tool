@@ -10,7 +10,7 @@
 import { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, screen, session, shell, utilityProcess, type MenuItemConstructorOptions, type UtilityProcess, type WebContents } from 'electron';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { LICENCE_FILE, MIN_WINDOW, NOTICES_BUTTON, NOTICES_FILE, describeAbout, describeFailure, parseSelfTest, restoreWindow, type ProgramNames, type SelfTestArgs, type WindowState } from './config';
 import { CarryOverError, carryOverRefusal, prepareProgramFolders } from './dataFolders';
 import { isAppNavigation, requestHost, type GuardOptions } from './netGuard';
@@ -38,7 +38,7 @@ export interface DesktopProgram {
   sendHeaders?(session: Electron.Session, version: () => string): void;
   /** The program's own File menu items, before "Open the data folder" and Quit. */
   fileMenu(ctx: ProgramContext): MenuItemConstructorOptions[];
-  /** The program's own IPC handlers (the shared desktop:* ones are registered already). */
+  /** The program's own IPC handlers (the shared desktop:pick-folder is registered already). */
   registerIpc(ctx: ProgramContext): void;
   /** More (or different) fields for the server's start message. */
   startMessage(ctx: ProgramContext): Partial<StartMessage>;
@@ -91,7 +91,7 @@ export function runDesktopApp(program: DesktopProgram): void {
   const env = process.env;
   const envVar = (name: string) => env[`${names.envPrefix}_${name}`];
   const selfTest = parseSelfTest(process.argv);
-  // Development (`npm run dev:desktop`): the page comes from the Vite dev server.
+  // Development (`npm run dev:desktop:editor` or `dev:desktop:photo-tool`): the page comes from the Vite dev server.
   const devUrl = !app.isPackaged ? envVar('DESKTOP_DEV_URL') : undefined;
 
   // The name and the folders below decide the single-instance lock, so they are set before it is asked for.
@@ -446,38 +446,14 @@ export function runDesktopApp(program: DesktopProgram): void {
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));
   }
 
-  // ---- the page's functions (see preload.ts)
+  // ---- the page's functions (see each program's preload.ts)
 
   function registerDesktopApi() {
-    /** An export's file name → its full path, or null when it is not a file in the exports folder. */
-    const exportPath = (name: unknown): string | null => {
-      if (typeof name !== 'string' || !name || basename(name) !== name) return null;
-      const path = join(layout.dataDir, 'exports', name);
-      return existsSync(path) && statSync(path).isFile() ? path : null;
-    };
     ipcMain.handle('desktop:pick-folder', async (e, options: { title?: unknown; defaultPath?: unknown }) => {
       if (!fromApp(e) || !win) return null;
       const defaultPath = typeof options?.defaultPath === 'string' && existsSync(options.defaultPath) ? options.defaultPath : undefined;
       const r = await dialog.showOpenDialog(win, { title: typeof options?.title === 'string' ? options.title : 'Choose a folder', defaultPath, properties: ['openDirectory'] });
       return r.canceled || !r.filePaths[0] ? null : r.filePaths[0];
-    });
-    ipcMain.handle('desktop:open-file', async (e, name: unknown) => {
-      const path = fromApp(e) ? exportPath(name) : null;
-      if (!path) return false;
-      if (selfTest) return true; // a test must not pop a PDF viewer open
-      const problem = await shell.openPath(path);
-      if (problem) {
-        // No app for this kind of file: showing where it is still helps.
-        log('could not open', path, problem);
-        shell.showItemInFolder(path);
-      }
-      return true;
-    });
-    ipcMain.handle('desktop:show-in-folder', (e, name: unknown) => {
-      const path = fromApp(e) ? exportPath(name) : null;
-      if (!path) return false;
-      if (!selfTest) shell.showItemInFolder(path);
-      return true;
     });
     program.registerIpc(ctx);
   }

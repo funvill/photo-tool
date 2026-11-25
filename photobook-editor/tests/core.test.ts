@@ -268,8 +268,9 @@ describe('architecture boundaries', () => {
     // The tile address is written down once (photo-tool/core/galleryMap.ts) and allowed by the gallery page's
     // content policy (its index.html and its server's header) for images only.
     const tileFiles = new Set(['photo-tool/core/galleryMap.ts', 'photo-tool/web/index.html', 'photo-tool/server/app.ts'].map((f) => join(f)));
-    // electron/ is the desktop shell, scripts/desktop builds it: neither may reach out either.
-    for (const f of [...['photobook-editor', 'shared'].flatMap((d) => files(d)).filter((f) => !/[\\/]tests[\\/]/.test(f)), ...['core', 'server', 'web'].flatMap((d) => files(`photo-tool/${d}`)), ...files('electron'), ...files('scripts/desktop'), 'electron-builder.config.cjs']) {
+    // The editor's desktop shell (photobook-editor/electron and its builder config, both in the list above)
+    // and scripts/desktop, which builds both programs, may not reach out either.
+    for (const f of [...['photobook-editor', 'shared'].flatMap((d) => files(d)).filter((f) => !/[\\/]tests[\\/]/.test(f)), ...['core', 'server', 'web'].flatMap((d) => files(`photo-tool/${d}`)), ...files('scripts/desktop'), 'photo-tool/electron-builder.config.cjs']) {
       // Comments may cite documentation; code may not contain remote URLs.
       const src = readFileSync(f, 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
       const urls = src.match(/https?:\/\/[^\s'"`);]+/g) ?? [];

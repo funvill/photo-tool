@@ -91,7 +91,7 @@ export function Home() {
     <div className="home">
       <header className="home-head">
         <div>
-          <h1>Photobook Studio</h1>
+          <h1>Photobook Editor</h1>
           <p className="muted">{isBrowserBackend ? 'Runs in your browser. Photos and books stay on this device — nothing is uploaded.' : 'Everything stays on this computer — photos, thumbnails and books.'}</p>
         </div>
         <button className="btn btn-primary" onClick={() => setCreating(true)}><Icon name="plus" /> New book or poster</button>

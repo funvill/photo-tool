@@ -42,7 +42,7 @@ describe.runIf(existsSync(FIXTURES))('shelf and linked folders (API)', () => {
     outside = join(tmp, 'elsewhere');
     mkdirSync(outside);
     put('day1-01-arrival.jpg', outside);
-    const { app, store } = createApp(dataDir);
+    const { app, store } = createApp(dataDir, { photoInfoFallbackDir: join(dataDir, 'photoinfo') });
     // Point the shelf at a folder that doesn't exist yet (as on a first run).
     store.setSetting('shelf_root', shelf);
     await new Promise<void>((r) => (server = app.listen(0, '127.0.0.1', () => r())));

@@ -45,7 +45,7 @@ describe.runIf(existsSync(FIXTURES))('dropping files (API)', () => {
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'drop-data-'));
     tmp = mkdtempSync(join(tmpdir(), 'drop-'));
-    const { app, store } = createApp(dataDir);
+    const { app, store } = createApp(dataDir, { photoInfoFallbackDir: join(dataDir, 'photoinfo') });
     await new Promise<void>((r) => (server = app.listen(0, '127.0.0.1', () => r())));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     closeStore = () => store.close();

@@ -166,7 +166,7 @@ describe('entry points', () => {
     expect(hits).toEqual([]);
   });
 
-  it("Photo Tool's preload has no openGallery, and none of the editor's export functions", () => {
+  it("Photo Tool's preload opens no other program, and has none of the editor's export functions", () => {
     const preload = read('photo-tool/electron/preload.ts');
     expect(preload).not.toContain(['open', 'Gallery'].join(''));
     expect(preload).not.toContain('desktop:open-file');

@@ -24,7 +24,7 @@ describe.runIf(existsSync(HEIC))('HEIC on the Shelf', () => {
     const shelf = mkdtempSync(join(tmpdir(), 'heic-shelf-'));
     mkdirSync(join(shelf, 'Phone'));
     copyFileSync(HEIC, join(shelf, 'Phone', 'IMG_0001.HEIC'));
-    const { app, store } = createApp(dataDir);
+    const { app, store } = createApp(dataDir, { photoInfoFallbackDir: join(dataDir, 'photoinfo') });
     store.setSetting('shelf_root', shelf);
     const server = app.listen(0, '127.0.0.1');
     await new Promise((r) => server.once('listening', r));

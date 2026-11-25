@@ -33,14 +33,18 @@ export interface AppOptions {
   restart?: () => void;
   /** A packaged app's resource folder (see resources.ts). Leave it out when running from source. */
   resourceRoot?: string;
-  /** Where photoinfo files for read-only photo folders are kept. The program's main.ts always passes the folder shared with Photo Tool; the default (`<dataDir>/photoinfo`) is for tests and embedders. */
-  photoInfoFallbackDir?: string;
+  /**
+   * Where photoinfo files for read-only photo folders are kept: the folder shared with Photo Tool
+   * (shared/electron/config.ts photoInfoFallbackDir in the desktop app, ./data/photoinfo-shared or
+   * PHOTOINFO_FALLBACK_DIR from source). Always given, so stars never land in a folder Photo Tool cannot see.
+   */
+  photoInfoFallbackDir: string;
 }
 
-export function createApp(dataDir: string, opts: AppOptions = {}) {
+export function createApp(dataDir: string, opts: AppOptions) {
   if (opts.resourceRoot) setResourceRoot(opts.resourceRoot);
   const store = new Store(dataDir);
-  const photoInfoOptions = { fallbackDir: opts.photoInfoFallbackDir ?? join(dataDir, 'photoinfo') };
+  const photoInfoOptions = { fallbackDir: opts.photoInfoFallbackDir };
   const importer = new Importer(store, photoInfoOptions);
   const photoInfo = new PhotoInfoIndex(photoInfoOptions);
   const app = express();

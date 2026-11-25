@@ -19,9 +19,9 @@
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 // Each program's entry files and external modules: the table in programs.mjs.
-import { PROGRAMS, programArg } from './programs.mjs';
+import { PROGRAMS, findPackage, programArg, runtimeModules } from './programs.mjs';
 
 const root = resolve(import.meta.dirname, '../..');
 const dev = process.argv.includes('--dev');
@@ -36,9 +36,6 @@ const out = join(root, 'dist', program, 'desktop');
 // The development bundles get their own folder, so they can never be packaged by mistake.
 const appDir = join(out, dev ? 'dev' : 'app');
 
-// Never loaded in Node: Transformers.js carries its own copy of the web runtime inside its Node build,
-// so the onnxruntime-web package (140 MB) is left out.
-const NOT_NEEDED = new Set(['onnxruntime-web']);
 // onnxruntime-node carries binaries for every platform (about 290 MB); only this one's are packed.
 const ORT_KEEP = `${process.platform}/${process.arch}`;
 const keepFile = (src) => {
@@ -71,43 +68,10 @@ if (spec.taggingWorker) await build({ ...common, entryPoints: [spec.taggingWorke
 // The preload runs in the sandboxed page process: it may only require 'electron'.
 await build({ ...common, platform: 'browser', entryPoints: [spec.preload], outfile: join(appDir, 'preload.cjs'), external: ['electron'] });
 
-/** A package's folder, found the way Node would from `from`. */
-function findPackage(name, from) {
-  for (let dir = from; ; dir = dirname(dir)) {
-    const candidate = join(dir, 'node_modules', name);
-    if (existsSync(join(candidate, 'package.json'))) return candidate;
-    if (dirname(dir) === dir || dir === root) return null;
-  }
-}
-
-/** The external modules and everything they need at run time, as folders under node_modules. */
-function runtimeModules() {
-  const found = new Map();
-  const visit = (name, from, optional) => {
-    if (NOT_NEEDED.has(name)) return;
-    // sharp loads the WebAssembly build only when it finds no native one, so leave that out.
-    if (linuxWasm && /^@img\/sharp-(libvips-)?linux/.test(name)) return;
-    const dir = findPackage(name, from);
-    if (!dir) {
-      // Optional packages for other platforms (sharp's Linux binaries on Windows) are not installed.
-      if (optional) return;
-      throw new Error(`${name} (needed from ${from}) is not installed. Run npm install.`);
-    }
-    if (found.has(dir)) return;
-    const p = readJson(join(dir, 'package.json'));
-    found.set(dir, p);
-    for (const dep of Object.keys(p.dependencies ?? {})) visit(dep, dir, false);
-    for (const dep of Object.keys(p.optionalDependencies ?? {})) visit(dep, dir, true);
-  };
-  for (const name of EXTERNAL) visit(name, root, false);
-  if (linuxWasm) visit(SHARP_WASM, root, false);
-  return found;
-}
-
 if (linuxWasm && !dev) (await import('./ensure-sharp-wasm.mjs')).ensureSharpWasm();
 // electron-builder packs only what this list leads to, so the WebAssembly build has to be on it:
 // sharp itself does not name it as a dependency.
-const dependencies = Object.fromEntries([...EXTERNAL, ...(linuxWasm && !dev ? [SHARP_WASM] : [])].map((name) => [name, readJson(join(findPackage(name, root), 'package.json')).version]));
+const dependencies = Object.fromEntries([...EXTERNAL, ...(linuxWasm && !dev ? [SHARP_WASM] : [])].map((name) => [name, readJson(join(findPackage(name, root, root), 'package.json')).version]));
 
 // The packaged app's own package.json. No "type": the bundles are CommonJS.
 writeFileSync(
@@ -138,7 +102,9 @@ if (dev) {
   // Run from the project: Node finds sharp and the rest in the project's own node_modules.
   console.log(`Built ${program}'s desktop bundles (development) in ${relative(root, appDir)}`);
 } else {
-  const modules = runtimeModules();
+  // The external modules and what they need (programs.mjs). sharp loads the WebAssembly build only
+  // when it finds no native one, so with the WebAssembly build the native Linux ones are left out.
+  const modules = runtimeModules(program, { root, skip: (name) => linuxWasm && /^@img\/sharp-(libvips-)?linux/.test(name), extra: linuxWasm ? [SHARP_WASM] : [] });
   for (const dir of modules.keys()) {
     // Copy each package without any node_modules nested in it: nested ones that are needed are
     // in the list themselves and are copied to the same nested place.

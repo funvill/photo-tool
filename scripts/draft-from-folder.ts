@@ -5,7 +5,7 @@
 // The book lands in the same data directory the app uses (./data, or PHOTOBOOK_DATA_DIR), so it
 // is on the home page the next time the app starts. Stop the app first: both write the database.
 
-import { resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import { generateDraft, printablePages, type BookDocument, type PhotoAsset } from '../photobook-editor/core';
@@ -24,7 +24,9 @@ const dataDir = resolve(process.env.PHOTOBOOK_DATA_DIR ?? 'data');
 // on the top, bottom and outside edges (Blurb's size calculator, checked 2026-11-22).
 const BLURB_LARGE_SQUARE_TRIM_MM = 11.75 * 25.4;
 
-const { app, store } = createApp(dataDir);
+// Stars for read-only photo folders: the folder shared with Photo Tool, as `npm run dev` uses.
+const photoInfoFallbackDir = resolve(process.env.PHOTOINFO_FALLBACK_DIR ?? join('data', 'photoinfo-shared'));
+const { app, store } = createApp(dataDir, { photoInfoFallbackDir });
 const server = await new Promise<Server>((done) => {
   const s = app.listen(0, '127.0.0.1', () => done(s));
 });

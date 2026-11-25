@@ -16,3 +16,6 @@ export const PROGRAM_NAMES: ProgramName[];
 export function programEntries(name: ProgramName): string[];
 export function programArg(argv: readonly string[]): ProgramName;
 export function withoutProgramArg(argv: readonly string[]): string[];
+export function findPackage(name: string, from: string, root?: string): string | null;
+export function runtimeModules(name: ProgramName, options?: { root?: string; skip?: (name: string) => boolean; extra?: string[] }): Map<string, { name: string; version: string; [key: string]: unknown }>;
+export function runtimeModuleNames(name: ProgramName): string[];

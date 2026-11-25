@@ -3,8 +3,8 @@
 //   node scripts/desktop/linux/docker-build.mjs [work folder]
 //
 // 1. copies the source (no node_modules, data, photos or build output) to <work>/src
-// 2. builds it in a node:24-bookworm container with `npm ci` and `npm run dist`
-// 3. copies the two packages to dist/installer/
+// 2. builds it in a node:24-bookworm container with `npm ci` and `npm run dist:all` (both programs)
+// 3. copies the packages (a .deb and an AppImage for each program) to dist/installer/
 //
 // The work folder defaults to <temp>/photobook-linux and must be outside the project.
 // Downloads (npm, Electron, electron-builder's tools) are kept in the Docker volume

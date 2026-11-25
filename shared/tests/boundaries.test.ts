@@ -54,6 +54,12 @@ describe('photobook-editor', () => {
   });
 });
 
+describe('electron/', () => {
+  it('is gone: each program has its own electron/ folder', () => {
+    expect(existsSync(resolve(root, 'electron'))).toBe(false);
+  });
+});
+
 describe('src', () => {
   it('is empty', () => {
     const files: string[] = [];

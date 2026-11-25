@@ -164,7 +164,7 @@ describe('import, backfill and export (API)', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'cutout-data-'));
     photoDir = mkdtempSync(join(tmpdir(), 'cutout-photos-'));
     await writeFixtures(photoDir);
-    const { app, store } = createApp(dataDir);
+    const { app, store } = createApp(dataDir, { photoInfoFallbackDir: join(dataDir, 'photoinfo') });
     await new Promise<void>((r) => (server = app.listen(0, '127.0.0.1', () => r())));
     baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     storeClose = () => store.close();

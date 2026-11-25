@@ -86,7 +86,7 @@ export interface NoticesFor {
 
 export function makeNotices(root = projectRoot() ?? process.cwd(), program: NoticesFor = {}): Notices {
   const pkg = readJson<Pkg>(join(root, 'package.json'));
-  const product = { productName: program.productName ?? readJson<{ productName: string }>(join(root, 'electron', 'product.json')).productName };
+  const product = { productName: program.productName ?? readJson<{ productName: string }>(join(root, 'photobook-editor', 'product.json')).productName };
   const modules = join(root, 'node_modules');
   const extras = join(root, 'scripts', 'notices');
   const missing: string[] = [];

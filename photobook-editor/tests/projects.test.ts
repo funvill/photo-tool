@@ -25,7 +25,7 @@ describe('deleting projects (API)', () => {
   };
   beforeAll(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'delete-'));
-    const { app, store } = createApp(dataDir);
+    const { app, store } = createApp(dataDir, { photoInfoFallbackDir: join(dataDir, 'photoinfo') });
     await new Promise<void>((r) => (server = app.listen(0, '127.0.0.1', () => r())));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     closeStore = () => store.close();
