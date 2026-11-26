@@ -1,6 +1,7 @@
 // Deleting photos from the gallery window, the part free of Electron (see gallery.ts for the rest).
 // A photo goes to the Recycle Bin (Trash) only: never erased. Only paths the gallery's server has
 // catalogued, only after the person said yes, and a failure is reported, never retried another way.
+import { pathToFileURL } from 'node:url';
 import { dragRequest, MAX_DRAG_FILES } from './drag';
 
 export interface TrashResult {
@@ -70,4 +71,25 @@ export const MAX_COPY_TEXT = MAX_DRAG_FILES * 4097;
 /** The text the page asked to copy, when it is a non-empty string no longer than MAX_COPY_TEXT; else null. */
 export function copyTextRequest(raw: unknown): string | null {
   return typeof raw === 'string' && raw !== '' && raw.length <= MAX_COPY_TEXT ? raw : null;
+}
+
+/**
+ * Ctrl+C with several photos: what the page asked to copy, as far as it is taken on trust. Only paths
+ * `allowed` passes (photos of the open folder that are files), each once, at most MAX_DRAG_FILES (as a
+ * drag); `dropped` says how many allowed ones were left over. Null when there is nothing to copy.
+ */
+export function copyFilesRequest(raw: unknown, allowed: (p: string) => boolean): { paths: string[]; dropped: number } | null {
+  if (!Array.isArray(raw)) return null;
+  const ok = [...new Set(raw.filter((p): p is string => typeof p === 'string' && p !== ''))].filter(allowed);
+  if (!ok.length) return null;
+  return { paths: ok.slice(0, MAX_DRAG_FILES), dropped: Math.max(0, ok.length - MAX_DRAG_FILES) };
+}
+
+/**
+ * The files as a text/uri-list (file URLs, CRLF between them). Written to the clipboard under that type,
+ * Electron puts it on the Windows clipboard as a file drop list (CF_HDROP), which Explorer and chat apps
+ * paste as files. (Found by trying it, issue #9: Electron 45 has no raw clipboard formats any more.)
+ */
+export function fileUrlList(paths: string[]): string {
+  return paths.map((p) => pathToFileURL(p).href).join('\r\n');
 }

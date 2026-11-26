@@ -1769,6 +1769,42 @@ test.describe('#9 keys, rotate and flip, light and colour, copy, shortcuts', () 
     }
   });
 
+  test('Ctrl+C copies one photo as the picture, several as files; in the search field it is the field\'s own', async ({ page, request }) => {
+    await page.addInitScript(() => {
+      const w = window as unknown as { desktop: unknown; __copied: unknown[] };
+      w.__copied = [];
+      w.desktop = {
+        copyImage: async (path: string) => (w.__copied.push(['image', path]), { ok: true }),
+        copyFiles: async (paths: string[]) => (w.__copied.push(['files', paths]), { ok: true, copied: paths.length, dropped: 0 }),
+      };
+    });
+    const copied = () => page.evaluate(() => (window as unknown as { __copied: unknown[] }).__copied);
+    const dir = await openTrip(page, request);
+    try {
+      await page.getByLabel('Stack similar').uncheck();
+      const tiles = page.locator('.gallery-tile');
+      const first = (await tiles.nth(0).getAttribute('data-path'))!;
+      const second = (await tiles.nth(1).getAttribute('data-path'))!;
+      await tiles.nth(0).click();
+      await page.keyboard.press('Control+c');
+      await expect(page.locator('.toast', { hasText: 'Copied' }).first()).toBeVisible();
+      expect(await copied()).toEqual([['image', first]]);
+
+      await tiles.nth(1).click({ modifiers: ['Shift'] });
+      await page.keyboard.press('Control+c');
+      await expect(page.locator('.toast', { hasText: 'Copied 2 photos' })).toBeVisible();
+      expect(await copied()).toEqual([['image', first], ['files', [first, second]]]);
+
+      const search = page.getByLabel('Search photos');
+      await search.fill('lake');
+      await search.press('Control+a');
+      await search.press('Control+c');
+      expect(await copied()).toHaveLength(2);
+    } finally {
+      removeTrip(dir);
+    }
+  });
+
   test('] and [ turn the selected photos as an unsaved edit, one undo step; the menu rotates and flips too', async ({ page, request }) => {
     const dir = await openTrip(page, request);
     try {

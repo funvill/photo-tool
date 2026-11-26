@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { gridStep } from '../core/galleryViewer';
-import { selectablePaths, selectFiltered, selectVisible, useGallery } from './store';
+import { canCopyPhotos, selectablePaths, selectFiltered, selectVisible, useGallery } from './store';
 
 /** Where keys belong to what has focus (typing, a menu, a dialog), not to the review. */
 const TYPING = 'input, textarea, select, [contenteditable="true"], [role="dialog"]';
@@ -35,7 +35,7 @@ function stepFrom(list: { path: string }[], unfolded: { path: string }[], select
  * hides the same photos; Enter or Space opens the selected photo in the viewer; E opens edit mode on it;
  * [ and ] turn the selected photos a quarter anticlockwise or clockwise (an unsaved edit, as Done in edit
  * mode leaves one); Delete sends the selected photos to the Recycle Bin (after the desktop app's confirm); Ctrl+A selects
- * every shown photo and Ctrl+D none; Ctrl+Z undoes the last change. Not while typing (Ctrl+Z there is the field's own), while the viewer or a
+ * every shown photo and Ctrl+D none; Ctrl+C copies the selected photos (desktop app); Ctrl+Z undoes the last change. Not while typing (Ctrl+Z there is the field's own), while the viewer or a
  * dialog is open, or while a photo is being edited (edit mode has its own keys); no other key with Ctrl,
  * Alt or Meta held.
  */
@@ -57,6 +57,13 @@ export function useReviewKeys(onOpen: (path: string) => void) {
         e.preventDefault();
         if (e.key === 'a' || e.key === 'A') s.selectAll();
         else s.selectNone();
+        return;
+      }
+      // Ctrl+C copies the selected photos (desktop app only). Selected text, or a field, keeps its own copy.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === 'c' || e.key === 'C')) {
+        if (inside(e, TYPING) || !canCopyPhotos() || (window.getSelection()?.toString() ?? '') !== '') return;
+        e.preventDefault();
+        if (!e.repeat) void s.copySelected();
         return;
       }
       if (e.ctrlKey || e.altKey || e.metaKey) return;

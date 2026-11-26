@@ -169,7 +169,7 @@ export function PhotoMenu({ x, y, path, onClose }: PhotoMenuProps) {
       {!!actions?.saveAll && <MenuItem icon="check" label={`Save all (${actions.saveAll})`} disabled={saving} onClick={go(() => useGallery.getState().saveAllEdits())} />}
       {actions?.revert && <MenuItem icon="undo" label="Revert to original" disabled={saving} onClick={go(() => useGallery.getState().revertEdit(path))} />}
       <div className="ctx-sep" />
-      <MenuItem icon="image" label="Copy to clipboard" disabled={!desktop?.copyImage} onClick={go(() => copyImage(path))} />
+      <MenuItem icon="image" label="Copy to clipboard" hint="Ctrl+C" disabled={!desktop?.copyImage} onClick={go(() => copyImage(path))} />
       <MenuItem icon="copy" label="Copy path to clipboard" onClick={go(() => copyPaths(path))} />
       <MenuItem icon="folder" label="Show in file explorer" disabled={!desktop?.showPhotoInFolder} onClick={go(() => showInFolder(path))} />
       <div className="ctx-sep" />

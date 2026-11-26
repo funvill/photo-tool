@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GalleryItem } from '../server/app';
 
-const { useGallery, connectDesktop, guardUnload, selectVisible, selectStackInfo, selectFiltered, selectFacts, selectStackPlace, menuTargets, shownEdit, selectMeaningStart } = await import('../web/store');
+const { useGallery, connectDesktop, canCopyPhotos, guardUnload, selectVisible, selectStackInfo, selectFiltered, selectFacts, selectStackPlace, menuTargets, shownEdit, selectMeaningStart } = await import('../web/store');
 const { IDENTITY_EDIT } = await import('../../shared/core/photoEdit');
 
 function item(over: Partial<GalleryItem> = {}): GalleryItem {
@@ -1924,5 +1924,61 @@ describe('#9 gallery store: rotate and flip without edit mode', () => {
     g().flipSelected();
     expect(Object.keys(g().pendingEdits)).toEqual(['b']);
     useGallery.setState({ savingPaths: [] });
+  });
+});
+
+describe('#9 gallery store: Ctrl+C', () => {
+  const g = () => useGallery.getState();
+  const photos = (...names: string[]) => names.map((n) => item({ path: n, fileName: `${n}.jpg`, key: n }));
+  const setup = (items: GalleryItem[], selected: string | null, extra: Record<string, unknown> = {}) =>
+    useGallery.setState({ job: 'j1', root: 'D:/Trip', items, sort: 'name', filter: {}, stacked: false, openStacks: [], view: 'grid', selected, selection: selected ? [selected] : [], anchor: selected, ...extra });
+  let disconnect: (() => void) | null = null;
+  afterEach(() => {
+    disconnect?.();
+    disconnect = null;
+  });
+  const fake = () => {
+    const calls: { image: string[]; files: string[][] } = { image: [], files: [] };
+    disconnect = connectDesktop({
+      copyImage: async (p: string) => (calls.image.push(p), { ok: true }),
+      copyFiles: async (ps: string[]) => (calls.files.push(ps), { ok: true, copied: ps.length, dropped: 0 }),
+    });
+    return calls;
+  };
+
+  it('one photo goes as the picture', async () => {
+    setup(photos('a', 'b'), 'b');
+    const calls = fake();
+    expect(canCopyPhotos()).toBe(true);
+    await g().copySelected();
+    expect(calls).toEqual({ image: ['b'], files: [] });
+    expect(g().toasts).toEqual([expect.objectContaining({ kind: 'success', text: 'Copied' })]);
+  });
+
+  it('several go as files, in the order shown, and the toast counts them', async () => {
+    setup(photos('a', 'b', 'c'), 'c', { selection: ['c', 'a'] });
+    const calls = fake();
+    await g().copySelected();
+    expect(calls.files).toEqual([['a', 'c']]);
+    expect(g().toasts).toEqual([expect.objectContaining({ kind: 'success', text: 'Copied 2 photos' })]);
+  });
+
+  it('over 500, the first 500 go and the toast says so', async () => {
+    const many = Array.from({ length: 600 }, (_, n) => item({ path: `p${String(n).padStart(3, '0')}`, fileName: `p${n}.jpg`, key: `k${n}` }));
+    setup(many, 'p000', { selection: many.map((i) => i.path) });
+    const calls = fake();
+    await g().copySelected();
+    expect(calls.files[0]).toHaveLength(500);
+    expect(g().toasts[0].text).toBe('Copied the first 500 of 600 photos');
+  });
+
+  it('a refusal is shown as an error; without the desktop app nothing can be copied', async () => {
+    setup(photos('a', 'b'), 'a', { selection: ['a', 'b'] });
+    disconnect = connectDesktop({ copyImage: async () => ({ ok: true }), copyFiles: async () => ({ ok: false, copied: 0, dropped: 0, error: 'no' }) });
+    await g().copySelected();
+    expect(g().toasts).toEqual([expect.objectContaining({ kind: 'error', text: 'no' })]);
+    disconnect();
+    disconnect = null;
+    expect(canCopyPhotos()).toBe(false);
   });
 });

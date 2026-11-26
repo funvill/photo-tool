@@ -6,11 +6,12 @@ import { clipboard, ClipboardItem, dialog, ipcMain, nativeImage, shell, type Bro
 import { statSync } from 'node:fs';
 import { copyFile, rename, rm, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import type { DesktopApi } from '../../shared/desktop/desktopApi';
 import { formatById } from '../../shared/core/mediaFormats';
 import { editFormatFor, type PhotoEdit } from '../../shared/core/photoEdit';
 import { launchFolder } from '../../shared/electron/config';
 import { dragFiles, dragRequest, preparedDragFor, sameDragList, type DragCheck, type PreparedDrag } from './drag';
-import { copyTextRequest, trashConfirm, trashPhotos, type TrashResult } from './fileActions';
+import { copyFilesRequest, copyTextRequest, fileUrlList, trashConfirm, trashPhotos, type TrashResult } from './fileActions';
 import { letPageClose, saveAs, saveToFile, shouldQuit, unsavedClosePrompt, type EditSaveAsResult, type EditSaveResult } from './editActions';
 import { readEditTarget, readMapConsent, writeEditTarget, writeMapConsent, type EditTarget } from './mapTiles';
 
@@ -245,6 +246,7 @@ async function tellRemoved(port: number, paths: string[]): Promise<void> {
 }
 
 type ActionReply = { ok: boolean; error?: string };
+type CopyFilesReply = NonNullable<Awaited<ReturnType<NonNullable<DesktopApi['copyFiles']>>>>;
 const NOT_A_PHOTO = "That photo is not in the open folder any more.";
 const failure = (err: unknown) => (err instanceof Error ? err.message : String(err));
 
@@ -295,6 +297,23 @@ export function galleryFileActions(o: { window: () => BrowserWindow | null; from
     } catch (err) {
       o.log('copy image failed', String(err));
       return { ok: false, error: `Couldn't copy the photo: ${failure(err)}` };
+    }
+  });
+
+  // Ctrl+C with several photos: the files, as Explorer and chat apps paste them. A text/uri-list of file URLs,
+  // which Electron writes to the Windows clipboard as a file drop list (CF_HDROP). The page sends at most 500.
+  ipcMain.handle('gallery:copy-files', async (e, raw: unknown): Promise<CopyFilesReply> => {
+    if (!allowed(e)) return { ok: false, copied: 0, dropped: 0, error: 'Not allowed' };
+    try {
+      const asked = dragRequest(raw);
+      const ok = new Set(asked.length ? await inOpenFolder(asked) : []);
+      const request = copyFilesRequest(asked, (p) => ok.has(p));
+      if (!request) return { ok: false, copied: 0, dropped: 0, error: NOT_A_PHOTO };
+      await clipboard.write([new ClipboardItem({ 'text/uri-list': fileUrlList(request.paths) })]);
+      return { ok: true, copied: request.paths.length, dropped: request.dropped };
+    } catch (err) {
+      o.log('copy files failed', String(err));
+      return { ok: false, copied: 0, dropped: 0, error: `Couldn't copy the photos: ${failure(err)}` };
     }
   });
 

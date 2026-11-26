@@ -25,6 +25,7 @@ const api: PhotoToolDesktopApi = {
   },
   copyText: (text) => ipcRenderer.invoke('gallery:copy-text', String(text)),
   copyImage: (path) => ipcRenderer.invoke('gallery:copy-image', String(path)),
+  copyFiles: (paths) => ipcRenderer.invoke('gallery:copy-files', Array.isArray(paths) ? paths.map(String) : []),
   showPhotoInFolder: (path) => ipcRenderer.invoke('gallery:show-in-folder', String(path)),
   trashPhotos: (paths) => ipcRenderer.invoke('gallery:trash', Array.isArray(paths) ? paths.map(String) : []),
   getMapConsent: () => ipcRenderer.invoke('gallery:get-map-consent'),

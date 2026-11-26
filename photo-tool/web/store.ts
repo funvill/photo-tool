@@ -151,6 +151,11 @@ export interface GalleryState {
    */
   trashSelected(paths?: string[]): Promise<void>;
   /**
+   * Ctrl+C: one photo goes on the clipboard as the picture (as Copy to clipboard does), several as files (at
+   * most 500, as a drag). A toast says how it went. Needs the desktop app (canCopyPhotos).
+   */
+  copySelected(): Promise<void>;
+  /**
    * [ and ] (and the photo menu): turn every selected photo (the focused one when none is) a quarter, as an
    * unsaved edit built on what it shows now, exactly as Done in edit mode would leave it. One undo step.
    */
@@ -373,6 +378,10 @@ let scoreToastId = 0;
 let savingCount = 0;
 /** Saving into the photo file needs the desktop app. */
 const canSaveToFile = () => !!host?.saveEditToFile;
+/** Ctrl+C puts photos on the clipboard only in the desktop app (a plain browser keeps its own Ctrl+C). */
+export const canCopyPhotos = () => !!host?.copyImage;
+/** Ctrl+C copies at most this many photos as files (as many as a drag takes). */
+const MAX_COPY_FILES = 500;
 
 /** The list as it was before a change: its paths, and the stack whose face was the selected photo (null: none). */
 interface Before {
@@ -1093,6 +1102,29 @@ export const useGallery = create<GalleryState>()((set, get) => {
         }
       } catch (e) {
         get().toast('error', `Couldn't delete: ${message(e)}`);
+      }
+    },
+
+    async copySelected() {
+      const paths = selectedShown(get());
+      if (!paths.length) return;
+      const { toast } = get();
+      try {
+        if (paths.length === 1) {
+          if (!host?.copyImage) return;
+          const r = await host.copyImage(paths[0]);
+          if (r.ok) toast('success', 'Copied');
+          else toast('error', r.error ?? "Couldn't copy the photo.");
+          return;
+        }
+        if (!host?.copyFiles) return;
+        const sent = paths.slice(0, MAX_COPY_FILES);
+        const r = await host.copyFiles(sent);
+        if (!r.ok) toast('error', r.error ?? "Couldn't copy the photos.");
+        else if (sent.length < paths.length || r.dropped > 0) toast('success', `Copied the first ${r.copied} of ${paths.length} photos`);
+        else toast('success', `Copied ${plural(r.copied, 'photo')}`);
+      } catch (e) {
+        toast('error', `Couldn't copy: ${message(e)}`);
       }
     },
 
