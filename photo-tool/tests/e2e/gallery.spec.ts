@@ -1501,4 +1501,58 @@ test.describe('#5 fast navigation', () => {
       rmSync(join(dir, '..'), { recursive: true, force: true });
     }
   });
+  test("stepping past the photos loaded ahead never shows one photo's picture under another's name", async ({ page, request }) => {
+    const N = 40;
+    const dir = await makeAlbum(N);
+    // Large pictures held back on their way (a slow disk or a busy server), by photo key.
+    const slow = new Set<string>();
+    await page.route('**/api/gallery/thumb?**', async (route) => {
+      const u = new URL(route.request().url());
+      if (u.searchParams.get('size') === 'm' && slow.has(u.searchParams.get('key')!)) await new Promise((r) => setTimeout(r, 4000));
+      await route.continue();
+    });
+    try {
+      expect((await request.post('/api/gallery/open', { data: { folder: dir, recursive: false } })).status()).toBe(202);
+      await page.addInitScript(() => {
+        localStorage.setItem('gallery.gridWidth', '900');
+        localStorage.setItem('gallery.thumbSize', '96');
+      });
+      await page.goto('/');
+      await page.getByRole('button', { name: dir }).click();
+      await expect(page.getByRole('progressbar')).toHaveCount(0, { timeout: 60_000 });
+      await page.getByLabel('Stack similar').uncheck();
+      const tiles = page.locator('.gallery-tile');
+      await expect(tiles).toHaveCount(N);
+      const order = await tiles.locator('img').evaluateAll((imgs) => imgs.map((i) => ({ key: new URL((i as HTMLImageElement).src).searchParams.get('key')!, name: (i as HTMLImageElement).alt })));
+      /** The picture on screen is photo `i`'s own (its 400 px or 1600 px one), named as it is. */
+      const showsOwn = async (img: ReturnType<Page['locator']>, i: number) => {
+        await expect(img).toHaveAttribute('alt', order[i].name, { timeout: 1500 });
+        expect(new URL(await img.evaluate((e) => (e as HTMLImageElement).src)).searchParams.get('key')).toBe(order[i].key);
+      };
+
+      // The preview: End jumps far past the photos loaded ahead, to one whose large picture is slow.
+      await tiles.first().click();
+      slow.add(order[N - 1].key);
+      const preview = page.getByRole('region', { name: 'Preview' });
+      await page.keyboard.press('End');
+      await expect(preview).toContainText(order[N - 1].name);
+      await showsOwn(preview.locator('img'), N - 1);
+      // Its large picture comes in once it arrives.
+      await expect(preview.locator('img')).toHaveAttribute('src', /size=m/, { timeout: 10_000 });
+
+      // The viewer: stepping fast onto a photo whose large picture is still on its way.
+      await page.keyboard.press('Home');
+      slow.add(order[25].key);
+      await page.keyboard.press('Enter');
+      const viewer = page.getByRole('dialog', { name: 'Photo viewer' });
+      await expect(viewer).toContainText(`1 / ${N}`);
+      for (let i = 0; i < 25; i++) await page.keyboard.press('ArrowRight');
+      await expect(viewer).toContainText(`26 / ${N}`);
+      await showsOwn(viewer.locator('img'), 25);
+      await page.keyboard.press('Escape');
+    } finally {
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
+      rmSync(join(dir, '..'), { recursive: true, force: true });
+    }
+  });
 });

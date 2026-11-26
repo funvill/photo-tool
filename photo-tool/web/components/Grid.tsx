@@ -125,6 +125,8 @@ export function Grid({ onOpen, onContextMenu }: { onOpen: (path: string) => void
     went.current = { index: at, direction };
     imageCache.want([at, ...preloadOrder(at, items.length, { direction })].map((i) => thumbUrl(items[i].key, 'm')));
   }, [at, items, viewing]);
+  // The grid gone (the map shown instead, another folder): its photos are no longer wanted.
+  useEffect(() => () => imageCache.want([]), []);
 
   const picked = useMemo(() => new Set(selection), [selection]);
   const tiles = [];

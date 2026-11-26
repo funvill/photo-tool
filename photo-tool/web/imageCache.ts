@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 
 // One image cache shared by the viewer and the preview pane (issue #5). The photos around the one on
 // screen are loaded and decoded ahead of time, so a step shows the next photo from memory: no network
@@ -240,41 +240,24 @@ export class ImageCache {
 export const imageCache = new ImageCache();
 
 /**
- * What to put on screen for `url` (with `value`, what it shows): at once when it is decoded already; else
- * the last one shown stays until it is (no blank frame between photos), then it comes in. When `url`
- * fails, `fallback` is tried. The first photo, with nothing shown before it, is shown straight away.
+ * The picture to show for one photo: its large one (`large`, 1600 px) when that is decoded in the cache;
+ * else its small one (`small`, 400 px) at once, with the large one swapped in when it has loaded (and
+ * kept when it fails). Always this photo's own picture, so it never sits under another photo's name.
+ * A photo stepped past before its large picture came lets go of that load (the next want() may cancel it).
  */
-export function useDecodedSwap<T>(url: string, fallback: string | undefined, value: T, cache: ImageCache = imageCache): { url: string; value: T } {
-  const [shown, setShown] = useState<{ url: string; value: T; for: string } | null>(null);
-  const latest = useRef(value);
-  latest.current = value;
-  const ready = cache.get(url) ? url : fallback && cache.failed(url) && cache.get(fallback) ? fallback : null;
-
+export function usePicture(large: string, small: string, cache: ImageCache = imageCache): string {
+  const [, loaded] = useState(0);
+  const ready = cache.get(large) !== undefined;
   useEffect(() => {
-    if (ready) {
-      setShown({ url: ready, value: latest.current, for: url });
-      return;
-    }
-    // Stepped past before it came: the load is let go, so the next want() can cancel it.
+    if (ready) return;
     const gone = new AbortController();
-    const show = (u: string) => !gone.signal.aborted && setShown({ url: u, value: latest.current, for: url });
-    cache.load(url, gone.signal).then(
-      () => show(url),
+    cache.load(large, gone.signal).then(
+      () => !gone.signal.aborted && loaded((n) => n + 1),
       () => {
-        if (gone.signal.aborted) return;
-        if (!fallback) return show(url);
-        cache.load(fallback, gone.signal).then(
-          () => show(fallback),
-          () => show(fallback),
-        );
+        // Missing or not loading now: the small picture stays (tried again after a while, on a later visit).
       },
     );
     return () => gone.abort();
-  }, [url, fallback, ready, cache]);
-
-  if (ready) return { url: ready, value };
-  if (shown === null) return { url, value };
-  // This photo's own picture: with its latest value (a star given since).
-  if (shown.for === url) return { url: shown.url, value };
-  return { url: shown.url, value: shown.value };
+  }, [large, ready, cache]);
+  return ready ? large : small;
 }

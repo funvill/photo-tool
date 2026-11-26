@@ -4,7 +4,7 @@ import { pathIndex, preloadOrder } from '../../core/preloadWindow';
 import { Icon } from '../../../shared/web/components/Icon';
 import { formatSize, formatTaken } from '../../../shared/web/components/HoverPreview';
 import { thumbUrl, type GalleryItem } from '../api';
-import { imageCache, useDecodedSwap } from '../imageCache';
+import { imageCache, usePicture } from '../imageCache';
 import { selectVisible, useGallery, useVisibleItems } from '../store';
 
 // The full-screen viewer: one photo at a time over the whole window, stepping through the grid's own
@@ -99,7 +99,7 @@ function OpenViewer({ path }: { path: string }) {
   const hidden = item.info.hidden === true;
   return (
     <div className="gallery-viewer" role="dialog" aria-modal="true" aria-label="Photo viewer">
-      <ViewerImage item={item} />
+      <ViewerImage key={item.key} item={item} />
       <div className="gallery-viewer-bar">
         <strong className="ellipsis" title={item.path}>{item.fileName}</strong>
         {starred && (
@@ -128,10 +128,13 @@ function OpenViewer({ path }: { path: string }) {
   );
 }
 
-/** The 1600 px picture (the 400 px one when that is missing), from the image cache: the photo before stays until it is decoded. */
+/**
+ * The 1600 px picture from the image cache, at once when it is decoded there; else the 400 px one until it
+ * is (or when it is missing). A new element per photo: the photo before never lingers under this one's name.
+ */
 function ViewerImage({ item }: { item: GalleryItem }) {
-  const shown = useDecodedSwap(thumbUrl(item.key, 'm'), thumbUrl(item.key, 's'), item);
-  return <img className="gallery-viewer-img" src={shown.url} alt={shown.value.fileName} draggable={false} />;
+  const src = usePicture(thumbUrl(item.key, 'm'), thumbUrl(item.key, 's'));
+  return <img className="gallery-viewer-img" src={src} alt={item.fileName} draggable={false} />;
 }
 
 /** What the details panel knows about the photo, read-only. */
