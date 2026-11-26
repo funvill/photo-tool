@@ -46,7 +46,7 @@ For a single-process build: `npm run build && npm start`, then open http://127.0
 npm run fixtures
 ```
 
-This writes 21 synthetic trip photos to `fixtures/generated/trip`: mixed orientations, a panorama, a burst, an exact duplicate, a blurry frame, a low-res image, a HEIC file, an EXIF-rotated file and an undated PNG. Import that folder in the editor.
+This writes 21 synthetic trip photos to `fixtures/generated/trip`: mixed orientations, a panorama, a burst, an exact duplicate, a blurry frame, a low-res image, a HEIC file, an EXIF-rotated file and an undated PNG. Import that folder in the editor. It also writes one AVIF, TIFF, GIF, SVG, BMP and ICO file to `fixtures/generated/formats`.
 
 ## Stars and photoinfo.json
 

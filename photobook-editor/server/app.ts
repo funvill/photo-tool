@@ -12,7 +12,8 @@ import { listPlaces, placeOutline, suggestPlaces } from '../../shared/server/pla
 import { exportFlipbook, type FlipbookSize } from './flipbook';
 import { exportPosterImage } from './imageExport';
 import { formatById } from '../../shared/core/mediaFormats';
-import { colorFeatures, existingThumb, hashFile, hasTransparency, isSupported, makeThumbnails, THUMB_SIZES, type ThumbSize } from '../../shared/server/media';
+import { checkSvgGuardOnce } from '../../shared/server/mediaHandlers/svg';
+import { colorFeatures, existingThumb, hashFile, hasTransparency, isSupported, makeThumbnails, THUMB_SIZES, workingFile, type ThumbSize } from '../../shared/server/media';
 import { exportCoverPdf, exportPdf, exportPosterPdf, type ExportAsset, type ExportOptions } from './pdf';
 import { setResourceRoot } from '../../shared/server/resources';
 import { PhotoInfoWriteError } from '../../shared/photoinfo';
@@ -43,6 +44,8 @@ export interface AppOptions {
 }
 
 export function createApp(dataDir: string, opts: AppOptions) {
+  // Warns (once) if this sharp build would load an SVG by its path; SVGs are refused by content anyway.
+  checkSvgGuardOnce();
   if (opts.resourceRoot) setResourceRoot(opts.resourceRoot);
   const store = new Store(dataDir);
   const photoInfoOptions = { fallbackDir: opts.photoInfoFallbackDir };
@@ -172,8 +175,11 @@ export function createApp(dataDir: string, opts: AppOptions) {
       }
       if (analysis.transparent === undefined && formatById(r.format)?.capabilities.alpha && existsSync(r.original_path)) {
         try {
-          const transparent = await hasTransparency(r.original_path);
-          if (transparent) await makeThumbnails(r.original_path, dataDir, r.id, true);
+          // Through the format's handler: the original for PNG and WebP, a decoded copy for an SVG,
+          // which is never read by its path (see shared/server/mediaHandlers/svg.ts).
+          const work = (await workingFile(r.original_path, dataDir, r.content_hash)).path;
+          const transparent = await hasTransparency(work);
+          if (transparent) await makeThumbnails(work, dataDir, r.id, true);
           analysis = { ...analysis, transparent };
         } catch {
           // unreadable original: treat as opaque for now and try again next time
@@ -382,13 +388,22 @@ export function createApp(dataDir: string, opts: AppOptions) {
   }));
 
   // ---- export
-  /** The project's photos that can be drawn: originals, or their converted copy when the original is missing. */
-  const exportAssets = (projectId: string) => {
+  /**
+   * The project's photos that can be drawn: their converted copy, else the original as its format's
+   * handler gives it (decoded again into the cache when the copy is gone: a HEIC, SVG, BMP or ICO).
+   * A photo whose original is missing is drawn from its copy, if that is still there.
+   */
+  const exportAssets = async (projectId: string) => {
     const assets = new Map<string, ExportAsset>();
     for (const r of store.projectAssetRows(projectId)) {
       const missing = isMissing(r);
-      const workPath = r.derived_path && existsSync(r.derived_path) ? r.derived_path : r.original_path;
-      if (!missing || (r.derived_path && existsSync(r.derived_path))) assets.set(r.id, { asset: toPhotoAsset(r, missing), workPath });
+      const copy = r.derived_path && existsSync(r.derived_path) ? r.derived_path : null;
+      if (copy) assets.set(r.id, { asset: toPhotoAsset(r, missing), workPath: copy });
+      else if (!missing) {
+        // One that can't be decoded now is handed over as it is, as before: the export says what failed.
+        const workPath = await workingFile(r.original_path, dataDir, r.content_hash).then((w) => w.path, () => r.original_path);
+        assets.set(r.id, { asset: toPhotoAsset(r, missing), workPath });
+      }
     }
     return assets;
   };
@@ -397,7 +412,7 @@ export function createApp(dataDir: string, opts: AppOptions) {
     const p = requireProject(P(req).id);
     const doc = req.body?.doc ? migrateDocument(req.body.doc) : p.doc;
     const options: ExportOptions = req.body?.bleedMode === 'outer' || req.body?.bleedMode === 'all' ? { bleedMode: req.body.bleedMode } : {};
-    const assets = exportAssets(P(req).id);
+    const assets = await exportAssets(P(req).id);
     const safeTitle = doc.title.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-').slice(0, 60) || 'photobook';
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     if (doc.settings.product === 'poster') {
@@ -423,7 +438,7 @@ export function createApp(dataDir: string, opts: AppOptions) {
     if (doc.settings.product !== 'poster') throw new HttpError(400, 'Image export is for posters');
     const format = req.body?.format === 'jpeg' ? 'jpeg' : 'png';
     const dpi = Math.max(36, Math.min(600, Number(req.body?.dpi) || 150));
-    const assets = exportAssets(P(req).id);
+    const assets = await exportAssets(P(req).id);
     const safeTitle = doc.title.replace(/[^\w\- ]+/g, '').trim().replace(/\s+/g, '-').slice(0, 60) || 'poster';
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const file = `${safeTitle}-${stamp}-${dpi}dpi.${format === 'jpeg' ? 'jpg' : 'png'}`;
@@ -445,7 +460,7 @@ export function createApp(dataDir: string, opts: AppOptions) {
     const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const file = `${safeTitle}-${stamp}-flipbook.html`;
     try {
-      const result = await exportFlipbook(doc, exportAssets(P(req).id), join(dataDir, 'exports', file), { size });
+      const result = await exportFlipbook(doc, await exportAssets(P(req).id), join(dataDir, 'exports', file), { size });
       res.json({ ...result, file, url: `/api/exports/${encodeURIComponent(file)}` });
     } catch (e) {
       throw new HttpError(500, e instanceof Error ? e.message : String(e));

@@ -4,6 +4,7 @@ import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { editKey, isIdentityEdit, parseEdit, type PhotoEdit } from '../core';
 import { infoFor, readFolderInfo, type FolderInfo, type PhotoInfoOptions } from '../../shared/photoinfo';
+import { formatOf } from '../../shared/core/mediaFormats';
 import type { Store } from './db';
 import { expandHome } from './folders';
 import { renderEdited } from '../../shared/server/photoEditRender';
@@ -290,7 +291,8 @@ export class Importer {
         id,
         original_path: path,
         file_name: basename(path),
-        format: extname(path).slice(1).toLowerCase() === 'jpg' ? 'jpeg' : extname(path).slice(1).toLowerCase(),
+        // The registry's id ('tiff' for a .tif, 'jpeg' for a .jpg), which the capabilities are found by.
+        format: formatOf(path)?.id ?? extname(path).slice(1).toLowerCase(),
         file_size: st.size,
         mtime_ms: st.mtimeMs,
         content_hash: contentHash,

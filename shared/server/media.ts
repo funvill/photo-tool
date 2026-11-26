@@ -143,8 +143,27 @@ export async function readMetadata(originalPath: string): Promise<ExtractedMetad
   } catch {
     return { capturedAt, gpsLat, gpsLon, camera, exif, read: false };
   }
+  // Formats whose EXIF exifr can't find in the file (AVIF) have their handler find the block.
+  const parse = (from: Buffer) => exifr.parse(from, { reviveValues: false, pick: ['DateTimeOriginal', 'CreateDate', 'DateTimeDigitized', 'ModifyDate', 'DateTime', 'Make', 'Model', 'LensModel', 'LensMake', 'FocalLength', 'FocalLengthIn35mmFormat', 'FNumber', 'ExposureTime', 'ISO', 'ExposureBiasValue', 'Flash'] });
+  const handler = handlerFor(originalPath);
+  if (handler?.exifBlock) {
+    let found = false;
+    try {
+      const tags = await parse(data);
+      found = !!tags && Object.keys(tags).some((k) => k !== 'errors');
+    } catch {
+      // read from the block below
+    }
+    if (!found) {
+      try {
+        data = (await handler.exifBlock(data)) ?? data;
+      } catch {
+        // no block either: exifr's own reading is all there is
+      }
+    }
+  }
   try {
-    const tags = await exifr.parse(data, { reviveValues: false, pick: ['DateTimeOriginal', 'CreateDate', 'DateTimeDigitized', 'ModifyDate', 'DateTime', 'Make', 'Model', 'LensModel', 'LensMake', 'FocalLength', 'FocalLengthIn35mmFormat', 'FNumber', 'ExposureTime', 'ISO', 'ExposureBiasValue', 'Flash'] });
+    const tags = await parse(data);
     if (tags) capturedAt = exifDate(tags.DateTimeOriginal) ?? exifDate(tags.CreateDate) ?? exifDate(tags.DateTimeDigitized) ?? exifDate(tags.ModifyDate) ?? exifDate(tags.DateTime);
     if (tags) camera = cameraName(tags.Make, tags.Model);
     exif = exifFromTags(tags);

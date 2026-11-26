@@ -1,7 +1,9 @@
 import type { Sharp } from 'sharp';
 import { formatOf, MEDIA_FORMATS } from '../../core/mediaFormats';
+import { bmpHandler, icoHandler } from './bitmap';
 import { heifHandler } from './heic';
 import { sharpHandler } from './sharp';
+import { svgHandler } from './svg';
 
 // One handler per format in shared/core/mediaFormats.ts: how that format is decoded. Everything that
 // reads a photo's pixels (the scanners, the importer, /full, /image, the shelf previews, the edit
@@ -24,9 +26,21 @@ export interface MediaHandler {
   working?(file: string, ctx: HandlerContext): Promise<string>;
   /** The picture as an upright sharp image, decoded in memory without the cache (small previews). */
   image(file: string): Promise<Sharp>;
+  /**
+   * The EXIF block (a TIFF structure) of the file's bytes, for formats where exifr can't find it in
+   * the file itself. Without it, or when it gives null, exifr's own reading is all there is.
+   */
+  exifBlock?(data: Buffer): Promise<Buffer | null>;
 }
 
-const HANDLERS: readonly MediaHandler[] = [sharpHandler('jpeg'), sharpHandler('png'), sharpHandler('webp'), heifHandler];
+const HANDLERS: readonly MediaHandler[] = [
+  sharpHandler('jpeg'), sharpHandler('png'), sharpHandler('webp'), heifHandler,
+  // sharp reads these from the original: the page only ever gets JPEGs the server makes from them, so
+  // no converted copy is needed. sharp shows a multi-page TIFF's first page and a GIF's first frame.
+  sharpHandler('avif', { exifFromSharp: true }), sharpHandler('tiff'), sharpHandler('gif'),
+  // These get a decoded PNG in the derived cache: SVG for safety, BMP and ICO because sharp can't read them.
+  svgHandler, bmpHandler, icoHandler,
+];
 
 const BY_ID = new Map(HANDLERS.map((h) => [h.id, h]));
 

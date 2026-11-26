@@ -225,12 +225,13 @@ export class Scanner {
     // The content hash is only worked out when the format's handler needs it (to name a decoded copy).
     const work = await workingFile(path, this.dataDir, () => hashFile(path));
     const [dims, meta, analysis] = await Promise.all([orientedSize(work.path), readMetadata(path), this.analyze(work.path)]);
-    // A decoded copy (a HEIC's JPEG) would report 'jpeg', so its format comes from the original.
+    // The format is the registry's, by the original's name: a decoded copy (a HEIC's JPEG) would
+    // report 'jpeg', and sharp calls AVIF 'heif'.
     const key = photoKey(path, st.size, st.mtimeMs);
     await Promise.all((Object.keys(THUMB_SIZES) as ThumbSize[]).map((s) => writeJpegThumb(work.path, s, this.catalog.thumbPath(key, s))));
     const photo: GalleryPhoto = {
       path, folder: job.root, fileName: basename(path), relDir, size: st.size, mtimeMs: st.mtimeMs,
-      width: dims.width, height: dims.height, format: work.derived ? formatOf(path)!.id : dims.format, capturedAt: meta.capturedAt, gpsLat: meta.gpsLat,
+      width: dims.width, height: dims.height, format: formatOf(path)?.id ?? dims.format, capturedAt: meta.capturedAt, gpsLat: meta.gpsLat,
       gpsLon: meta.gpsLon, camera: meta.camera, exif: meta.exif, analysis, key,
       contentKey: await contentKeyOf(this.catalog.thumbPath(key, 'm')),
     };

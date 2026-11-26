@@ -7,6 +7,8 @@ import { folderStamp, forgetPhotos, infoFor, PhotoInfoWriteError, readFolderInfo
 import { AlbumTagsStore, type AlbumTagsOptions } from '../../shared/phototags';
 import { isIdentityEdit, parseEdit } from '../../shared/core/photoEdit';
 import { hashFile, workingFile } from '../../shared/server/media';
+import { checkSvgGuardOnce } from '../../shared/server/mediaHandlers/svg';
+import { mediaSelfCheck } from '../../shared/server/mediaSelfCheck';
 import { editFormatFor, renderEdited } from '../../shared/server/photoEditRender';
 import { listPlaces, suggestPlaces } from '../../shared/server/places';
 import { setResourceRoot } from '../../shared/server/resources';
@@ -100,6 +102,8 @@ class HttpError extends Error {
 }
 
 export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { app: express.Express; close(): void } {
+  // Warns (once) if this sharp build would load an SVG by its path; SVGs are refused by content anyway.
+  checkSvgGuardOnce();
   if (opts.resourceRoot) setResourceRoot(opts.resourceRoot);
   const catalog = new Catalog(dataDir);
   // Photo tagging: the models run in a worker thread with half the processor's threads.
@@ -252,6 +256,13 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
   const workPathOf = async (photo: GalleryPhoto): Promise<string> => (await workingFile(photo.path, dataDir, () => hashFile(photo.path))).path;
 
   app.get('/api/health', (_req, res) => res.json({ ok: true, app: 'gallery' }));
+
+  // For the desktop self-test: this sharp build decodes each newer format (AVIF, TIFF, GIF, SVG, BMP)
+  // from a few bytes made on the spot, and an SVG is refused by its path and under a photo's name.
+  app.get('/api/gallery/media-check', wrap(async (_req, res) => {
+    res.setHeader('Cache-Control', 'no-store');
+    res.json(await mediaSelfCheck());
+  }));
 
   app.get('/api/gallery/recent', (_req, res) => res.json(catalog.recentFolders().map((r) => ({ ...r, exists: isFolder(r.folder) }))));
 
@@ -412,11 +423,12 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     res.json(itemsFor(out));
   }));
 
-  // A photo of the open folder at full size, upright, as JPEG (the zoomed view).
+  // A photo of the open folder at full size, upright, as JPEG (the zoomed view). See-through parts
+  // (a cutout PNG, an SVG, an icon) go on white, as in its thumbnails; JPEG would make them black.
   app.get('/api/gallery/full', wrap(async (req, res) => {
     const photo = openPhoto(q(req, 'path'));
     if (!existsSync(photo.path)) throw new HttpError(404, 'That photo is not in the open folder any more.');
-    const jpeg = await sharp(await workPathOf(photo), { failOn: 'none' }).rotate().jpeg({ quality: 90 }).toBuffer();
+    const jpeg = await sharp(await workPathOf(photo), { failOn: 'none' }).rotate().flatten({ background: '#ffffff' }).jpeg({ quality: 90 }).toBuffer();
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.type('image/jpeg').send(jpeg);
   }));
