@@ -1,7 +1,6 @@
 import type { BookDocument, PhotoAsset, PreflightIssue } from '../../core';
 
-// What the editor needs from a backend. Two implementations: the local server over HTTP
-// (http.ts) and the in-browser one for the static web version (browser/). The build picks one.
+// What the editor needs from its backend: the local server, over HTTP (http.ts).
 
 export class ApiError extends Error {
   constructor(readonly status: number, message: string) {
@@ -53,8 +52,6 @@ export interface LinkedFolder {
   onShelf: boolean;
   syncedAt: string | null;
   assetIds: string[];
-  /** Web version: the browser needs permission again (after a restart) before this folder can be read. */
-  needsAccess?: boolean;
 }
 
 export interface ShelfFolder {
@@ -72,10 +69,6 @@ export interface ShelfListing {
   parent: string | null;
   folders: ShelfFolder[];
   loosePhotos: number;
-  /** Web version: no shelf folder chosen yet, or this browser can't keep folder access at all. */
-  unsupported?: boolean;
-  /** Web version: the shelf folder needs permission again before it can be read. */
-  needsAccess?: boolean;
 }
 
 export interface FolderListing {
@@ -150,8 +143,6 @@ export interface NewProject {
 }
 
 export interface Backend {
-  /** 'http': the local server. 'browser': everything runs in this page (the web version). */
-  readonly kind: 'http' | 'browser';
   deletedProjects(): Promise<{ id: string; title: string; deletedAt: string; product: 'book' | 'poster' }[]>;
   trashProject(id: string): Promise<{ ok: true }>;
   restoreProject(id: string): Promise<{ ok: true }>;
@@ -170,13 +161,13 @@ export interface Backend {
   revision(id: string, rev: number): Promise<{ doc: BookDocument }>;
   assets(id: string): Promise<PhotoAsset[]>;
   patchAsset(projectId: string, assetId: string, patch: { rating?: number; favorite?: boolean; excluded?: boolean }): Promise<PhotoAsset>;
-  /** Changes when a photoinfo.json beside the book's photos changes. The browser version has none: always ''. */
+  /** Changes when a photoinfo.json beside the book's photos changes. */
   photoInfoStamp(projectId: string): Promise<string>;
-  /** `folder` is a path (local server) or a folder reference from the browser's picker. */
+  /** `folder` is a path on this computer. */
   startImport(projectId: string, folder: string): Promise<ImportJob>;
   /**
-   * Photos dropped onto the editor. The local server imports them by `paths` (from the desktop app);
-   * the browser version reads `files` itself. Resolves to a job whose `assetIds` lists each file's photo.
+   * Photos dropped onto the editor, imported by `paths` (the desktop app says where each dropped file
+   * lives). Resolves to a job whose `assetIds` lists each file's photo.
    */
   importDropped(projectId: string, files: File[], paths: string[] | null): Promise<ImportJob>;
   job(id: string): Promise<ImportJob>;
@@ -195,33 +186,4 @@ export interface Backend {
   shelfPreviewUrl(path: string): string;
   /** Link that downloads an export (`url` from an export response). */
   downloadUrl(url: string): string;
-  /** Only in the web version: what the browser offers instead of server features. */
-  readonly web?: WebExtras;
-}
-
-export interface StorageInfo {
-  /** Whether the browser promised not to clear this site's data on its own. */
-  persisted: boolean;
-  usageBytes: number;
-  quotaBytes: number;
-}
-
-export interface WebExtras {
-  /** Chrome/Edge: folders can be referenced in place, linked and relinked. */
-  readonly canPickDirectories: boolean;
-  /** Ask for a folder with the browser's picker; returns a folder reference, or null if cancelled. */
-  pickDirectory(): Promise<string | null>;
-  /** Files handed over by a file input or a drop → a folder reference to import (copied in). */
-  registerFiles(files: File[]): string;
-  /** How many of this project's folders (and the shelf) need permission again. */
-  foldersNeedingAccess(projectId: string): Promise<number>;
-  /** Ask for that permission (call from a click). Returns how many folders are readable now. */
-  requestFolderAccess(projectId: string): Promise<number>;
-  backupProject(projectId: string): Promise<{ url: string; file: string; bytes: number; photos: number; withoutOriginal: number }>;
-  restoreBackup(file: File): Promise<{ projectId: string; title: string; photos: number }>;
-  storage(): Promise<StorageInfo>;
-  /** Ask the browser to keep this site's data (no prompt in Chrome; Firefox may ask). */
-  persist(): Promise<boolean>;
-  /** Delete every book, photo and setting stored in this browser (the demo's Start fresh). */
-  eraseEverything(): Promise<void>;
 }

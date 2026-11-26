@@ -6,6 +6,8 @@ It is one of two programs in this repository; the other, [Photo Tool](../photo-t
 
 ## Run it
 
+It is a desktop program: there is no web version, and the page always works through the editor's local server. (An earlier in-browser mode, which kept everything in the browser's own storage, has been removed.)
+
 **As a desktop program (Windows and Linux).** The editor and its local server in one window, as an installed program: no terminal, no browser, and it never uses the network.
 
 - **Build the installer:** `npm run dist:editor`. It builds for the platform it runs on, into `dist/installer/photobook-editor`: on Windows a per-user installer (`Photobook Editor Setup <version>.exe`, no administrator prompt), on Linux a `.deb` and an AppImage (x64 only). Everything the program needs is inside; nothing is downloaded when installing or running it.

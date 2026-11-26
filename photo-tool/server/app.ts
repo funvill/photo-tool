@@ -1,7 +1,7 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
-import { basename, dirname, extname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import sharp from 'sharp';
 import { folderStamp, forgetPhotos, infoFor, PhotoInfoWriteError, readFolderInfo, updatePhotoInfo, type FolderInfo, type PhotoInfo, type PhotoInfoOptions } from '../../shared/photoinfo';
 import { isIdentityEdit, parseEdit } from '../../shared/core/photoEdit';
@@ -230,11 +230,8 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     return photo;
   };
 
-  /** The photo as sharp can read it (a HEIC through its derived JPEG). */
-  const workPathOf = async (photo: GalleryPhoto): Promise<string> => {
-    const isHeic = ['.heic', '.heif'].includes(extname(photo.path).toLowerCase());
-    return (await workingFile(photo.path, dataDir, isHeic ? await hashFile(photo.path) : '')).path;
-  };
+  /** The photo as sharp can read it (a HEIC through its derived JPEG; hashed only when that is needed). */
+  const workPathOf = async (photo: GalleryPhoto): Promise<string> => (await workingFile(photo.path, dataDir, () => hashFile(photo.path))).path;
 
   app.get('/api/health', (_req, res) => res.json({ ok: true, app: 'gallery' }));
 
@@ -309,8 +306,7 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
   app.get('/api/gallery/image', wrap(async (req, res) => {
     const photo = catalog.get(q(req, 'path'));
     if (!photo || !existsSync(photo.path)) throw new HttpError(404, 'Unknown photo');
-    const isHeic = ['.heic', '.heif'].includes(extname(photo.path).toLowerCase());
-    const work = await workingFile(photo.path, dataDir, isHeic ? await hashFile(photo.path) : '');
+    const work = await workingFile(photo.path, dataDir, () => hashFile(photo.path));
     const png = await sharp(work.path).rotate().png().toBuffer();
     res.setHeader('Cache-Control', 'no-store');
     res.type('image/png').send(png);

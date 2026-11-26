@@ -2,7 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { statSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
-import { basename, dirname, extname, isAbsolute, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
+import { formatOf } from '../../shared/core/mediaFormats';
 import type { PhotoAnalysis } from '../../shared/core/photoAnalysis';
 import { analyze as defaultAnalyze, fileStat, hashFile, isSupported, orientedSize, readMetadata, THUMB_SIZES, workingFile, writeJpegThumb, type ThumbSize } from '../../shared/server/media';
 import { photoKey, type Catalog, type GalleryPhoto } from './catalog';
@@ -214,16 +215,15 @@ export class Scanner {
       if (upgraded || photo.folder !== hit.folder || photo.relDir !== hit.relDir) this.catalog.put(photo);
       return photo;
     }
-    // The content hash is only needed to name a HEIC's derived JPEG.
-    const isHeic = ['.heic', '.heif'].includes(extname(path).toLowerCase());
-    const work = await workingFile(path, this.dataDir, isHeic ? await hashFile(path) : '');
+    // The content hash is only worked out when the format's handler needs it (to name a decoded copy).
+    const work = await workingFile(path, this.dataDir, () => hashFile(path));
     const [dims, meta, analysis] = await Promise.all([orientedSize(work.path), readMetadata(path), this.analyze(work.path)]);
-    // The derived JPEG of a HEIC would report 'jpeg', so its format comes from the original.
+    // A decoded copy (a HEIC's JPEG) would report 'jpeg', so its format comes from the original.
     const key = photoKey(path, st.size, st.mtimeMs);
     await Promise.all((Object.keys(THUMB_SIZES) as ThumbSize[]).map((s) => writeJpegThumb(work.path, s, this.catalog.thumbPath(key, s))));
     const photo: GalleryPhoto = {
       path, folder: job.root, fileName: basename(path), relDir, size: st.size, mtimeMs: st.mtimeMs,
-      width: dims.width, height: dims.height, format: isHeic ? 'heif' : dims.format, capturedAt: meta.capturedAt, gpsLat: meta.gpsLat,
+      width: dims.width, height: dims.height, format: work.derived ? formatOf(path)!.id : dims.format, capturedAt: meta.capturedAt, gpsLat: meta.gpsLat,
       gpsLon: meta.gpsLon, camera: meta.camera, exif: meta.exif, analysis, key,
       contentKey: await contentKeyOf(this.catalog.thumbPath(key, 'm')),
     };

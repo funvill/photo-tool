@@ -6,6 +6,7 @@ import { clipboard, ClipboardItem, dialog, ipcMain, nativeImage, shell, type Bro
 import { statSync } from 'node:fs';
 import { copyFile, rename, rm, unlink } from 'node:fs/promises';
 import { resolve } from 'node:path';
+import { formatById } from '../../shared/core/mediaFormats';
 import { editFormatFor, type PhotoEdit } from '../../shared/core/photoEdit';
 import { launchFolder } from '../../shared/electron/config';
 import { dragFiles, dragRequest, preparedDragFor, sameDragList, type DragCheck, type PreparedDrag } from './drag';
@@ -493,8 +494,8 @@ export function galleryEditActions(o: { window: () => BrowserWindow | null; from
             ask: async (defaultPath) => {
               const w = o.window();
               // The filter makes the dialog itself give the name the right extension and ask before replacing a file.
-              const format = editFormatFor(defaultPath);
-              const filters = [format === 'jpeg' ? { name: 'JPEG photo', extensions: ['jpg', 'jpeg'] } : { name: `${format.toUpperCase()} photo`, extensions: [format] }];
+              const format = formatById(editFormatFor(defaultPath))!;
+              const filters = [{ name: `${format.label} photo`, extensions: format.extensions.map((e) => e.slice(1)) }];
               const options = { title: 'Save the edited photo as', defaultPath, filters };
               const chosen = w && !w.isDestroyed() ? await dialog.showSaveDialog(w, options) : await dialog.showSaveDialog(options);
               return chosen.canceled || !chosen.filePath ? null : chosen.filePath;

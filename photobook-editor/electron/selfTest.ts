@@ -7,6 +7,7 @@
 // It does what a person would: makes a book, imports the folder, drafts it, exports the PDFs, a
 // poster image and the flipbook, and looks at the home page and the editor in the real window.
 import { existsSync, statSync } from 'node:fs';
+import { formatOf } from '../../shared/core/mediaFormats';
 import { harness, offlineChecks, sleep, type SelfTestContext, type Step } from '../../shared/electron/selfTest';
 
 const PAGES = 20;
@@ -45,7 +46,7 @@ export async function runSelfTest(ctx: SelfTestContext): Promise<Record<string, 
       const n = d.length / 4;
       return { width: bmp.width, height: bmp.height, spread: Math.round(Math.sqrt(Math.max(0, sq / n - (sum / n) ** 2)) * 10) / 10, type: blob.type };
     })()`);
-  const isHeic = (a: { fileName: string }) => /\.hei[cf]$/i.test(a.fileName);
+  const isHeic = (a: { fileName: string }) => formatOf(a.fileName)?.id === 'heif';
   const waitForJob = async (job: any) => {
     let s = job;
     while (s.status !== 'done' && s.status !== 'failed') {

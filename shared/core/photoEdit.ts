@@ -7,6 +7,8 @@
 //      aspect ratio that lies wholly inside the turned picture (the "frame");
 //   3. cut out `crop`, given as fractions of the frame.
 
+import { formatOf, type SaveFormat } from './mediaFormats';
+
 export type QuarterTurn = 0 | 90 | 180 | 270;
 
 /** A rectangle as fractions (0 to 1) of whatever it sits on. */
@@ -287,12 +289,9 @@ export function editCss(
 }
 
 /** The format an edited photo is written in. */
-export type EditFormat = 'jpeg' | 'png' | 'webp';
+export type EditFormat = SaveFormat;
 
-/** The format an edited photo is written in: its own, except HEIC, which is written as JPEG. */
+/** The format an edited photo is written in: its format's `saveAs` (its own, except HEIC: JPEG); JPEG when unknown. */
 export function editFormatFor(path: string): EditFormat {
-  const ext = /\.[^./\\]*$/.exec(path)?.[0].toLowerCase();
-  if (ext === '.png') return 'png';
-  if (ext === '.webp') return 'webp';
-  return 'jpeg';
+  return formatOf(path)?.capabilities.saveAs ?? 'jpeg';
 }

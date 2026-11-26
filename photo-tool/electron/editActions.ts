@@ -4,6 +4,7 @@
 // touches the original. Only photos of the open folder; a failure is reported, never retried another way.
 import { posix, win32 } from 'node:path';
 import type { MessageBoxOptions } from 'electron';
+import { formatById, formatOf } from '../../shared/core/mediaFormats';
 import { editFormatFor, type EditFormat, type PhotoEdit } from '../../shared/core/photoEdit';
 
 export interface EditSaveResult {
@@ -54,7 +55,8 @@ export interface SaveAsDeps extends CommonDeps {
 const BAD_FORMAT = 'Photo Tool wrote the edited photo in an unexpected format, so nothing was changed.';
 const failure = (err: unknown) => (err instanceof Error ? err.message : String(err));
 const NOT_A_PHOTO = 'That photo is not in the open folder any more.';
-const isHeic = (path: string) => /\.(heic|heif)$/i.test(path);
+/** A format that can't be written (HEIC): an edit is saved only as a copy. Unknown formats are not refused here. */
+const copyOnly = (path: string) => formatOf(path)?.capabilities.editInPlace === false;
 
 /** Codes a move gets on Windows while another program (OneDrive, antivirus, a viewer) holds the file open. */
 const BUSY_CODES = new Set(['EBUSY', 'EPERM', 'EACCES']);
@@ -79,7 +81,7 @@ async function moveRetrying(deps: CommonDeps, from: string, to: string): Promise
 /** Replace the photo's file with its edited picture. The original is trashed only after the picture is made. */
 export async function saveToFile(path: string, edit: PhotoEdit, deps: SaveToFileDeps): Promise<EditSaveResult> {
   if (typeof path !== 'string' || !(await deps.check([path])).includes(path)) return { ok: false, error: NOT_A_PHOTO };
-  if (isHeic(path)) return { ok: false, error: 'HEIC photos can only be saved as a copy.' };
+  if (copyOnly(path)) return { ok: false, error: `${formatOf(path)!.label} photos can only be saved as a copy.` };
   let temp: string;
   try {
     const made = await deps.render(path, edit);
@@ -119,11 +121,13 @@ export async function saveToFile(path: string, edit: PhotoEdit, deps: SaveToFile
   }
 }
 
+/** The extension new files of a written format get: .jpg, .png or .webp. */
+const extensionFor = (format: EditFormat) => formatById(format)!.extensions[0];
+
 /** `path` with its extension made to fit the written format: .jpg (or a chosen .jpeg), .png or .webp. */
 function withFormatExtension(path: string, format: EditFormat, p: typeof win32): string {
-  const { dir, name, ext } = p.parse(path);
-  const keep = format === 'jpeg' ? ext.toLowerCase() === '.jpg' || ext.toLowerCase() === '.jpeg' : ext.toLowerCase() === `.${format}`;
-  return keep ? path : p.join(dir, `${name}${format === 'jpeg' ? '.jpg' : `.${format}`}`);
+  const { dir, name } = p.parse(path);
+  return formatOf(path)?.id === format ? path : p.join(dir, `${name}${extensionFor(format)}`);
 }
 
 /** Write the edited photo as a new file the person names. The original stays as it is. */
@@ -132,7 +136,7 @@ export async function saveAs(path: string, edit: PhotoEdit, deps: SaveAsDeps, in
   const p = deps.platform === 'win32' ? win32 : posix;
   const format = editFormatFor(path);
   const { dir, name, ext } = p.parse(path);
-  const chosen = await deps.ask(p.join(dir, `${name}-edited${format === 'jpeg' && isHeic(path) ? '.jpg' : ext}`));
+  const chosen = await deps.ask(p.join(dir, `${name}-edited${copyOnly(path) ? extensionFor(format) : ext}`));
   if (!chosen) return { ok: false, cancelled: true };
   const target = withFormatExtension(chosen, format, p);
   const same = deps.platform === 'win32' ? target.toLowerCase() === path.toLowerCase() : target === path;

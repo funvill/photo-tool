@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
-import { api, isBrowserBackend, shelfPreviewUrl, type LinkedFolder, type ShelfFolder, type ShelfListing } from '../api';
+import { api, shelfPreviewUrl, type LinkedFolder, type ShelfFolder, type ShelfListing } from '../api';
 import { useEditor } from '../store';
 import { FolderPicker } from './FolderPicker';
 import { Icon } from '../../../shared/web/components/Icon';
 
 const OPEN_KEY = 'photobook:shelfOpen';
 
-/** Home folder shown as ~ (macOS paths); the web version's folder references as plain names. */
-export const tildePath = (p: string) => p.replace(/^\/Users\/[^/]+(?=\/|$)/, '~').replace(/^(dir|pick):[\w-]+:/, '');
+/** Home folder shown as ~ (macOS paths). */
+export const tildePath = (p: string) => p.replace(/^\/Users\/[^/]+(?=\/|$)/, '~');
 
 const inside = (path: string, folder: string) => path === folder || ['/', '\\'].some((sep) => path.startsWith(folder.endsWith(sep) ? folder : folder + sep));
 
@@ -76,24 +76,7 @@ export function Shelf() {
 
   const offShelf = listing ? links.filter((l) => !listing.root || !inside(l.folder, listing.root)) : [];
 
-  // Web version: the shelf is a folder chosen with the browser's picker (Chrome and Edge only).
-  const chooseRoot = () => {
-    if (!isBrowserBackend) return setChoosing(true);
-    void api.web!.pickDirectory().then(async (ref) => {
-      if (!ref) return;
-      setPath(undefined);
-      setListing(await api.setShelfRoot(ref));
-    }).catch((e) => useEditor.getState().toast('error', e instanceof Error ? e.message : String(e)));
-  };
-  const allowAccess = async () => {
-    const projectId = useEditor.getState().projectId;
-    if (!projectId) return;
-    await api.web!.requestFolderAccess(projectId);
-    await load(path);
-    await useEditor.getState().refreshAssets();
-    await useEditor.getState().refreshLinks();
-    void useEditor.getState().syncLinks({ force: true });
-  };
+  const chooseRoot = () => setChoosing(true);
 
   return (
     <section className={`shelf ${open ? '' : 'closed'}`}>
@@ -112,7 +95,7 @@ export function Shelf() {
             }}>
               <Icon name="rotate" size={14} />
             </button>
-            <button className="icon-btn" title="Use a different folder as the shelf" onClick={chooseRoot} hidden={listing?.unsupported}>
+            <button className="icon-btn" title="Use a different folder as the shelf" onClick={chooseRoot}>
               <Icon name="folder" size={14} />
             </button>
           </div>
@@ -121,24 +104,7 @@ export function Shelf() {
       {open && (
         <div className="shelf-body">
           {error && <div className="notice notice-error">{error}</div>}
-          {listing?.unsupported && (
-            <p className="muted small shelf-note">
-              The Shelf links folders and keeps them in sync, which needs a browser that can keep access to a folder: Chrome or Edge. Here, import photos with Import above.
-            </p>
-          )}
-          {listing?.needsAccess && (
-            <div className="shelf-empty">
-              <p className="small">The browser needs your permission again to read <strong>{tildePath(listing.root)}</strong>.</p>
-              <button className="btn btn-small" onClick={() => void allowAccess()}>Allow access</button>
-            </div>
-          )}
-          {listing && !listing.exists && !listing.unsupported && isBrowserBackend && (
-            <div className="shelf-empty">
-              <p className="small">Choose a folder as your shelf: its subfolders are offered in every book, ready to link and keep in sync.</p>
-              <button className="btn btn-small" onClick={chooseRoot}>Choose a folder…</button>
-            </div>
-          )}
-          {listing && !listing.exists && !isBrowserBackend && (
+          {listing && !listing.exists && (
             <div className="shelf-empty">
               <p className="small">
                 Your shelf folder isn't there yet: <code>{tildePath(listing.root)}</code>
@@ -150,7 +116,7 @@ export function Shelf() {
               </div>
             </div>
           )}
-          {listing?.exists && !listing.needsAccess && (
+          {listing?.exists && (
             <>
               <div className="shelf-path muted small" title={listing.path}>
                 {listing.parent ? (
@@ -184,7 +150,7 @@ export function Shelf() {
             <div className="shelf-elsewhere">
               <span className="muted small">Also linked</span>
               {offShelf.map((l) => (
-                <span key={l.folder} className={`shelf-tag ${l.exists && !l.needsAccess ? '' : 'shelf-tag-missing'}`} title={l.needsAccess ? `Needs permission again: ${tildePath(l.folder)}` : l.exists ? tildePath(l.folder) : `Not found: ${tildePath(l.folder)}`}>
+                <span key={l.folder} className={`shelf-tag ${l.exists ? '' : 'shelf-tag-missing'}`} title={l.exists ? tildePath(l.folder) : `Not found: ${tildePath(l.folder)}`}>
                   {l.name}
                   <button className="icon-btn" title="Stop syncing (photos stay in the library)" onClick={() => void unlink(l)}><Icon name="x" size={11} /></button>
                 </span>

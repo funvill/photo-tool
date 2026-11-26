@@ -16,7 +16,7 @@ export interface Place {
   feature: Feature<Polygon | MultiPolygon>;
 }
 
-/** Shared by the server and the web version: each loads the bundled topology its own way. */
+/** The pure part of places.ts: given the bundled topology, however it was loaded. */
 export function placesFromTopology(topo: PlacesTopology): Place[] {
   return topo.objects.countries.geometries
     .map((g) => {

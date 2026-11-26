@@ -1,26 +1,23 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';
 import { readFile, rename, rm, stat } from 'node:fs/promises';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { basename, extname, join } from 'node:path';
+import { join } from 'node:path';
 import sharp from 'sharp';
 import exifr from 'exifr';
 import type { PhotoAnalysis } from '../core/photoAnalysis';
 import type { PhotoExif } from '../core/photoFacts';
-import { heicToJpeg } from './heic';
+import { handlerFor, workingPath } from './mediaHandlers';
 
-// Media pipeline: everything runs locally. Originals are only ever read.
+// Media pipeline: everything runs locally. Originals are only ever read. Which files are photos, and
+// how each format is decoded, is the registry's business (shared/core/mediaFormats.ts,
+// shared/server/mediaHandlers/).
 
-const run = promisify(execFile);
+export { isSupported, SUPPORTED_EXTENSIONS } from '../core/mediaFormats';
 
 // libvips keeps the files it has read open for reuse. On Windows an open file can't be moved,
 // renamed or deleted, which would lock the user's originals (and our thumbnails) while the server
 // runs. Applies to every use of sharp in this process.
 if (process.platform === 'win32') sharp.cache({ files: 0 });
-
-export const SUPPORTED_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.heic', '.heif', '.webp']);
-const HEIC = new Set(['.heic', '.heif']);
 
 export const THUMB_SIZES = { s: 400, m: 1600 } as const;
 export type ThumbSize = keyof typeof THUMB_SIZES;
@@ -37,8 +34,6 @@ export function existingThumb(dataDir: string, assetId: string, size: ThumbSize)
   return null;
 }
 
-/** Formats that can carry an alpha channel. */
-export const ALPHA_FORMATS = new Set(['png', 'webp']);
 
 /**
  * True when the image actually has see-through pixels (not just an unused alpha channel, which
@@ -54,10 +49,6 @@ export async function hasTransparency(path: string): Promise<boolean> {
   return clear > (info.width * info.height) / 200;
 }
 
-export function isSupported(path: string) {
-  return SUPPORTED_EXTENSIONS.has(extname(path).toLowerCase()) && !basename(path).startsWith('._');
-}
-
 export async function hashFile(path: string): Promise<string> {
   const h = createHash('sha256');
   for await (const chunk of createReadStream(path)) h.update(chunk as Buffer);
@@ -65,18 +56,19 @@ export async function hashFile(path: string): Promise<string> {
 }
 
 /**
- * The file sharp should decode. HEIC (HEVC) is not decodable by the bundled libvips, so it is
- * converted once into the data directory: with macOS `sips`, elsewhere with the bundled libheif
- * (see heic.ts). The original is untouched.
+ * The file sharp should decode: the original, or a copy its format's handler decoded once into
+ * `<dataDir>/derived` (HEIC, which the bundled libvips can't decode). `derived` is that copy, or null.
+ * `contentHash` is the original's SHA-256, or a function that works it out: it is only asked for
+ * when the handler needs it (to name the copy). The original is untouched.
  */
-export async function workingFile(originalPath: string, dataDir: string, contentHash: string): Promise<{ path: string; derived: string | null }> {
-  if (!HEIC.has(extname(originalPath).toLowerCase())) return { path: originalPath, derived: null };
-  const out = join(dataDir, 'derived', `${contentHash}.jpg`);
-  if (!existsSync(out)) {
-    if (process.platform === 'darwin') await run('/usr/bin/sips', ['-s', 'format', 'jpeg', '-s', 'formatOptions', '95', originalPath, '--out', out]);
-    else await heicToJpeg(originalPath, out);
-  }
-  return { path: out, derived: out };
+export async function workingFile(originalPath: string, dataDir: string, contentHash: string | (() => Promise<string>)): Promise<{ path: string; derived: string | null }> {
+  const handler = handlerFor(originalPath);
+  if (!handler) return { path: originalPath, derived: null };
+  const path = await workingPath(handler, originalPath, {
+    derivedDir: join(dataDir, 'derived'),
+    contentHash: typeof contentHash === 'string' ? async () => contentHash : contentHash,
+  });
+  return { path, derived: path === originalPath ? null : path };
 }
 
 /** Exif wall-clock "2026:03:14 09:12:05" → "2026-03-14T09:12:05" (no zone: EXIF has none). */

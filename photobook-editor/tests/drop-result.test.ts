@@ -16,7 +16,7 @@ describe('splitDropResult', () => {
     expect(out.folders).toEqual([{ folder: 'C:\\Trip\\Day 1', name: 'Day 1', count: 2 }]);
   });
 
-  it('treats every photo as a dropped file when the job does not say (web version)', () => {
+  it('treats every photo as a dropped file when the job does not say', () => {
     expect(splitDropResult(job(['a', '', 'b']))).toEqual({ placed: ['a', 'b'], folders: [] });
   });
 

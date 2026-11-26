@@ -45,8 +45,8 @@ interface Pkg {
   peerDependenciesMeta?: Record<string, { optional?: boolean }>;
 }
 
-// In the production tree but not in the app: pdfjs-dist's optional canvas for Node. The app uses
-// pdfjs only in the browser build of the editor (photobook-editor/web/backend/browser/raster.ts).
+// In the production tree but not in the app: pdfjs-dist's optional canvas for Node. (pdfjs-dist itself
+// was used only by the editor's in-browser mode, which is gone; nothing in the app imports it.)
 // Nor onnxruntime-web: Transformers.js carries its own copy of the web runtime inside its Node build, and
 // scripts/desktop/build.mjs leaves the package out (NOT_NEEDED there).
 const NOT_SHIPPED = /^(@napi-rs\/canvas(-|$)|onnxruntime-web$)/;

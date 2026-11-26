@@ -9,10 +9,9 @@ import {
 // Print export. Geometry comes from core (same functions the editor preview uses); this module only
 // translates millimetres to points and pixels. Every export is re-opened and verified afterwards.
 //
-// Shared by the local server (photobook-editor/server/pdf.ts: sharp + files) and the web version (a worker:
-// canvas + memory). Each side supplies a `PdfEnv`: how to read font files, how to cut a photo to
-// its printed size, and where the bytes go. Imports nothing from Node: `pdfkit` resolves to its
-// Node build on the server and its browser build in the web bundle.
+// Used by the local server (photobook-editor/server/pdf.ts: sharp + files), which supplies a `PdfEnv`:
+// how to read font files, how to cut a photo to its printed size, and where the bytes go. (It was
+// written to run in the editor's in-browser mode too, now removed, so it still imports nothing from Node.)
 
 const TARGET_DPI = 300;
 

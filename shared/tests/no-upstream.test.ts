@@ -43,4 +43,22 @@ describe('cut from upstream', () => {
     const vite = readFileSync(resolve(root, 'photobook-editor/vite.config.ts'), 'utf8');
     expect(vite).not.toMatch(/mode === 'pages'|dist\/pages/);
   });
+
+  // Steven's decision: the editor is a desktop program. Its in-browser mode is removed, not switched off.
+  it('the editor has no in-browser mode: no browser backend, browser picker, web notes or demo', () => {
+    for (const gone of [
+      'photobook-editor/web/backend/browser', 'photobook-editor/web/components/BrowserFolderPicker.tsx', 'photobook-editor/web/components/WebNotes.tsx',
+      'photobook-editor/web/demo', 'photobook-editor/web/public', 'scripts/make-demo.ts',
+    ]) expect(existsSync(resolve(root, gone)), gone).toBe(false);
+    const { status, found } = (() => {
+      try {
+        return { status: 0, found: execFileSync('git', ['grep', '-n', '-I', '-e', '__BROWSER_BACKEND__', '-e', 'isBrowserBackend', '-e', 'backend/browser', '--', 'photobook-editor', 'shared', 'scripts', 'package.json', ':!shared/tests/no-upstream.test.ts'], { cwd: root, encoding: 'utf8' }) };
+      } catch (e) {
+        const err = e as { status: number; stdout: string };
+        return { status: err.status, found: err.stdout };
+      }
+    })();
+    expect(found).toBe('');
+    expect(status).toBe(1);
+  });
 });
