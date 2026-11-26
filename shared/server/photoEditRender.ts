@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { rename, rm } from 'node:fs/promises';
 import sharp, { type Sharp } from 'sharp';
+import { colorMatrix, isNoAdjust } from '../core/colorAdjust';
 import { editFormatFor, editPlan, type EditFormat, type PhotoEdit } from '../core/photoEdit';
 
-// Renders a photo edit (crop, rotate, straighten) into a new file. The steps follow `editPlan` in
+// Renders a photo edit (flip, crop, rotate, straighten, light and colour) into a new file. The steps follow `editPlan` in
 // core/photoEdit.ts, the same plan the page uses for its preview. The original is only read.
 
 // The format rules live in core/photoEdit.ts (the desktop shell needs them without sharp).
@@ -27,9 +28,10 @@ export async function renderEdited(
   const keep = !!opts.keepMetadata;
   const withMeta = (img: Sharp) => (keep ? img.keepExif() : img);
 
-  // Step 0 and 1: the upright picture, turned by the quarter.
-  const upright = await lossless(withMeta(sharp(workPath, { failOn: 'none' }).autoOrient()));
+  // Step 0 and 1: the upright picture, mirrored when asked (its own step: sharp orders operations itself), turned by the quarter.
+  let upright = await lossless(withMeta(sharp(workPath, { failOn: 'none' }).autoOrient()));
   const plan = editPlan(upright.info.width, upright.info.height, edit);
+  if (plan.flip) upright = await lossless(withMeta(sharp(upright.data).flop()));
   let step = await lossless(withMeta(sharp(upright.data).rotate(plan.rotate)));
 
   // Step 2: the straighten turn enlarges the canvas; the frame sits in its middle.
@@ -45,6 +47,15 @@ export async function renderEdited(
   const width = Math.min(plan.extract.width, canvasW - left);
   const height = Math.min(plan.extract.height, canvasH - top);
   let out = withMeta(sharp(step.data).extract({ left, top, width, height }));
+
+  // Step 4: light and colour, the matrix the page draws with its SVG filter: out = m · in + offset. On its
+  // own after the crop, in sRGB with three colour channels (a greyscale photo gains them; alpha is kept).
+  if (!isNoAdjust(edit.adjust)) {
+    const cm = colorMatrix(edit.adjust!);
+    const cut = await lossless(out.toColourspace('srgb'));
+    const rows = [cm.m.slice(0, 3), cm.m.slice(3, 6), cm.m.slice(6, 9)] as [[number, number, number], [number, number, number], [number, number, number]];
+    out = withMeta(sharp(cut.data).recomb(rows).linear([1, 1, 1], cm.offset.map((o) => o * 255)));
+  }
   if (keep) out = out.withMetadata({ orientation: 1 });
   if (format === 'png') out = out.png();
   else if (format === 'webp') out = out.webp({ quality: 95 });

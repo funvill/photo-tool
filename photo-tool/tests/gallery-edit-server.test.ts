@@ -235,3 +235,31 @@ describe('PATCH /api/gallery/info scoreAdjust field', () => {
     expect(existsSync(infoPath())).toBe(false);
   });
 });
+
+describe('#9 flip and light and colour on the server', () => {
+  const patch = (edit: unknown) => api('PATCH', '/api/gallery/info', { path: join(photos, 'a.jpg'), patch: { edit } });
+  const stored = () => JSON.parse(readFileSync(join(photos, 'photoinfo.json'), 'utf8')).photos['a.jpg'].edit;
+
+  it('photoinfo.json gets flip and adjust only when they change something', async () => {
+    await openAndFinish();
+    await patch({ rotate: 90, straighten: 0, crop: { x: 0, y: 0, w: 1, h: 1 }, flip: false, adjust: { brightness: 0, contrast: 0, saturation: 0, warmth: 0 } });
+    expect(stored()).toEqual({ rotate: 90, straighten: 0, crop: { x: 0, y: 0, w: 1, h: 1 } });
+    await patch({ rotate: 0, straighten: 0, crop: { x: 0, y: 0, w: 1, h: 1 }, flip: true, adjust: { brightness: 40, contrast: 0, saturation: 0, warmth: 0 } });
+    expect(stored()).toEqual({ rotate: 0, straighten: 0, crop: { x: 0, y: 0, w: 1, h: 1 }, flip: true, adjust: { brightness: 40, contrast: 0, saturation: 0, warmth: 0 } });
+  });
+
+  it('GET /api/gallery/auto-adjust works the sliders out from the photo: a red photo is cooled', async () => {
+    await openAndFinish();
+    const res = await api('GET', `/api/gallery/auto-adjust?path=${encodeURIComponent(join(photos, 'a.jpg'))}`);
+    expect(res.status).toBe(200);
+    expect(Object.keys(res.body).sort()).toEqual(['brightness', 'contrast', 'saturation', 'warmth']);
+    expect(res.body.warmth).toBeLessThan(0);
+    for (const v of Object.values(res.body as Record<string, number>)) expect(Math.abs(v)).toBeLessThanOrEqual(60);
+  });
+
+  it('auto-adjust is a 404 outside the open folder and a 400 without a path', async () => {
+    await openAndFinish();
+    expect((await api('GET', `/api/gallery/auto-adjust?path=${encodeURIComponent(join(other, 'o.jpg'))}`)).status).toBe(404);
+    expect((await api('GET', '/api/gallery/auto-adjust')).status).toBe(400);
+  });
+});

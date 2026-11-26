@@ -23,7 +23,7 @@ const SETTLE_MS = 200;
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
 /** The review keys (move, favourite, hide, edit, delete): they act on the photos, so the menu goes away. */
-const REVIEW_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'f', 'F', 'h', 'H', 'e', 'E', 'Delete']);
+const REVIEW_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'f', 'F', 'h', 'H', 'e', 'E', 'Delete', '[', ']']);
 
 /**
  * Text onto the clipboard. In the desktop app the main process does it (the app turns every web
@@ -102,6 +102,8 @@ export function PhotoMenu({ x, y, path, onClose }: PhotoMenuProps) {
   const hidden = selectedItem?.info.hidden === true;
   // Being edited, or its save is on its way (an edit started now would be lost when it lands).
   const editing = useGallery((s) => s.editing === path || s.savingPaths.includes(path));
+  // Rotate and flip wait while a photo is in edit mode (Done or Cancel first).
+  const anyEditing = useGallery((s) => s.editing !== null);
   // Save, Save as…, Save all and Revert to original, as the preview caption offers them for this photo.
   const actions = useGallery(useShallow((s) => {
     const item = s.items.find((i) => i.path === path);
@@ -155,6 +157,9 @@ export function PhotoMenu({ x, y, path, onClose }: PhotoMenuProps) {
   return (
     <div className="ctx-menu" ref={ref} style={pos} role="menu" aria-label="Photo" onContextMenu={(e) => e.preventDefault()}>
       <MenuItem icon="crop" label="Edit" hint="E" disabled={editing} onClick={go(() => edit(path))} />
+      <MenuItem icon="rotate-left" label="Rotate left" hint="[" disabled={anyEditing} onClick={go(() => useGallery.getState().turnSelected('left'))} />
+      <MenuItem icon="rotate" label="Rotate right" hint="]" disabled={anyEditing} onClick={go(() => useGallery.getState().turnSelected('right'))} />
+      <MenuItem icon="swap" label="Flip horizontally" disabled={anyEditing} onClick={go(() => useGallery.getState().flipSelected())} />
       {actions?.save && (
         <>
           <MenuItem icon="check" label="Save" disabled={saving || !!actions.saveBlocked} title={actions.saveBlocked ?? actions.saveTitle} onClick={go(() => useGallery.getState().saveEdit(path))} />

@@ -724,7 +724,7 @@ describe('gallery store: edits', () => {
     g().startEdit(A);
     g().finishEdit({ ...cropped, crop: { ...cropped.crop } });
     expect(g().pendingEdits).toEqual({});
-    expect(shownEdit(g(), g().items[0])).toEqual(cropped);
+    expect(shownEdit(g(), g().items[0])).toEqual({ ...IDENTITY_EDIT, ...cropped });
   });
 
   it('Done with no edit, where none is saved, clears the unsaved edit; where one is saved, keeps "no edit" unsaved', () => {
@@ -877,7 +877,7 @@ describe('gallery store: saving edits', () => {
     expect(patches()).toEqual([{ path: A, patch: { edit: cropped }, job: 'j1' }]);
     expect(g().pendingEdits).toEqual({ [B]: turned });
     expect(g().items[0].info.edit).toEqual(cropped);
-    expect(shownEdit(g(), g().items[0])).toEqual(cropped);
+    expect(shownEdit(g(), g().items[0])).toEqual({ ...IDENTITY_EDIT, ...cropped });
   });
 
   it('info-file mode: saving "no edit" removes the field', async () => {
@@ -1850,5 +1850,79 @@ describe('#9 gallery store: select all, select none, Delete', () => {
     disconnect = connectDesktop({ trashPhotos: async (paths: string[]) => (asked.push(paths), { trashed: [], failed: [], cancelled: true }) });
     await g().trashSelected();
     expect(asked).toEqual([]);
+  });
+});
+
+describe('#9 gallery store: rotate and flip without edit mode', () => {
+  const g = () => useGallery.getState();
+  const photos = (...names: string[]) => names.map((n) => item({ path: n, fileName: `${n}.jpg`, key: n }));
+  const setup = (items: GalleryItem[], selected: string | null, extra: Record<string, unknown> = {}) =>
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items, sort: 'name', filter: {}, stacked: false, openStacks: [], view: 'grid', selected, selection: selected ? [selected] : [], anchor: selected, editTarget: 'info', ...extra });
+
+  it("turnSelected('left') gives every selected photo an unsaved quarter turn, as one undo step", async () => {
+    setup(photos('a', 'b', 'c'), 'a', { selection: ['a', 'b', 'c'] });
+    g().turnSelected('left');
+    for (const p of ['a', 'b', 'c']) expect(g().pendingEdits[p]).toMatchObject({ rotate: 270 });
+    expect(g().undoStack).toHaveLength(1);
+    await g().undo();
+    expect(g().pendingEdits).toEqual({});
+  });
+
+  it("turnSelected('right') on the focused photo alone; four turns leave nothing unsaved", () => {
+    setup(photos('a', 'b'), 'b');
+    g().turnSelected('right');
+    expect(Object.keys(g().pendingEdits)).toEqual(['b']);
+    expect(g().pendingEdits.b.rotate).toBe(90);
+    g().turnSelected('right');
+    g().turnSelected('right');
+    g().turnSelected('right');
+    expect(g().pendingEdits).toEqual({});
+  });
+
+  it('rotate keeps the crop: an unsaved crop turns with the photo', () => {
+    const cropped = { ...IDENTITY_EDIT, crop: { x: 0, y: 0, w: 0.5, h: 1 } };
+    setup(photos('a'), 'a', { pendingEdits: { a: cropped } });
+    g().turnSelected('left');
+    expect(g().pendingEdits.a.rotate).toBe(270);
+    expect(g().pendingEdits.a.crop).toEqual({ x: 0, y: 0.5, w: 1, h: 0.5 });
+  });
+
+  it('builds on the saved edit; turning back to it leaves nothing unsaved', () => {
+    setup([item({ path: 'a', key: 'a', info: { edit: { rotate: 90, straighten: 0, crop: { x: 0, y: 0, w: 1, h: 1 } } } })], 'a');
+    g().turnSelected('right');
+    expect(g().pendingEdits.a.rotate).toBe(180);
+    g().turnSelected('left');
+    expect(g().pendingEdits).toEqual({});
+  });
+
+  it('flipSelected mirrors every selected photo; twice leaves nothing unsaved; the colour stays', () => {
+    const coloured = { ...IDENTITY_EDIT, adjust: { brightness: 20, contrast: 0, saturation: 0, warmth: 0 } };
+    setup(photos('a', 'b'), 'a', { selection: ['a', 'b'], pendingEdits: { b: coloured } });
+    g().flipSelected();
+    expect(g().pendingEdits.a.flip).toBe(true);
+    expect(g().pendingEdits.b).toMatchObject({ flip: true, adjust: { brightness: 20 } });
+    g().flipSelected();
+    expect(g().pendingEdits.a).toBeUndefined();
+    expect(g().pendingEdits.b).toMatchObject({ flip: false, adjust: { brightness: 20 } });
+  });
+
+  it('a flip alone counts as a change: Done with only a flip leaves an unsaved edit', () => {
+    setup(photos('a'), 'a');
+    g().startEdit('a');
+    g().finishEdit({ ...IDENTITY_EDIT, flip: true });
+    expect(g().pendingEdits.a?.flip).toBe(true);
+    g().startEdit('a');
+    g().finishEdit({ ...IDENTITY_EDIT, adjust: { brightness: 0, contrast: 5, saturation: 0, warmth: 0 } });
+    expect(g().pendingEdits.a?.adjust?.contrast).toBe(5);
+  });
+
+  it('not while a photo is being edited, and not on a photo whose save is on its way', () => {
+    setup(photos('a', 'b'), 'a', { selection: ['a', 'b'], editing: 'a' });
+    g().turnSelected('left');
+    expect(g().pendingEdits).toEqual({});
+    useGallery.setState({ editing: null, savingPaths: ['a'] });
+    g().flipSelected();
+    expect(Object.keys(g().pendingEdits)).toEqual(['b']);
+    useGallery.setState({ savingPaths: [] });
   });
 });

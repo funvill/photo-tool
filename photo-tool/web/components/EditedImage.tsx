@@ -1,6 +1,8 @@
 import { useState, type CSSProperties } from 'react';
 import { editCss, type PhotoEdit } from '../../../shared/core/photoEdit';
 import type { Size } from '../../core/previewZoom';
+import { imageCache } from '../imageCache';
+import { ColorFilter, colorFilterCss } from './ColorFilter';
 
 export interface EditedImageProps {
   src: string;
@@ -22,12 +24,17 @@ export interface EditedImageProps {
 }
 
 /**
- * A photo with an edit (crop, rotate, straighten) drawn by CSS: a box that hides what is cut away, and the
- * upright picture inside it placed and turned by `editCss`. The picture's shape is known once it has
- * loaded; until then it is loading, unseen.
+ * A photo with an edit (flip, crop, rotate, straighten) drawn by CSS: a box that hides what is cut away, and
+ * the upright picture inside it placed, mirrored and turned by `editCss`; light and colour by an SVG filter
+ * (ColorFilter). The picture's shape is known once it has loaded; until then it is loading, unseen.
  */
 export function EditedImage({ src, alt, edit, box, fit = 'contain', className, style, loading, onPicture, onError }: EditedImageProps) {
-  const [pic, setPic] = useState<Size | null>(null);
+  // Known at once when the picture is decoded in the image cache (the preview steps from it): placed on the
+  // first frame, not hidden until a load event. Many photos are edited (a turn, a flip, colour): this keeps them as quick as the rest.
+  const [pic, setPic] = useState<Size | null>(() => {
+    const img = imageCache.get(src);
+    return img && img.naturalWidth > 0 ? { w: img.naturalWidth, h: img.naturalHeight } : null;
+  });
   const ready = pic !== null && pic.w > 0 && pic.h > 0 && box.w > 0 && box.h > 0;
 
   let outer: Size = box;
@@ -45,11 +52,12 @@ export function EditedImage({ src, alt, edit, box, fit = 'contain', className, s
     } else {
       outer = css.box;
     }
-    img = { width: css.img.width, height: css.img.height, transform: `translate(${dx}px, ${dy}px) ${css.img.transform}` };
+    img = { width: css.img.width, height: css.img.height, transform: `translate(${dx}px, ${dy}px) ${css.img.transform}`, filter: colorFilterCss(edit.adjust) };
   }
 
   return (
     <div className={`gallery-edited${className ? ` ${className}` : ''}`} style={{ ...style, width: outer.w, height: outer.h }}>
+      <ColorFilter adjust={edit.adjust} />
       <img
         src={src}
         alt={alt}

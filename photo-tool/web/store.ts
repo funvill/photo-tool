@@ -4,7 +4,7 @@ import { filterItems, galleryFacts, sortItems, type GalleryFacts, type GalleryFi
 import { clickSelect, dragPaths, flagTargets, nextAfterRemoval } from '../core/galleryViewer';
 import { stackItems, type StackInfo } from '../core/galleryStacks';
 import { formatOf } from '../../shared/core/mediaFormats';
-import { IDENTITY_EDIT, isIdentityEdit, parseEdit, type PhotoEdit } from '../../shared/core/photoEdit';
+import { flipEdit, IDENTITY_EDIT, isIdentityEdit, parseEdit, rotateEditLeft, rotateEditRight, sameEdit, type PhotoEdit } from '../../shared/core/photoEdit';
 import { photoScores, scoreAdjustOf, type PhotoScore } from '../core/photoScore';
 import { loadEditTarget, saveEditTarget, type EditTarget } from './editSettings';
 import { galleryApi, type GalleryItem, type JobUpdate, type RecentFolder, type TaggingStatus } from './api';
@@ -150,6 +150,13 @@ export interface GalleryState {
    * list and the selection moves on, as after H. Nothing without the desktop app.
    */
   trashSelected(paths?: string[]): Promise<void>;
+  /**
+   * [ and ] (and the photo menu): turn every selected photo (the focused one when none is) a quarter, as an
+   * unsaved edit built on what it shows now, exactly as Done in edit mode would leave it. One undo step.
+   */
+  turnSelected(dir: 'left' | 'right'): void;
+  /** The photo menu's Flip horizontally: mirror every selected photo, as turnSelected does. */
+  flipSelected(): void;
   /** Stop reading and watching the open folder, and go back to the start screen. */
   close(): void;
   setTidyOpen(open: boolean): void;
@@ -381,17 +388,6 @@ const without = (edits: Record<string, PhotoEdit>, path: string) => {
   const { [path]: _dropped, ...others } = edits;
   return others;
 };
-
-/** The same edit, to 1e-4 (null is no edit). */
-function sameEdit(a: PhotoEdit | null, b: PhotoEdit | null): boolean {
-  const x = a ?? IDENTITY_EDIT;
-  const y = b ?? IDENTITY_EDIT;
-  const near = (p: number, q: number) => Math.abs(p - q) <= 1e-4;
-  return (
-    x.rotate === y.rotate && near(x.straighten, y.straighten) &&
-    near(x.crop.x, y.crop.x) && near(x.crop.y, y.crop.y) && near(x.crop.w, y.crop.w) && near(x.crop.h, y.crop.h)
-  );
-}
 
 // Read once per stored value, so a selector hands back the same object each time (and nothing re-renders for it).
 const parsedEdits = new WeakMap<object, PhotoEdit | null>();
@@ -654,6 +650,37 @@ export const useGallery = create<GalleryState>()((set, get) => {
         // Only the extra matches go missing; the word matches are shown.
       }
     }, MEANING_DEBOUNCE_MS);
+  };
+
+  /** What the keys act on: the selected photos that are shown, in the order shown; else the focused one when shown. */
+  const selectedShown = (s: GalleryState): string[] => {
+    const picked = new Set(s.selection);
+    const shown = selectablePaths(s);
+    const paths = shown.filter((p) => picked.has(p));
+    return paths.length ? paths : s.selected !== null && shown.includes(s.selected) ? [s.selected] : [];
+  };
+
+  /**
+   * Change the shown edit of every selected photo (the focused one when none is) with `fn`, each as an
+   * unsaved edit (none when it comes back to what is saved), as one undo step. Not in edit mode, and not
+   * on a photo whose save is on its way.
+   */
+  const changeSelectedEdits = (label: string, fn: (e: PhotoEdit) => PhotoEdit) => {
+    const s = get();
+    if (s.editing !== null) return;
+    const byPath = new Map(s.items.map((i) => [i.path, i]));
+    const paths = selectedShown(s).filter((p) => byPath.has(p) && !s.savingPaths.includes(p));
+    if (!paths.length) return;
+    const pendingEdits = { ...s.pendingEdits };
+    const edits: NonNullable<UndoStep['edits']> = [];
+    for (const path of paths) {
+      const item = byPath.get(path)!;
+      const next = fn(shownEdit(s, item) ?? IDENTITY_EDIT);
+      edits.push({ path, before: s.pendingEdits[path] });
+      if (sameEdit(next, savedEdit(s, item))) delete pendingEdits[path];
+      else pendingEdits[path] = next;
+    }
+    set({ pendingEdits, undoStack: pushUndo(s.undoStack, { label, info: [], edits }) });
   };
 
   /** A photo's file name, as the list has it. */
@@ -1054,13 +1081,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
     async trashSelected(paths) {
       const trash = host?.trashPhotos;
       if (!trash) return;
-      const s = get();
-      let targets = paths;
-      if (!targets) {
-        const shown = new Set(selectablePaths(s));
-        targets = s.selection.filter((p) => shown.has(p));
-        if (!targets.length && s.selected !== null && shown.has(s.selected)) targets = [s.selected];
-      }
+      const targets = paths ?? selectedShown(get());
       if (!targets.length) return;
       try {
         const r = await trash(targets);
@@ -1073,6 +1094,14 @@ export const useGallery = create<GalleryState>()((set, get) => {
       } catch (e) {
         get().toast('error', `Couldn't delete: ${message(e)}`);
       }
+    },
+
+    turnSelected(dir) {
+      changeSelectedEdits('rotate', dir === 'left' ? rotateEditLeft : rotateEditRight);
+    },
+
+    flipSelected() {
+      changeSelectedEdits('flip', flipEdit);
     },
 
     close() {

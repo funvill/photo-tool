@@ -84,3 +84,25 @@ describe('importer with a saved edit', () => {
     expect([row().width, row().height]).toEqual([400, 300]);
   });
 });
+
+describe('#9 importer with light and colour, or a flip, from Photo Tool', () => {
+  it('a photo saved brighter comes into the book brighter', async () => {
+    writeInfo({ rotate: 0, straighten: 0, crop: { x: 0, y: 0, w: 1, h: 1 }, adjust: { brightness: 50, contrast: 0, saturation: 0, warmth: 0 } });
+    expect((await sync()).imported).toBe(1);
+    const derived = row().derived_path!;
+    expect(derived).toBeTruthy();
+    const before = (await sharp(join(photos, 'a.jpg')).stats()).channels.map((c) => c.mean);
+    const after = (await sharp(derived).stats()).channels.map((c) => c.mean);
+    for (let i = 0; i < 3; i++) expect(after[i] - before[i]).toBeGreaterThan(40);
+  });
+
+  it('a flip alone is an edit, rendered again when it changes', async () => {
+    writeInfo({ rotate: 0, straighten: 0, crop: { x: 0, y: 0, w: 1, h: 1 }, flip: true });
+    await sync();
+    const first = row().derived_path;
+    expect(first).toBeTruthy();
+    writeInfo({ rotate: 0, straighten: 0, crop: { x: 0, y: 0, w: 1, h: 1 }, flip: true, adjust: { brightness: 0, contrast: 30, saturation: 0, warmth: 0 } });
+    expect((await sync()).imported).toBe(1);
+    expect(row().derived_path).not.toBe(first);
+  });
+});

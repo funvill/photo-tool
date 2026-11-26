@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import exifr from 'exifr';
 import sharp from 'sharp';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { editPlan, type PhotoEdit } from '../core/photoEdit';
+import { applyMatrix, colorMatrix, NO_ADJUST, type Adjust } from '../core/colorAdjust';
+import { editPlan, flipEdit, type PhotoEdit } from '../core/photoEdit';
 import { orientedSize } from '../server/media';
 import { editFormatFor, renderEdited } from '../server/photoEditRender';
 
@@ -115,5 +116,94 @@ describe('editFormatFor', () => {
     expect(editFormatFor('a.jpeg')).toBe('jpeg');
     expect(editFormatFor('a.png')).toBe('png');
     expect(editFormatFor('a.webp')).toBe('webp');
+  });
+});
+
+describe('#9 renderEdited: flip, light and colour', () => {
+  /** A w x h picture of one colour (PNG: no JPEG noise). */
+  const flat = async (file: string, rgb: [number, number, number], w = 8, h = 8, channels: 3 | 4 = 3) =>
+    sharp({ create: { width: w, height: h, channels, background: channels === 4 ? { r: rgb[0], g: rgb[1], b: rgb[2], alpha: 0.5 } : { r: rgb[0], g: rgb[1], b: rgb[2] } } }).png().toFile(file);
+  const adjust = (a: Partial<Adjust>): PhotoEdit => id({ adjust: { ...NO_ADJUST, ...a } });
+  const near = (a: number[], b: number[], tol = 3) => a.forEach((v, i) => expect(Math.abs(v - b[i])).toBeLessThanOrEqual(tol));
+
+  it('flips: red on the left ends up on the right', async () => {
+    const src = join(dir, 'f.jpg');
+    await halves(src);
+    const out = join(dir, 'f-out.jpg');
+    await renderEdited(src, id({ flip: true }), out, 'jpeg');
+    expect((await pixel(out, 50, 150))[2]).toBeGreaterThan(200);
+    expect((await pixel(out, 350, 150))[0]).toBeGreaterThan(200);
+  });
+
+  it('flipEdit on a turned photo mirrors what is shown, left to right', async () => {
+    const src = join(dir, 'ft.png');
+    // Four quadrants of different colours, so a wrong mirror (top to bottom) shows.
+    const q = (c: string) => sharp({ create: { width: 20, height: 15, channels: 3, background: c } }).png().toBuffer();
+    await sharp({ create: { width: 40, height: 30, channels: 3, background: '#000000' } })
+      .composite([{ input: await q('#ff0000'), left: 0, top: 0 }, { input: await q('#00ff00'), left: 20, top: 0 }, { input: await q('#0000ff'), left: 0, top: 15 }, { input: await q('#ffffff'), left: 20, top: 15 }])
+      .png().toFile(src);
+    const e = id({ rotate: 90, crop: { x: 0, y: 0, w: 0.6, h: 1 } });
+    const before = join(dir, 'ft-before.png');
+    const after = join(dir, 'ft-after.png');
+    await renderEdited(src, e, before, 'png');
+    await renderEdited(src, flipEdit(e), after, 'png');
+    const mirrored = await sharp(before).flop().raw().toBuffer();
+    const got = await sharp(after).raw().toBuffer();
+    expect(got.equals(mirrored)).toBe(true);
+  });
+
+  it('brightness +50 makes a mid-grey photo about 51 levels lighter', async () => {
+    const src = join(dir, 'grey.jpg');
+    await sharp({ create: { width: 8, height: 8, channels: 3, background: '#808080' } }).jpeg({ quality: 95 }).toFile(src);
+    const out = join(dir, 'grey-out.jpg');
+    await renderEdited(src, adjust({ brightness: 50 }), out, 'jpeg');
+    const before = (await sharp(src).stats()).channels[0].mean;
+    const after = (await sharp(out).stats()).channels[0].mean;
+    expect(Math.abs(after - before - 51)).toBeLessThanOrEqual(3);
+  });
+
+  it('saturation -100 turns a red photo grey', async () => {
+    const src = join(dir, 'red.jpg');
+    await sharp({ create: { width: 8, height: 8, channels: 3, background: '#d02020' } }).jpeg({ quality: 95 }).toFile(src);
+    const out = join(dir, 'red-out.jpg');
+    await renderEdited(src, adjust({ saturation: -100 }), out, 'jpeg');
+    const [r, g, b] = await pixel(out, 4, 4);
+    expect(Math.abs(r - g)).toBeLessThanOrEqual(3);
+    expect(Math.abs(g - b)).toBeLessThanOrEqual(3);
+  });
+
+  it('the saved colour is the colour the page works out with the same matrix, even when it clips', async () => {
+    const cases: [number[], Partial<Adjust>][] = [
+      [[180, 90, 40], { brightness: 30, contrast: -20 }],
+      [[230, 30, 120], { brightness: -50, contrast: 100 }],
+      [[20, 200, 90], { saturation: 60, warmth: -70, brightness: 10 }],
+      [[60, 60, 200], { warmth: 100, contrast: 40 }],
+    ];
+    for (const [n, [rgb, a]] of cases.entries()) {
+      const src = join(dir, `m${n}.png`);
+      await flat(src, rgb as [number, number, number]);
+      const out = join(dir, `m${n}-out.png`);
+      await renderEdited(src, adjust(a), out, 'png');
+      near(await pixel(out, 4, 4), applyMatrix(rgb, colorMatrix({ ...NO_ADJUST, ...a })));
+    }
+  });
+
+  it('a greyscale photo takes colour too (warmth tints it)', async () => {
+    const src = join(dir, 'bw.png');
+    await sharp({ create: { width: 8, height: 8, channels: 3, background: '#808080' } }).toColourspace('b-w').png().toFile(src);
+    expect((await sharp(src).metadata()).channels).toBe(1);
+    const out = join(dir, 'bw-out.png');
+    await renderEdited(src, adjust({ warmth: 100 }), out, 'png');
+    near(await pixel(out, 4, 4), applyMatrix([128, 128, 128], colorMatrix({ ...NO_ADJUST, warmth: 100 })));
+  });
+
+  it('a PNG with transparency keeps it', async () => {
+    const src = join(dir, 'alpha.png');
+    await flat(src, [100, 100, 100], 8, 8, 4);
+    const out = join(dir, 'alpha-out.png');
+    await renderEdited(src, adjust({ brightness: 50 }), out, 'png');
+    const { data, info } = await sharp(out).raw().toBuffer({ resolveWithObject: true });
+    expect(info.channels).toBe(4);
+    near([data[0], data[1], data[2], data[3]], [151, 151, 151, 128], 3);
   });
 });

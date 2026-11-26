@@ -1,20 +1,23 @@
-import { useEffect, useRef, useState, type PointerEvent } from 'react';
+import { useEffect, useRef, useState, type MouseEvent, type PointerEvent } from 'react';
 import { Icon } from '../../../shared/web/components/Icon';
 import {
   ASPECTS,
   IDENTITY_EDIT,
+  NO_ADJUST,
   editCss,
   fitCropToAspect,
+  flipEdit,
   isIdentityEdit,
   resizeCrop,
   rotateEditLeft,
   turnedSize,
   type CropHandle,
+  type Adjust,
   type CropRect,
   type PhotoEdit,
 } from '../../../shared/core/photoEdit';
 import type { Size } from '../../core/previewZoom';
-import { thumbUrl, type GalleryItem } from '../api';
+import { galleryApi, thumbUrl, type GalleryItem } from '../api';
 import { shownEdit, useGallery } from '../store';
 import { EditedImage } from './EditedImage';
 
@@ -31,6 +34,17 @@ const HANDLE_NAMES: Record<Exclude<CropHandle, 'move'>, string> = {
   nw: 'top left', n: 'top', ne: 'top right', e: 'right', se: 'bottom right', s: 'bottom', sw: 'bottom left', w: 'left',
 };
 const FIXED: Partial<Record<AspectId, number>> = { square: 1, '4:5': 4 / 5, '3:2': 3 / 2, '16:9': 16 / 9 };
+const COLOUR_SLIDERS: { key: keyof Adjust; label: string }[] = [
+  { key: 'brightness', label: 'Brightness' },
+  { key: 'contrast', label: 'Contrast' },
+  { key: 'saturation', label: 'Saturation' },
+  { key: 'warmth', label: 'Warmth' },
+];
+
+/** A mouse click (detail > 0; a key press gives 0) leaves no focus on the toolbar button it pressed. */
+const blurClicked = (e: MouseEvent) => {
+  if (e.detail > 0) (e.target as HTMLElement).closest('button')?.blur();
+};
 
 /**
  * Keys typed into a field (the description, say) are the field's own. The straighten slider keeps its arrows,
@@ -93,10 +107,26 @@ export function EditPane({ item }: { item: GalleryItem }) {
     const r = aspectRatio(a, f, live.current.turned);
     if (r !== null) setDraft((d) => ({ ...d, crop: fitCropToAspect(d.crop, r, live.current.turned) }));
   };
+  const flip = () => setDraft((d) => flipEdit(d));
   const reset = () => {
+    // Everything: the crop, the turns, the flip, and light and colour.
     setDraft(IDENTITY_EDIT);
     setAspect('free');
     setFlipped(false);
+  };
+  const setAdjust = (k: keyof Adjust, v: number) => setDraft((d) => ({ ...d, adjust: { ...(d.adjust ?? NO_ADJUST), [k]: v } }));
+  // Auto: the sliders from the photo's own statistics (they can be moved after). A reply for a photo no longer edited is dropped.
+  const [autoBusy, setAutoBusy] = useState(false);
+  const auto = async () => {
+    setAutoBusy(true);
+    try {
+      const a = await galleryApi.autoAdjust(item.path);
+      if (useGallery.getState().editing === item.path) setDraft((d) => ({ ...d, adjust: a }));
+    } catch (e) {
+      useGallery.getState().toast('error', `Couldn't work out Auto: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setAutoBusy(false);
+    }
   };
 
   // The store keeps the edit in progress: selecting another photo now is Done with it.
@@ -171,13 +201,22 @@ export function EditPane({ item }: { item: GalleryItem }) {
           </div>
         </div>
       </div>
-      <div
-        className="gallery-edit-tools"
-        onClick={(e) => {
-          // A mouse click (detail > 0; a key press gives 0) leaves no focus on the button it pressed.
-          if (e.detail > 0) (e.target as HTMLElement).closest('button')?.blur();
-        }}
-      >
+      <div className="gallery-edit-tools gallery-edit-colour" role="group" aria-label="Light and colour" onClick={blurClicked}>
+        {COLOUR_SLIDERS.map(({ key, label }) => {
+          const v = (draft.adjust ?? NO_ADJUST)[key];
+          return (
+            <label key={key} className="gallery-straighten row" title="Double-click to reset">
+              <span>{label}</span>
+              <input type="range" min={-100} max={100} step={1} value={v} aria-label={label} onChange={(e) => setAdjust(key, Number(e.currentTarget.value))} onDoubleClick={() => setAdjust(key, 0)} />
+              <output className="gallery-straighten-value">{`${v > 0 ? '+' : ''}${v}`}</output>
+            </label>
+          );
+        })}
+        <button type="button" className="btn btn-small" onClick={() => void auto()} disabled={autoBusy} title="Set light and colour from the photo itself">
+          Auto
+        </button>
+      </div>
+      <div className="gallery-edit-tools" onClick={blurClicked}>
         {/* The shapes need the photo's own shape: they wait for the picture. */}
         <div className="seg seg-compact" role="group" aria-label="Aspect ratio">
           {ASPECTS.map((a) => (
@@ -201,6 +240,10 @@ export function EditPane({ item }: { item: GalleryItem }) {
             <Icon name="rotate" size={14} />
           </span>
           Rotate 90°
+        </button>
+        <button type="button" className="btn btn-small" onClick={flip} title="Flip horizontally (mirror left to right)">
+          <Icon name="swap" size={14} />
+          Flip
         </button>
         <label className="gallery-straighten row" title="Double-click to reset">
           <span>Straighten</span>

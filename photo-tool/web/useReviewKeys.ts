@@ -33,7 +33,8 @@ function stepFrom(list: { path: string }[], unfolded: { path: string }[], select
  * Left/Right, Home and End move the selection through the shown list; Up and Down nudge the photo score
  * of the selected photo (every selected one when several are) by +1 / −1; F favourites (stars) and H
  * hides the same photos; Enter or Space opens the selected photo in the viewer; E opens edit mode on it;
- * Delete sends the selected photos to the Recycle Bin (after the desktop app's confirm); Ctrl+A selects
+ * [ and ] turn the selected photos a quarter anticlockwise or clockwise (an unsaved edit, as Done in edit
+ * mode leaves one); Delete sends the selected photos to the Recycle Bin (after the desktop app's confirm); Ctrl+A selects
  * every shown photo and Ctrl+D none; Ctrl+Z undoes the last change. Not while typing (Ctrl+Z there is the field's own), while the viewer or a
  * dialog is open, or while a photo is being edited (edit mode has its own keys); no other key with Ctrl,
  * Alt or Meta held.
@@ -76,6 +77,13 @@ export function useReviewKeys(onOpen: (path: string) => void) {
         if (path === null || !selectFiltered(s).some((i) => i.path === path)) return;
         e.preventDefault();
         if (!e.repeat) s.startEdit(path);
+        return;
+      }
+
+      // [ and ] turn the selected photos anticlockwise and clockwise, as an unsaved edit. One press, one turn.
+      if (e.key === '[' || e.key === ']') {
+        e.preventDefault();
+        if (!e.repeat) s.turnSelected(e.key === '[' ? 'left' : 'right');
         return;
       }
 

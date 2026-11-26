@@ -1,11 +1,13 @@
 // The gallery program: open a folder, review its photos (grid, preview pane, keys, stacks, hidden
 // photos) and star one — the star lands in the folder's photoinfo.json, where the editor will find it.
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { isSupported } from '../../../shared/server/media';
+import { applyMatrix, colorMatrix } from '../../../shared/core/colorAdjust';
+import sharp from 'sharp';
 
 const FIXTURES = join(process.cwd(), 'fixtures', 'generated', 'trip');
 
@@ -297,8 +299,8 @@ test('right-click opens the menu with icons; Copy path puts the path on the clip
     const menu = page.getByRole('menu');
     await expect(menu).toBeVisible();
     const items = menu.getByRole('menuitem');
-    await expect(items).toHaveText([/Edit/, /Copy to clipboard/, /Copy path to clipboard/, /Show in file explorer/, /Favourite/, /Hide/, /Delete/]);
-    for (let i = 0; i < 7; i++) await expect(items.nth(i).locator('svg.icon')).toHaveCount(1);
+    await expect(items).toHaveText([/Edit/, /Rotate left/, /Rotate right/, /Flip horizontally/, /Copy to clipboard/, /Copy path to clipboard/, /Show in file explorer/, /Favourite/, /Hide/, /Delete/]);
+    for (let i = 0; i < 10; i++) await expect(items.nth(i).locator('svg.icon')).toHaveCount(1);
     await expect(menu.locator('.ctx-sep')).toHaveCount(3);
 
     await menu.getByRole('menuitem', { name: /Copy path to clipboard/ }).click();
@@ -1766,4 +1768,117 @@ test.describe('#9 keys, rotate and flip, light and colour, copy, shortcuts', () 
       removeTrip(dir);
     }
   });
+
+  test('] and [ turn the selected photos as an unsaved edit, one undo step; the menu rotates and flips too', async ({ page, request }) => {
+    const dir = await openTrip(page, request);
+    try {
+      await page.getByLabel('Stack similar').uncheck();
+      const tiles = page.locator('.gallery-tile');
+      const preview = page.getByRole('region', { name: 'Preview' });
+      await tiles.nth(0).click();
+      await page.keyboard.press(']');
+      await expect(page.locator('.gallery-tile.selected .gallery-tile-unsaved')).toHaveCount(1);
+      await expect(preview).toContainText('Edited · not saved');
+      await expect(preview.locator('.gallery-preview-img.gallery-edited img')).toBeVisible();
+      await page.keyboard.press('Control+z');
+      await expect(page.locator('.gallery-tile-unsaved')).toHaveCount(0);
+
+      // Two selected: one press turns both, and one Ctrl+Z takes both back.
+      await tiles.nth(1).click({ modifiers: ['Shift'] });
+      await page.keyboard.press('[');
+      await expect(page.locator('.gallery-tile-unsaved')).toHaveCount(2);
+      await page.keyboard.press('Control+z');
+      await expect(page.locator('.gallery-tile-unsaved')).toHaveCount(0);
+
+      // The menu: Flip horizontally on the photo right-clicked (now the only one selected).
+      await tiles.nth(3).click();
+      await tiles.nth(3).click({ button: 'right' });
+      await page.getByRole('menuitem', { name: /Flip horizontally/ }).click();
+      await expect(page.locator('.gallery-tile-unsaved')).toHaveCount(1);
+      await expect(preview.locator('.gallery-preview-img.gallery-edited img')).toHaveAttribute('style', /scaleX\(-1\)/);
+      // [ while the menu is open closes it and turns the photo.
+      await tiles.nth(3).click({ button: 'right' });
+      await page.keyboard.press('[');
+      await expect(page.getByRole('menu')).toHaveCount(0);
+      // Save writes it, flip and turn (anticlockwise: 270), into photoinfo.json.
+      await preview.getByRole('button', { name: 'Save', exact: true }).click();
+      const name = (await altOf(page, 3))!;
+      await expect.poll(() => photoInfo(dir)[name]?.edit).toEqual({ rotate: 270, straighten: 0, crop: { x: 0, y: 0, w: 1, h: 1 }, flip: true });
+    } finally {
+      removeTrip(dir);
+    }
+  });
+
+  test('Light & colour: a slider and Done leave an unsaved edit, Save writes adjust; Auto moves a slider; Reset clears colour', async ({ page, request }) => {
+    const dir = await openTrip(page, request);
+    try {
+      const first = (await altOf(page, 0))!;
+      const preview = page.getByRole('region', { name: 'Preview' });
+      await page.keyboard.press('e');
+      const colour = preview.getByRole('group', { name: 'Light and colour' });
+      await expect(colour).toBeVisible();
+      await colour.getByLabel('Brightness').fill('40');
+      await expect(colour.getByLabel('Brightness')).toHaveValue('40');
+      // The picture in edit mode is drawn through the colour filter.
+      await expect(page.locator('.gallery-edit-frame .gallery-edited img')).toHaveAttribute('style', /filter: url\("?#pt-color-/);
+      await preview.getByRole('button', { name: 'Done' }).click();
+      await expect(page.locator('.gallery-tile.selected .gallery-tile-unsaved')).toHaveCount(1);
+      await expect(preview).toContainText('Edited · not saved');
+      await expect(page.locator('.gallery-tile.selected .gallery-edited img')).toHaveAttribute('style', /filter/);
+      await preview.getByRole('button', { name: 'Save', exact: true }).click();
+      await expect.poll(() => photoInfo(dir)[first]?.edit).toEqual({ rotate: 0, straighten: 0, crop: { x: 0, y: 0, w: 1, h: 1 }, adjust: { brightness: 40, contrast: 0, saturation: 0, warmth: 0 } });
+
+      // Auto changes at least one slider; Reset puts them all back to 0. (Edit mode waits for the save to land.)
+      await expect(preview).not.toContainText('Edited · not saved');
+      await page.keyboard.press('e');
+      const values = () => Promise.all(['Brightness', 'Contrast', 'Saturation', 'Warmth'].map((l) => colour.getByLabel(l).inputValue()));
+      await colour.getByLabel('Brightness').fill('0');
+      const before = await values();
+      await colour.getByRole('button', { name: 'Auto' }).click();
+      await expect.poll(async () => JSON.stringify(await values())).not.toBe(JSON.stringify(before));
+      await preview.getByRole('button', { name: 'Reset' }).click();
+      expect(await values()).toEqual(['0', '0', '0', '0']);
+      await preview.getByRole('button', { name: 'Cancel' }).click();
+    } finally {
+      removeTrip(dir);
+    }
+  });
+
+  test("the page's colour filter draws the colour the saved file will have", async ({ page, request }) => {
+    // One flat colour, so the thumbnail's JPEG and the screen add no noise worth the name.
+    const dir = join(mkdtempSync(join(tmpdir(), 'photobook-flat-')), 'flat');
+    mkdirSync(dir, { recursive: true });
+    await sharp({ create: { width: 400, height: 300, channels: 3, background: { r: 170, g: 100, b: 60 } } }).jpeg({ quality: 100 }).toFile(join(dir, 'flat.jpg'));
+    const a = { brightness: 30, contrast: -20, saturation: 40, warmth: -50 };
+    expect((await request.post('/api/gallery/open', { data: { folder: dir, recursive: false } })).status()).toBe(202);
+    await page.goto('/');
+    await page.getByRole('button', { name: dir }).click();
+    await expect(page.locator('.gallery-tile')).toHaveCount(1, { timeout: 60_000 });
+    await expect(page.getByRole('progressbar')).toHaveCount(0, { timeout: 60_000 });
+    try {
+      const preview = page.getByRole('region', { name: 'Preview' });
+      const centre = async () => {
+        const img = preview.locator('.gallery-preview-img').first();
+        await expect(img).toBeVisible();
+        const b = (await img.boundingBox())!;
+        const shot = await page.screenshot({ clip: { x: b.x + b.width / 2 - 2, y: b.y + b.height / 2 - 2, width: 4, height: 4 } });
+        const { data } = await sharp(shot).raw().toBuffer({ resolveWithObject: true });
+        return [data[0], data[1], data[2]];
+      };
+      await page.waitForTimeout(300);
+      const plain = await centre();
+      await page.keyboard.press('e');
+      const colour = preview.getByRole('group', { name: 'Light and colour' });
+      for (const [k, v] of Object.entries(a)) await colour.getByLabel(k[0].toUpperCase() + k.slice(1)).fill(String(v));
+      await preview.getByRole('button', { name: 'Done' }).click();
+      await expect(preview.locator('.gallery-preview-img.gallery-edited img')).toBeVisible();
+      await page.waitForTimeout(300);
+      const shown = await centre();
+      const expected = applyMatrix(plain, colorMatrix(a));
+      for (let i = 0; i < 3; i++) expect(Math.abs(shown[i] - expected[i]), `channel ${i}: ${shown} vs ${expected}`).toBeLessThanOrEqual(4);
+    } finally {
+      rmSync(join(dir, '..'), { recursive: true, force: true });
+    }
+  });
 });
+
