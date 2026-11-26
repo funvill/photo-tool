@@ -2116,3 +2116,154 @@ test.describe('#6 phase 2: AVIF, TIFF, GIF, SVG, BMP and ICO', () => {
     }
   });
 });
+
+test.describe('#10 Timeline view', () => {
+  // The trip's photos were taken on three days of March 2026 (day 1 is Saturday the 14th); the HEIC and the scan have no date.
+  const SAT = 'Saturday 14 March 2026 · 7 photos';
+  const SUN = 'Sunday 15 March 2026 · 7 photos';
+  const MON = 'Monday 16 March 2026 · 5 photos';
+  const NONE = 'No date · 2 photos';
+  const headings = (page: Page) => page.locator('.gallery-timeline-heading');
+
+  /** The trip opened with Stack similar off (one tile per photo), shown as the timeline. */
+  async function openTimeline(page: Page, request: APIRequestContext): Promise<string> {
+    const dir = await openTrip(page, request);
+    await page.getByLabel('Stack similar').uncheck();
+    await page.getByRole('button', { name: 'Timeline', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Timeline', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    return dir;
+  }
+
+  test('Timeline shows a heading per day with its count, "No date" last; Sort is greyed out', async ({ page, request }) => {
+    const dir = await openTimeline(page, request);
+    try {
+      await expect(headings(page)).toHaveText([SAT, SUN, MON, NONE]);
+      const sort = page.getByRole('combobox', { name: 'Sort' });
+      await expect(sort).toBeDisabled();
+      await expect(sort).toHaveAttribute('title', 'Timeline is in date order');
+      // The tiles are the grid's own, the same count.
+      await expect(page.locator('.gallery-tile')).toHaveCount(21);
+      // Back to the grid: Sort works again.
+      await page.getByRole('button', { name: 'Grid', exact: true }).click();
+      await expect(headings(page)).toHaveCount(0);
+      await expect(sort).toBeEnabled();
+    } finally {
+      removeTrip(dir);
+    }
+  });
+
+  test('a click on a heading selects that day; F then stars the whole day', async ({ page, request }) => {
+    const dir = await openTimeline(page, request);
+    try {
+      await page.getByRole('button', { name: MON }).click();
+      const monday = page.getByRole('region', { name: 'Monday 16 March 2026' });
+      await expect(monday.locator('.gallery-tile.picked')).toHaveCount(5);
+      await expect(page.locator('.gallery-tile.picked')).toHaveCount(5);
+      await expect(selectedImg(page)).toHaveAttribute('alt', 'day3-01-cafe.jpg');
+      await page.keyboard.press('f');
+      await expect.poll(() => Object.values(photoInfo(dir)).filter((i) => i.star === true).length).toBe(5);
+      expect(Object.keys(photoInfo(dir)).sort()).toEqual(['day3-01-cafe.jpg', 'day3-02-museum.jpg', 'day3-03-garden.jpg', 'day3-04-departure.jpg', 'day3-05-lowres.jpg']);
+    } finally {
+      removeTrip(dir);
+    }
+  });
+
+  test('Right, Home and End step through the photos in date order, whatever the sort; the preview follows', async ({ page, request }) => {
+    const dir = await openTrip(page, request);
+    try {
+      await page.getByLabel('Stack similar').uncheck();
+      // By file name the undated HEIC sits among day 2's photos; in the timeline it is under "No date", last.
+      await page.getByRole('combobox', { name: 'Sort' }).selectOption('name');
+      await page.locator('.gallery-tile', { has: page.locator('img[alt="day2-05-rotated.jpg"]') }).click();
+      await page.keyboard.press('ArrowRight');
+      await expect(selectedImg(page)).toHaveAttribute('alt', 'day2-06-heic-sunset.heic');
+      await page.getByRole('button', { name: 'Timeline', exact: true }).click();
+      await page.locator('.gallery-tile', { has: page.locator('img[alt="day2-05-rotated.jpg"]') }).click();
+      await page.keyboard.press('ArrowRight');
+      await expect(selectedImg(page)).toHaveAttribute('alt', 'day3-01-cafe.jpg');
+      await expect(page.getByRole('region', { name: 'Preview' }).locator('img')).toHaveAttribute('alt', 'day3-01-cafe.jpg');
+      await page.keyboard.press('End');
+      await expect(selectedImg(page)).toHaveAttribute('alt', 'undated-scan.png');
+      await page.keyboard.press('Home');
+      await expect(selectedImg(page)).toHaveAttribute('alt', 'day1-01-arrival.jpg');
+      // ? lists the timeline's own keys.
+      await page.keyboard.press('?');
+      const keys = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
+      await expect(keys).toContainText('Timeline and preview');
+      await expect(keys).toContainText('Previous or next photo, in date order');
+      await page.keyboard.press('Escape');
+    } finally {
+      removeTrip(dir);
+    }
+  });
+
+  test('Day / Month changes the headings; the choice is kept', async ({ page, request }) => {
+    const dir = await openTimeline(page, request);
+    try {
+      const group = page.getByRole('group', { name: 'Group the photos by' });
+      await expect(group.getByRole('button', { name: 'Day' })).toHaveAttribute('aria-pressed', 'true');
+      await group.getByRole('button', { name: 'Month' }).click();
+      await expect(headings(page)).toHaveText(['March 2026 · 19 photos', NONE]);
+      expect(await page.evaluate(() => localStorage.getItem('gallery.timelineUnit'))).toBe('month');
+      await group.getByRole('button', { name: 'Day' }).click();
+      await expect(headings(page)).toHaveText([SAT, SUN, MON, NONE]);
+    } finally {
+      removeTrip(dir);
+    }
+  });
+
+  test('a large folder by day draws only about three screens of tiles; the month rail jumps to a month', async ({ page, request }) => {
+    // 400 small photos, four a day over 100 days from 1 January 2026: more than 90 days, so the timeline starts by month.
+    const dir = join(mkdtempSync(join(tmpdir(), 'photobook-timeline-')), 'many');
+    mkdirSync(dir);
+    const seed: Record<string, Record<string, unknown>> = {};
+    for (let n = 0; n < 400; n++) {
+      const name = `p${String(n).padStart(3, '0')}.jpg`;
+      await sharp({ create: { width: 48, height: 32, channels: 3, background: { r: (n * 37) % 255, g: (n * 91) % 255, b: (n * 53) % 255 } } }).jpeg().toFile(join(dir, name));
+      const day = new Date(Date.UTC(2026, 0, 1) + Math.floor(n / 4) * 86_400_000).toISOString().slice(0, 10);
+      seed[name] = { date: `${day}T${String(8 + (n % 4)).padStart(2, '0')}:00:00` };
+    }
+    writeFileSync(join(dir, 'photoinfo.json'), JSON.stringify({ format: 'photoinfo/1', photos: seed }, null, 2));
+    try {
+      expect((await request.post('/api/gallery/open', { data: { folder: dir, recursive: false } })).status()).toBe(202);
+      await page.addInitScript(() => {
+        localStorage.setItem('gallery.gridWidth', '900');
+        localStorage.setItem('gallery.thumbSize', '96');
+        localStorage.removeItem('gallery.timelineUnit');
+      });
+      await page.goto('/');
+      await page.getByRole('button', { name: dir }).click();
+      await expect(page.getByRole('progressbar')).toHaveCount(0, { timeout: 60_000 });
+      await page.getByLabel('Stack similar').uncheck();
+      await page.getByRole('button', { name: 'Timeline', exact: true }).click();
+      const group = page.getByRole('group', { name: 'Group the photos by' });
+      await expect(group.getByRole('button', { name: 'Month' })).toHaveAttribute('aria-pressed', 'true');
+      await expect(headings(page).first()).toHaveText('January 2026 · 124 photos');
+      await group.getByRole('button', { name: 'Day' }).click();
+      await expect(headings(page).first()).toHaveText('Thursday 1 January 2026 · 4 photos');
+
+      const scroller = page.locator('.gallery-timeline-scroll');
+      const screen = await scroller.evaluate((e) => e.clientHeight);
+      // A screen holds at most this many tiles: rows of up to 8 tiles, at least 102 px apart.
+      const perScreen = Math.ceil(screen / 102) * 8;
+      const tiles = page.locator('.gallery-tile');
+      expect(await tiles.count()).toBeGreaterThan(0);
+      expect(await tiles.count()).toBeLessThanOrEqual(3 * perScreen);
+      await scroller.evaluate((e) => (e.scrollTop = e.scrollHeight / 2));
+      await expect(headings(page).filter({ hasText: 'February 2026' }).first()).toBeVisible();
+      expect(await tiles.count()).toBeLessThanOrEqual(3 * perScreen);
+
+      // The rail: 2026 · Jan Feb Mar Apr. April jumps to 1 April, its heading at the top.
+      const rail = page.getByRole('navigation', { name: 'Months' });
+      await expect(rail.getByRole('button')).toHaveText(['Jan', 'Feb', 'Mar', 'Apr']);
+      await rail.getByRole('button', { name: 'April 2026' }).click();
+      const april = page.getByRole('button', { name: 'Wednesday 1 April 2026 · 4 photos' });
+      await expect(april).toBeVisible();
+      await expect(rail.getByRole('button', { name: 'April 2026' })).toHaveAttribute('aria-current', 'true');
+      const top = await april.evaluate((e) => e.getBoundingClientRect().top - e.closest('.gallery-timeline-scroll')!.getBoundingClientRect().top);
+      expect(Math.abs(top)).toBeLessThan(2);
+    } finally {
+      rmSync(join(dir, '..'), { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    }
+  });
+});

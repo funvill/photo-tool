@@ -11,9 +11,10 @@ import { Progress, TaggingProgress } from './components/Progress';
 import { LeaveDialog } from './components/LeaveDialog';
 import { Splitter, saveWidth, savedWidth } from './components/Splitter';
 import { TidyDialog } from './components/TidyDialog';
+import { Timeline, TimelineUnitSwitch } from './components/Timeline';
 import { Toasts } from './components/Toasts';
 import { Viewer } from './components/Viewer';
-import { connectDesktop, useGallery, useVisibleItems } from './store';
+import { connectDesktop, useGallery, useVisibleItems, type GalleryView } from './store';
 import { useOriginalKey, useReviewKeys } from './useReviewKeys';
 import { Shortcuts } from './components/Shortcuts';
 
@@ -60,20 +61,29 @@ export function GalleryApp() {
   );
 }
 
-/** Grid | Map, at the top of the thumbnail column: the map replaces only the thumbnails. */
+const VIEWS: { view: GalleryView; label: string }[] = [
+  { view: 'grid', label: 'Grid' },
+  { view: 'timeline', label: 'Timeline' },
+  { view: 'map', label: 'Map' },
+];
+
+/**
+ * Grid | Timeline | Map, at the top of the thumbnail column: the timeline and the map replace only the
+ * thumbnails. In the timeline, its Day | Month sits at the other end of the row.
+ */
 function ViewSwitch() {
   const view = useGallery((s) => s.view);
   const setView = useGallery((s) => s.setView);
   return (
     <div className="gallery-view-switch">
       <div className="seg" role="group" aria-label="Show the photos as">
-        <button type="button" className={view === 'grid' ? 'on' : ''} aria-pressed={view === 'grid'} onClick={() => setView('grid')}>
-          Grid
-        </button>
-        <button type="button" className={view === 'map' ? 'on' : ''} aria-pressed={view === 'map'} onClick={() => setView('map')}>
-          Map
-        </button>
+        {VIEWS.map((v) => (
+          <button key={v.view} type="button" className={view === v.view ? 'on' : ''} aria-pressed={view === v.view} onClick={() => setView(v.view)}>
+            {v.label}
+          </button>
+        ))}
       </div>
+      {view === 'timeline' && <TimelineUnitSwitch />}
     </div>
   );
 }
@@ -124,6 +134,9 @@ function ReviewScreen({ root }: { root: string }) {
         ) : view === 'map' ? (
           // A new folder opens fitted to its own markers.
           <MapView key={root} />
+        ) : view === 'timeline' ? (
+          // A new folder starts at the top.
+          <Timeline key={root} onOpen={openViewer} onContextMenu={onPhotoMenu} />
         ) : (
           // A new folder starts at the top.
           <Grid key={root} onOpen={openViewer} onContextMenu={onPhotoMenu} />

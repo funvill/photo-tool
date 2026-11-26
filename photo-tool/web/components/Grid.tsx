@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { dragPaths } from '../../core/galleryViewer';
-import { pathIndex, preloadOrder } from '../../core/preloadWindow';
-import { thumbUrl } from '../api';
-import { imageCache } from '../imageCache';
+import { pathIndex } from '../../core/preloadWindow';
 import { desktop } from '../../../shared/web/desktop';
 import { gridWindow } from '../virtualGrid';
 import { isIdentityEdit } from '../../../shared/core/photoEdit';
 import { selectMeaningStart, selectScores, selectVisible, shownEdit, useGallery, useStackInfo, useVisibleItems } from '../store';
 import { Tile } from './Tile';
+import { usePreviewPreload } from './usePreviewPreload';
 
 const GAP = 6;
 
@@ -113,20 +112,8 @@ export function Grid({ onOpen, onContextMenu }: { onOpen: (path: string) => void
     if (viewing === null) scrollToSelected();
   }, [selected, viewing, w.cols]);
 
-  // The preview pane steps through the grid: around the selected photo, the next 20 and the previous 5
-  // in grid order (the other way round after a step back) are loaded into the image cache it shows from.
-  // Not while the viewer is open: it asks for its own.
-  const at = selected === null ? undefined : pathIndex(items).get(selected);
-  const went = useRef<{ index: number; direction: 1 | -1 }>({ index: -1, direction: 1 });
-  useEffect(() => {
-    if (viewing !== null || at === undefined) return;
-    const last = went.current;
-    const direction = last.index < 0 || at === last.index ? last.direction : at < last.index ? -1 : 1;
-    went.current = { index: at, direction };
-    imageCache.want([at, ...preloadOrder(at, items.length, { direction })].map((i) => thumbUrl(items[i].key, 'm')));
-  }, [at, items, viewing]);
-  // The grid gone (the map shown instead, another folder): its photos are no longer wanted.
-  useEffect(() => () => imageCache.want([]), []);
+  // The preview pane steps through the grid: the photos around the selected one, in grid order, are loaded ahead.
+  usePreviewPreload(items, selected, viewing);
 
   const picked = useMemo(() => new Set(selection), [selection]);
   const tiles = [];

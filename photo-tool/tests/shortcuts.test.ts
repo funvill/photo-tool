@@ -9,7 +9,7 @@ const NAMED = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End',
 const CHARS = [...'abcdefghijklmnopqrstuvwxyz'].flatMap((c) => [c, c.toUpperCase()]).concat([...'0123456789[]\\/?.,;\'-=`']);
 const KEYS = [...NAMED, ...CHARS];
 const MODS: Omit<KeyLike, 'key'>[] = [{}, { shiftKey: true }, { ctrlKey: true }, { metaKey: true }, { altKey: true }, { ctrlKey: true, shiftKey: true }];
-const PLACES: ShortcutPlace[] = ['grid', 'viewer', 'edit'];
+const PLACES: ShortcutPlace[] = ['grid', 'timeline', 'viewer', 'edit'];
 
 describe('the shortcut table', () => {
   it('has the keys of every place, F1 and F2 among them', () => {
@@ -64,6 +64,24 @@ describe('the shortcut table', () => {
       const step = viewerStep(5, 10, key);
       if (step.action || step.index !== 5) expect(matchShortcut('viewer', { key }), key).not.toBeNull();
     }
+  });
+});
+
+describe("#10 the Timeline's keys", () => {
+  it("has its own list: the grid's keys, with the arrows, Home and End in date order", () => {
+    const rows = shortcutsFor('timeline');
+    expect(rows.find((s) => s.id === 'timeline-move')).toMatchObject({ keys: ['←', '→'], does: 'Previous or next photo, in date order' });
+    expect(rows.find((s) => s.id === 'timeline-first-last')).toMatchObject({ keys: ['Home', 'End'], does: 'Oldest or newest photo' });
+    expect(rows.map((s) => s.keys.join(' or '))).toEqual(expect.arrayContaining(['F', 'H', 'E', 'Enter or Space', '[', ']', 'Delete', 'Ctrl+A', 'Ctrl+D', 'Ctrl+C', 'Ctrl+Z', '\\', '?', 'F1', 'F2']));
+  });
+
+  it('every key the grid acts on, the timeline acts on too, the same way but for stepping in date order', () => {
+    const same = (id: string | null) => (id === 'move' ? 'timeline-move' : id === 'first-last' ? 'timeline-first-last' : id);
+    for (const key of KEYS)
+      for (const mods of MODS) {
+        const e = { key, ...mods };
+        expect(matchShortcut('timeline', e), JSON.stringify(e)).toBe(same(matchShortcut('grid', e)));
+      }
   });
 });
 

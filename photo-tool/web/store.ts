@@ -6,6 +6,7 @@ import { stackItems, type StackInfo } from '../core/galleryStacks';
 import { formatOf } from '../../shared/core/mediaFormats';
 import { flipEdit, IDENTITY_EDIT, isIdentityEdit, parseEdit, rotateEditLeft, rotateEditRight, sameEdit, type PhotoEdit } from '../../shared/core/photoEdit';
 import { photoScores, scoreAdjustOf, type PhotoScore } from '../core/photoScore';
+import { defaultUnit, groupTimeline, timelineOrder, type TimelineGroup, type TimelineUnit } from '../core/timeline';
 import { loadEditTarget, saveEditTarget, type EditTarget } from './editSettings';
 import { galleryApi, type GalleryItem, type JobUpdate, type RecentFolder, type TaggingStatus } from './api';
 
@@ -39,6 +40,9 @@ export interface ScoreToast {
   count: number;
 }
 
+/** What the thumbnail column shows: the grid, the photos by date under headings, or the photos on a map. */
+export type GalleryView = 'grid' | 'timeline' | 'map';
+
 export interface GalleryState {
   job: string | null;
   root: string | null;
@@ -70,8 +74,10 @@ export interface GalleryState {
   tidyOpen: boolean;
   /** Tiles per row in the grid as drawn now (the grid publishes it). 1 while the grid is not shown. */
   gridCols: number;
-  /** What the thumbnail column shows: the grid, or the photos on a map. Kept across folders, for the session. */
-  view: 'grid' | 'map';
+  /** What the thumbnail column shows: the grid, the timeline, or the photos on a map. Kept across folders. */
+  view: GalleryView;
+  /** The timeline's Day / Month, once the user picked one (localStorage 'gallery.timelineUnit'); null: by the folder's span. */
+  timelineUnit: TimelineUnit | null;
   /** The photo being cropped and turned in the preview pane (edit mode), or null. */
   editing: string | null;
   /** Edits made in the page and not saved yet, by photo path. IDENTITY_EDIT here means "remove the saved edit". */
@@ -175,7 +181,11 @@ export interface GalleryState {
   /** ? opens or closes the keyboard shortcuts list; `open` says which (Help > Keyboard shortcuts opens it). */
   toggleShortcuts(open?: boolean): void;
   setGridCols(cols: number): void;
-  setView(view: 'grid' | 'map'): void;
+  setView(view: GalleryView): void;
+  /** The timeline's Day / Month toggle: kept from now on. */
+  setTimelineUnit(unit: TimelineUnit): void;
+  /** A click on a timeline heading: select every shown photo of that group, the first one focused. */
+  selectGroup(key: string): void;
   /** Open edit mode on this photo; not while its save is on its way. */
   startEdit(path: string): void;
   /**
@@ -285,6 +295,7 @@ export const THUMB_MIN = 96;
 export const THUMB_MAX = 320;
 const THUMB_DEFAULT = 160;
 const THUMB_KEY = 'gallery.thumbSize';
+const TIMELINE_UNIT_KEY = 'gallery.timelineUnit';
 const JOB_POLL_MS = 500;
 /** A failed scan poll is retried this many times (1 s, 2 s, 4 s apart) before giving up. */
 const JOB_RETRIES = 3;
@@ -319,6 +330,23 @@ function saveThumbSize(px: number) {
     globalThis.localStorage?.setItem(THUMB_KEY, String(px));
   } catch {
     // Private mode or storage switched off: the size just isn't remembered.
+  }
+}
+
+function savedTimelineUnit(): TimelineUnit | null {
+  try {
+    const v = globalThis.localStorage?.getItem(TIMELINE_UNIT_KEY);
+    return v === 'day' || v === 'month' ? v : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveTimelineUnit(unit: TimelineUnit) {
+  try {
+    globalThis.localStorage?.setItem(TIMELINE_UNIT_KEY, unit);
+  } catch {
+    // Not remembered: the next start picks by the folder's span again.
   }
 }
 
@@ -566,7 +594,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
     const after = selectablePaths(s);
     if (s.selected !== null && !after.includes(s.selected)) {
       let next: string | null = null;
-      if (before.topOf !== null && s.view === 'grid') {
+      if (before.topOf !== null && s.view !== 'map') {
         for (const [path, info] of selectStackInfo(s)) if (info.id === before.topOf && info.top) next = path;
         // One member left: a plain tile now, still the stack's photo.
         if (next === null) {
@@ -828,6 +856,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
     tidyOpen: false,
     gridCols: 1,
     view: 'grid',
+    timelineUnit: savedTimelineUnit(),
     ...noEdits,
     editTarget: 'info',
     saving: false,
@@ -1049,7 +1078,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
       const member = s.selected === null ? undefined : selectStackInfo(s).get(s.selected);
       set({ openStacks: folding ? s.openStacks.filter((o) => o !== id) : [...s.openStacks, id] });
       // Folding the stack the selected photo is in: its face takes the selection.
-      if (folding && member?.id === id && !member.top && s.view === 'grid') {
+      if (folding && member?.id === id && !member.top && s.view !== 'map') {
         for (const [path, info] of selectStackInfo(get())) if (info.id === id && info.top) get().select(path);
         return;
       }
@@ -1223,12 +1252,28 @@ export const useGallery = create<GalleryState>()((set, get) => {
     setView(view) {
       const s = get();
       if (view === s.view) return;
-      // Photos picked on the map may be folded into a stack on the grid: their stacks unfold, so the
-      // selection stays as it was and in view.
-      if (view === 'grid') unfoldFor(s.selected === null ? s.selection : [...s.selection, s.selected]);
+      // Photos picked on the map may be folded into a stack on the grid (or the timeline): their stacks
+      // unfold, so the selection stays as it was and in view.
+      if (view !== 'map') unfoldFor(s.selected === null ? s.selection : [...s.selection, s.selected]);
       const before = snapshot();
       set({ view });
       settleSelection(before);
+    },
+
+    setTimelineUnit(unit) {
+      if (unit === get().timelineUnit) return;
+      set({ timelineUnit: unit });
+      saveTimelineUnit(unit);
+    },
+
+    selectGroup(key) {
+      const s = get();
+      const group = selectTimelineGroups(s).find((g) => g.key === key);
+      if (!group) return;
+      const paths = selectVisible(s).slice(group.start, group.end).map((i) => i.path);
+      if (!paths.length) return;
+      const focus = paths[0];
+      set({ selection: paths, selected: focus, anchor: focus, ...(focus === s.editing ? {} : withEditUndo(s, endEditAsDone(s))) });
     },
 
     startEdit(path) {
@@ -1439,7 +1484,8 @@ const NO_FACTS = new Map<string, GalleryFacts>();
 const NO_STACKS = new Map<string, StackInfo>();
 let factsMemo: { items: GalleryItem[]; facts: Map<string, GalleryFacts>; at: number } | null = null;
 let visibleMemo: {
-  items: GalleryItem[]; sort: GallerySortKey; filter: GalleryFilter; stacked: boolean; openStacks: string[] | undefined; meaning: GalleryState['meaning'] | undefined;
+  /** The sort, or 'timeline:day' / 'timeline:month' in the timeline (which is always in date order). */
+  order: string; items: GalleryItem[]; filter: GalleryFilter; stacked: boolean; openStacks: string[] | undefined; meaning: GalleryState['meaning'] | undefined;
   filtered: GalleryItem[]; visible: GalleryItem[]; stackOf: Map<string, StackInfo>; facts: Map<string, GalleryFacts>; stale: boolean;
   /** Index in `visible` where the matches by meaning begin (null: none shown). */
   meaningStart: number | null;
@@ -1470,7 +1516,11 @@ function sameFactsInput(a: GalleryItem[], b: GalleryItem[]): boolean {
 /** While a folder is still being read, facts are refreshed at most this often. */
 const FACTS_SCAN_THROTTLE_MS = 2000;
 
-type VisibleInput = Pick<GalleryState, 'items' | 'sort' | 'filter'> & { progress?: GalleryState['progress']; stacked?: boolean; openStacks?: string[]; meaning?: GalleryState['meaning'] };
+type VisibleInput = Pick<GalleryState, 'items' | 'sort' | 'filter'> & {
+  progress?: GalleryState['progress']; stacked?: boolean; openStacks?: string[]; meaning?: GalleryState['meaning'];
+  /** In the timeline the list is in date order, grouped by `timelineUnit` (see selectTimelineUnit). */
+  view?: GalleryView; timelineUnit?: TimelineUnit | null;
+};
 
 /** The folder's facts (bursts, quality), worked out again only when what they read changed; mid-scan at most every FACTS_SCAN_THROTTLE_MS. */
 function currentFacts(s: Pick<VisibleInput, 'items' | 'progress'>): Map<string, GalleryFacts> {
@@ -1495,26 +1545,52 @@ export function selectScores(s: Pick<VisibleInput, 'items' | 'progress'>): Map<s
   return scoresMemo.scores;
 }
 
+let unitMemo: { items: GalleryItem[]; unit: TimelineUnit } | null = null;
+
+/** The timeline's Day / Month: the one the user picked, else month when the folder's dates span more than 90 days. */
+export function selectTimelineUnit(s: Pick<VisibleInput, 'items' | 'timelineUnit'>): TimelineUnit {
+  if (s.timelineUnit) return s.timelineUnit;
+  if (unitMemo?.items !== s.items) unitMemo = { items: s.items, unit: defaultUnit(s.items) };
+  return unitMemo.unit;
+}
+
 export function selectVisible(s: VisibleInput): GalleryItem[] {
   const stacked = !!s.stacked;
+  // The timeline is always in date order (oldest first, each day or month together, "No date" last), whatever the sort.
+  const unit = s.view === 'timeline' ? selectTimelineUnit(s) : null;
+  const order = unit ? `timeline:${unit}` : s.sort;
+  const sort: GallerySortKey = unit ? 'date' : s.sort;
   const m = visibleMemo;
-  if (m && m.items === s.items && m.sort === s.sort && m.filter === s.filter && m.stacked === stacked && m.openStacks === s.openStacks && m.meaning === s.meaning && !(m.stale && !s.progress)) return m.visible;
-  const withFacts = needsFacts(s.sort, s.filter, stacked);
+  if (m && m.items === s.items && m.order === order && m.filter === s.filter && m.stacked === stacked && m.openStacks === s.openStacks && m.meaning === s.meaning && !(m.stale && !s.progress)) return m.visible;
+  const withFacts = needsFacts(sort, s.filter, stacked);
   const facts = withFacts ? currentFacts(s) : NO_FACTS;
-  const sorted = sortItems(filterItems(s.items, s.filter, facts), s.sort, facts, s.sort === 'score' ? selectScores(s) : undefined);
+  const bySort = sortItems(filterItems(s.items, s.filter, facts), sort, facts, sort === 'score' ? selectScores(s) : undefined);
+  const sorted = unit ? timelineOrder(bySort, unit) : bySort;
   const folded = stacked ? stackItems(sorted, facts, new Set(s.openStacks ?? [])) : null;
   // Then the photos found by meaning for this search text that the words did not find (passing the other filters), unstacked.
+  // In the timeline they take their places by date, with no note row.
   const extra = meaningExtra(s, sorted, facts);
   const words = folded ? folded.items : sorted;
-  const visible = extra.length ? [...words, ...extra] : words;
-  const filtered = extra.length ? [...sorted, ...extra] : sorted;
+  const inDateOrder = (list: GalleryItem[]) => timelineOrder(sortItems(list, 'date', facts), unit!);
+  const visible = !extra.length ? words : unit ? inDateOrder([...words, ...extra]) : [...words, ...extra];
+  const filtered = !extra.length ? sorted : unit ? inDateOrder([...sorted, ...extra]) : [...sorted, ...extra];
   // Built from stale facts: remembered (the selector must return the same list for the same state), but redone once the scan ends.
   const stale = withFacts && factsMemo?.items !== s.items;
   visibleMemo = {
-    items: s.items, sort: s.sort, filter: s.filter, stacked, openStacks: s.openStacks, meaning: s.meaning,
-    filtered, visible, stackOf: folded ? folded.stackOf : NO_STACKS, facts, stale, meaningStart: extra.length ? words.length : null,
+    order, items: s.items, filter: s.filter, stacked, openStacks: s.openStacks, meaning: s.meaning,
+    filtered, visible, stackOf: folded ? folded.stackOf : NO_STACKS, facts, stale, meaningStart: extra.length && !unit ? words.length : null,
   };
   return visible;
+}
+
+let groupsMemo: { visible: GalleryItem[]; unit: TimelineUnit; groups: TimelineGroup[] } | null = null;
+
+/** The timeline's groups over the shown list (each a day or a month, "No date" last), with their places in it. */
+export function selectTimelineGroups(s: VisibleInput): TimelineGroup[] {
+  const visible = selectVisible(s.view === 'timeline' ? s : { ...s, view: 'timeline' });
+  const unit = selectTimelineUnit(s);
+  if (groupsMemo?.visible !== visible || groupsMemo.unit !== unit) groupsMemo = { visible, unit, groups: groupTimeline(visible, unit) };
+  return groupsMemo.groups;
 }
 
 /** The photos found by meaning for the current search text, not among the word matches, that pass the other filters. */
@@ -1611,7 +1687,10 @@ export function selectStackPlace(s: VisibleInput, path: string): { place: number
  */
 useGallery.subscribe((s, prev) => {
   if (!s.job) return;
-  if (s.job === prev.job && s.selected === prev.selected && s.items === prev.items && s.filter === prev.filter && s.sort === prev.sort && s.stacked === prev.stacked && s.openStacks === prev.openStacks) return;
+  if (
+    s.job === prev.job && s.selected === prev.selected && s.items === prev.items && s.filter === prev.filter && s.sort === prev.sort &&
+    s.stacked === prev.stacked && s.openStacks === prev.openStacks && s.view === prev.view && s.timelineUnit === prev.timelineUnit
+  ) return;
   if (focusTimer) clearTimeout(focusTimer);
   focusTimer = setTimeout(() => {
     focusTimer = null;

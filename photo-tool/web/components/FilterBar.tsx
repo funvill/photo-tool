@@ -16,6 +16,8 @@ const SORTS: { key: GallerySortKey; label: string }[] = [
 ];
 
 const EXAMPLES = queryExamples();
+/** Why Sort is greyed out in the timeline. */
+const TIMELINE_SORT = 'Timeline is in date order';
 const PANEL_ID = 'gallery-filter-panel';
 const HINT_ID = 'gallery-search-hint';
 
@@ -37,6 +39,8 @@ export function FilterBar() {
   const sort = useGallery((s) => s.sort);
   const filter = useGallery((s) => s.filter);
   const stacked = useGallery((s) => s.stacked);
+  // The timeline is always in date order: Sort has nothing to change while it shows.
+  const timeline = useGallery((s) => s.view === 'timeline');
   const items = useGallery((s) => s.items);
   const dirs = useMemo(() => [...new Set(items.map((i) => i.relDir))].sort((a, b) => (a === '' ? -1 : b === '' ? 1 : a.localeCompare(b))), [items]);
   const active = isFilterActive(filter);
@@ -90,9 +94,9 @@ export function FilterBar() {
   return (
     <>
       <div className={`gallery-filters${open ? ' open' : ''}`} role="search" aria-label="Sort and filter">
-        <label className="row gallery-field">
+        <label className={`row gallery-field${timeline ? ' disabled' : ''}`} title={timeline ? TIMELINE_SORT : undefined}>
           Sort
-          <select value={sort} onChange={(e) => useGallery.getState().setSort(e.target.value as GallerySortKey)}>
+          <select value={sort} disabled={timeline} title={timeline ? TIMELINE_SORT : undefined} onChange={(e) => useGallery.getState().setSort(e.target.value as GallerySortKey)}>
             {SORTS.map((s) => (
               <option key={s.key} value={s.key}>{s.label}</option>
             ))}

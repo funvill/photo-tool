@@ -251,8 +251,24 @@
 .gallery-orphans h3 { margin: 0 0 4px; color: var(--muted); font-weight: 600; }
 .gallery-orphans ul { margin: 0; padding-left: 18px; font-size: 12px; overflow-wrap: anywhere; }
 
-/* Grid | Map switch, and the Map tab */
-.gallery-view-switch { flex: none; display: flex; align-items: center; padding: 8px 12px; border-bottom: 1px solid var(--line-soft); background: var(--panel); }
+/* Grid | Timeline | Map switch, and the Map tab */
+.gallery-view-switch { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line-soft); background: var(--panel); }
+.gallery-timeline-unit { margin-left: auto; }
+/* The Timeline: a block per day or month, its heading sticking to the top while the block scrolls under it;
+   the month rail down the right edge. */
+.gallery-timeline { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+.gallery-timeline-body { position: relative; flex: 1; min-height: 0; }
+.gallery-timeline-scroll { position: absolute; inset: 0; overflow-y: auto; background: var(--stage); }
+.gallery-timeline-inner { position: relative; margin-bottom: 12px; }
+.gallery-timeline-group { position: absolute; left: 0; right: 0; }
+.gallery-timeline-heading { position: sticky; top: 0; z-index: 2; display: block; width: 100%; height: 34px; box-sizing: border-box; padding: 0 2px; border: 0; border-bottom: 1px solid var(--line-soft); background: var(--stage); color: var(--text); font: inherit; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gallery-timeline-heading:hover { color: var(--accent); }
+.gallery-timeline-rail { position: absolute; top: 0; right: 0; bottom: 0; width: 64px; box-sizing: border-box; overflow-y: auto; padding: 6px 4px; display: flex; flex-direction: column; gap: 8px; border-left: 1px solid var(--line-soft); background: var(--panel); font-size: 12px; }
+.gallery-timeline-year { display: flex; flex-direction: column; gap: 1px; }
+.gallery-timeline-year-label { font-weight: 700; padding: 0 4px 2px; }
+.gallery-timeline-rail button { border: 0; background: none; color: var(--muted); font: inherit; text-align: left; padding: 2px 4px; border-radius: 4px; cursor: pointer; }
+.gallery-timeline-rail button:hover { color: var(--text); background: var(--panel-3); }
+.gallery-timeline-rail button.on { color: var(--accent-ink); background: var(--accent); }
 .gallery-map { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
 .gallery-map-note { flex: none; margin: 0; padding: 6px 12px; font-size: 12px; border-bottom: 1px solid var(--line-soft); background: var(--panel); }
 .gallery-map-stage { position: relative; flex: 1; min-height: 0; }

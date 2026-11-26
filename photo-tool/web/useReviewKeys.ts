@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { gridStep } from '../core/galleryViewer';
 import { canCopyPhotos, selectablePaths, selectFiltered, selectVisible, useGallery } from './store';
-import { matchShortcut } from './shortcuts';
+import { matchShortcut, type ShortcutPlace } from './shortcuts';
 
 /** Where keys belong to what has focus (typing, a menu, a dialog), not to the review. */
 const TYPING = 'input, textarea, select, [contenteditable="true"], [role="dialog"]';
@@ -9,6 +9,9 @@ const TYPING = 'input, textarea, select, [contenteditable="true"], [role="dialog
 const PRESSABLE = `${TYPING}, button, a`;
 
 const inside = (e: KeyboardEvent, selector: string) => !!(e.target as HTMLElement | null)?.closest?.(selector);
+
+/** Where the review keys are pressed: the timeline has a list of its own (it steps in date order), the grid and the map share the grid's. */
+export const reviewPlace = (view: string): ShortcutPlace => (view === 'timeline' ? 'timeline' : 'grid');
 
 /**
  * Where in the shown list the keys step from: the selected photo's place, or -1 when it is not shown.
@@ -31,8 +34,9 @@ function stepFrom(list: { path: string }[], unfolded: { path: string }[], select
 
 /**
  * The review keys, one window listener for the whole screen (it works whichever view shows the photos).
- * Which key does what is the shortcut table's (shortcuts.ts, place 'grid'), the same table the ? list
- * shows: Left/Right, Home and End move the selection through the shown list; Up and Down nudge the photo
+ * Which key does what is the shortcut table's (shortcuts.ts, place 'grid', or 'timeline' while the timeline
+ * shows), the same table the ? list shows: Left/Right, Home and End move the selection through the shown
+ * list (in date order in the timeline); Up and Down nudge the photo
  * score of the selected photo (every selected one when several are) by +1 / −1; F favourites (stars) and
  * H hides the same photos; Enter or Space opens the selected photo in the viewer; E opens edit mode on it;
  * [ and ] turn the selected photos a quarter anticlockwise or clockwise (an unsaved edit, as Done in edit
@@ -48,7 +52,7 @@ export function useReviewKeys(onOpen: (path: string) => void) {
       if (e.defaultPrevented) return;
       const s = useGallery.getState();
       if (s.viewing !== null || s.tidyOpen || s.settingsOpen || s.shortcutsOpen || s.leaving !== null || s.editing !== null) return;
-      const id = matchShortcut('grid', e);
+      const id = matchShortcut(reviewPlace(s.view), e);
       if (id === null) return;
       if (id === 'undo') {
         if (inside(e, TYPING)) return;
@@ -116,8 +120,11 @@ export function useReviewKeys(onOpen: (path: string) => void) {
           // One press, one point: a held key does not repeat (each tap is its own write and undo step).
           if (!e.repeat) s.nudgeScore(e.key === 'ArrowUp' ? 1 : -1);
           return;
+        // In the timeline the shown list is in date order (the store's), so the same steps go through it in that order.
         case 'move':
         case 'first-last':
+        case 'timeline-move':
+        case 'timeline-first-last':
           break;
         default:
           // \ (hold to see the original) is useOriginalKey's.
@@ -160,7 +167,7 @@ export function useOriginalKey() {
       if (e.defaultPrevented) return;
       const s = useGallery.getState();
       if (s.viewing !== null || s.tidyOpen || s.settingsOpen || s.shortcutsOpen || s.leaving !== null) return;
-      if (matchShortcut(s.editing !== null ? 'edit' : 'grid', e) !== 'original' || inside(e, TYPING_TEXT)) return;
+      if (matchShortcut(s.editing !== null ? 'edit' : reviewPlace(s.view), e) !== 'original' || inside(e, TYPING_TEXT)) return;
       e.preventDefault();
       held = e.code;
       s.setShowOriginal(true);

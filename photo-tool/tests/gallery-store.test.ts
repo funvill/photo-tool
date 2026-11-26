@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GalleryItem } from '../server/app';
 
-const { useGallery, connectDesktop, canCopyPhotos, MAX_TRASH_PHOTOS, BIN, guardUnload, selectVisible, selectStackInfo, selectFiltered, selectFacts, selectStackPlace, menuTargets, shownEdit, selectMeaningStart } = await import('../web/store');
+const { useGallery, connectDesktop, canCopyPhotos, MAX_TRASH_PHOTOS, BIN, guardUnload, selectVisible, selectStackInfo, selectFiltered, selectFacts, selectStackPlace, menuTargets, shownEdit, selectMeaningStart, selectTimelineGroups, selectTimelineUnit } = await import('../web/store');
 const { IDENTITY_EDIT } = await import('../../shared/core/photoEdit');
 
 function item(over: Partial<GalleryItem> = {}): GalleryItem {
@@ -2052,5 +2052,85 @@ describe('#9 gallery store: before/after and the shortcut list', () => {
     disconnect();
     disconnect = null;
     expect(show).toBeNull();
+  });
+});
+
+describe('#10 gallery store: the Timeline', () => {
+  const g = () => useGallery.getState();
+  const dated = (name: string, effectiveDate: string | null) => item({ path: name, fileName: `${name}.jpg`, key: name, effectiveDate });
+  // By name: m, p, q, x, z. In the timeline: x and m on the 14th, z and p on the 15th, q with no date.
+  // z is 16:00 UTC on the 14th but written as the 15th: it belongs to the 15th, before p (later that day everywhere).
+  const trip = () => [
+    dated('p', '2026-07-15T08:00:00'),
+    dated('x', '2026-07-14T09:00:00'),
+    dated('q', null),
+    dated('z', '2026-07-15T01:00:00+09:00'),
+    dated('m', '2026-07-14T10:00:00'),
+  ];
+  const setup = (items: GalleryItem[], selected: string | null, extra: Record<string, unknown> = {}) =>
+    useGallery.setState({ job: 'j1', root: 'D:/Trip', items, sort: 'name', filter: {}, stacked: false, openStacks: [], view: 'grid', timelineUnit: null, selected, selection: selected ? [selected] : [], anchor: selected, ...extra });
+  afterEach(() => useGallery.setState({ view: 'grid', timelineUnit: null }));
+
+  it('setView("timeline") keeps the selection', () => {
+    setup(trip(), 'p', { selection: ['x', 'p'] });
+    g().setView('timeline');
+    expect(g().view).toBe('timeline');
+    expect(g().selected).toBe('p');
+    expect(g().selection).toEqual(['x', 'p']);
+  });
+
+  it('in the timeline the shown list is in date order whatever the sort says, "No date" last; the grid keeps its sort', () => {
+    setup(trip(), null);
+    expect(selectVisible(g()).map((i) => i.path)).toEqual(['m', 'p', 'q', 'x', 'z']);
+    g().setView('timeline');
+    expect(g().sort).toBe('name');
+    expect(selectVisible(g()).map((i) => i.path)).toEqual(['x', 'm', 'z', 'p', 'q']);
+    useGallery.setState({ sort: 'score' });
+    expect(selectVisible(g()).map((i) => i.path)).toEqual(['x', 'm', 'z', 'p', 'q']);
+    g().setView('grid');
+    useGallery.setState({ sort: 'name' });
+    expect(selectVisible(g()).map((i) => i.path)).toEqual(['m', 'p', 'q', 'x', 'z']);
+  });
+
+  it('groups the shown photos by day, or by the unit picked', () => {
+    setup(trip(), null, { view: 'timeline' });
+    expect(selectTimelineUnit(g())).toBe('day');
+    expect(selectTimelineGroups(g()).map((t) => [t.key, t.count])).toEqual([['2026-07-14', 2], ['2026-07-15', 2], ['none', 1]]);
+    g().setTimelineUnit('month');
+    expect(g().timelineUnit).toBe('month');
+    expect(selectTimelineGroups(g()).map((t) => [t.key, t.count])).toEqual([['2026-07', 4], ['none', 1]]);
+  });
+
+  it('is by month for a folder spanning more than 90 days until a unit is picked', () => {
+    setup([dated('a', '2026-01-01T10:00:00'), dated('b', '2026-06-01T10:00:00')], null, { view: 'timeline' });
+    expect(selectTimelineUnit(g())).toBe('month');
+    g().setTimelineUnit('day');
+    expect(selectTimelineUnit(g())).toBe('day');
+  });
+
+  it('selectGroup selects exactly the shown photos of that day and focuses the first', () => {
+    setup([...trip(), item({ path: 'h', key: 'h', effectiveDate: '2026-07-14T12:00:00', info: { hidden: true } })], 'q', { view: 'timeline' });
+    g().selectGroup('2026-07-14');
+    expect(g().selection).toEqual(['x', 'm']);
+    expect(g().selected).toBe('x');
+    expect(g().anchor).toBe('x');
+    g().selectGroup('none');
+    expect(g().selection).toEqual(['q']);
+    g().selectGroup('2030-01-01');
+    expect(g().selection).toEqual(['q']);
+  });
+
+  it('Ctrl+A in the timeline selects every shown photo in date order', () => {
+    setup(trip(), null, { view: 'timeline' });
+    g().selectAll();
+    expect(g().selection).toEqual(['x', 'm', 'z', 'p', 'q']);
+    expect(g().selected).toBe('x');
+  });
+
+  it('H in the timeline moves the selection on to the next photo in date order', async () => {
+    routes['PATCH /api/gallery/info'] = (body) => ({ json: { ...trip().find((i) => i.path === (body as { path: string }).path)!, info: { hidden: true } } });
+    setup(trip(), 'x', { view: 'timeline' });
+    await g().toggleFlag('hidden');
+    expect(g().selected).toBe('m');
   });
 });
