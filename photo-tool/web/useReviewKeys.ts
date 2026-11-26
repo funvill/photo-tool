@@ -33,7 +33,8 @@ function stepFrom(list: { path: string }[], unfolded: { path: string }[], select
  * Left/Right, Home and End move the selection through the shown list; Up and Down nudge the photo score
  * of the selected photo (every selected one when several are) by +1 / −1; F favourites (stars) and H
  * hides the same photos; Enter or Space opens the selected photo in the viewer; E opens edit mode on it;
- * Ctrl+Z undoes the last change. Not while typing (Ctrl+Z there is the field's own), while the viewer or a
+ * Delete sends the selected photos to the Recycle Bin (after the desktop app's confirm); Ctrl+A selects
+ * every shown photo and Ctrl+D none; Ctrl+Z undoes the last change. Not while typing (Ctrl+Z there is the field's own), while the viewer or a
  * dialog is open, or while a photo is being edited (edit mode has its own keys); no other key with Ctrl,
  * Alt or Meta held.
  */
@@ -47,6 +48,14 @@ export function useReviewKeys(onOpen: (path: string) => void) {
         if (inside(e, TYPING)) return;
         e.preventDefault();
         void s.undo();
+        return;
+      }
+      // Ctrl+A selects every shown photo, Ctrl+D none. In a field they stay the field's own.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === 'a' || e.key === 'A' || e.key === 'd' || e.key === 'D')) {
+        if (inside(e, TYPING)) return;
+        e.preventDefault();
+        if (e.key === 'a' || e.key === 'A') s.selectAll();
+        else s.selectNone();
         return;
       }
       if (e.ctrlKey || e.altKey || e.metaKey) return;
@@ -67,6 +76,13 @@ export function useReviewKeys(onOpen: (path: string) => void) {
         if (path === null || !selectFiltered(s).some((i) => i.path === path)) return;
         e.preventDefault();
         if (!e.repeat) s.startEdit(path);
+        return;
+      }
+
+      if (e.key === 'Delete') {
+        if (e.shiftKey) return;
+        e.preventDefault();
+        if (!e.repeat) void s.trashSelected();
         return;
       }
 

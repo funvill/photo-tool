@@ -3,7 +3,7 @@
 import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { isSupported } from '../../../shared/server/media';
 
@@ -1665,6 +1665,105 @@ test.describe('album tags sidecar: generated tags live in the album folder', () 
       await api.dispose();
       await stopServer(server);
       rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    }
+  });
+});
+
+test.describe('#9 keys, rotate and flip, light and colour, copy, shortcuts', () => {
+  /**
+   * A stand-in for the desktop app's Delete: `window.desktop.trashPhotos` moves the files into a trash folder
+   * of the test's own (through Node) and tells the server they are gone, as the desktop app does.
+   */
+  async function fakeTrash(page: Page, request: APIRequestContext): Promise<{ bin: string; asked: string[][] }> {
+    const bin = mkdtempSync(join(tmpdir(), 'photobook-bin-'));
+    const asked: string[][] = [];
+    await page.exposeFunction('__trashFiles', async (paths: string[]) => {
+      asked.push(paths);
+      for (const p of paths) renameSync(p, join(bin, basename(p)));
+      await request.post('/api/gallery/removed', { data: { paths } });
+      return paths;
+    });
+    await page.addInitScript(() => {
+      const w = window as unknown as { desktop: unknown; __trashFiles(paths: string[]): Promise<string[]> };
+      w.desktop = { trashPhotos: async (paths: string[]) => ({ trashed: await w.__trashFiles(paths), failed: [], cancelled: false }) };
+    });
+    return { bin, asked };
+  }
+
+  test('Ctrl+A selects every shown photo, Ctrl+D none; in the search field Ctrl+A selects its text', async ({ page, request }) => {
+    const dir = await openTrip(page, request);
+    try {
+      await page.getByLabel('Stack similar').uncheck();
+      const tiles = page.locator('.gallery-tile');
+      const count = await tiles.count();
+      await tiles.nth(1).click();
+      await page.keyboard.press('Control+a');
+      await expect(page.locator('.gallery-tile.picked')).toHaveCount(count);
+      // The focused photo stays in the preview.
+      await expect(page.locator('.gallery-tile.selected')).toHaveCount(1);
+      await expect(page.locator('.gallery-tile.selected')).toHaveAttribute('data-path', (await tiles.nth(1).getAttribute('data-path'))!);
+
+      await page.keyboard.press('Control+d');
+      await expect(page.locator('.gallery-tile.picked')).toHaveCount(0);
+      await expect(page.locator('.gallery-tile.selected')).toHaveCount(0);
+      await expect(page.getByRole('region', { name: 'Preview' }).locator('img')).toHaveCount(0);
+
+      const search = page.getByLabel('Search photos');
+      await search.fill('lake');
+      await search.press('Control+a');
+      await expect(page.locator('.gallery-tile.picked')).toHaveCount(0);
+      expect(await search.evaluate((el: HTMLInputElement) => [el.selectionStart, el.selectionEnd])).toEqual([0, 4]);
+    } finally {
+      removeTrip(dir);
+    }
+  });
+
+  test('Delete sends the selected photo to the Recycle Bin and selects the next; Delete in the search field deletes a letter', async ({ page, request }) => {
+    const { bin, asked } = await fakeTrash(page, request);
+    const dir = await openTrip(page, request);
+    try {
+      await page.getByLabel('Stack similar').uncheck();
+      const tiles = page.locator('.gallery-tile');
+      const count = await tiles.count();
+      const name = (await altOf(page, 1))!;
+      const next = (await altOf(page, 2))!;
+      await tiles.nth(1).click();
+      await page.keyboard.press('Delete');
+      await expect(tiles).toHaveCount(count - 1);
+      await expect(page.locator(`.gallery-tile img[alt="${name}"]`)).toHaveCount(0);
+      await expect(selectedImg(page)).toHaveAttribute('alt', next);
+      expect(asked).toHaveLength(1);
+      expect(existsSync(join(bin, name))).toBe(true);
+      expect(existsSync(join(dir, name))).toBe(false);
+
+      // Typing in the search field: Delete is the field's own.
+      const search = page.getByLabel('Search photos');
+      await search.fill('ab');
+      await search.press('Home');
+      await search.press('Delete');
+      await expect(search).toHaveValue('b');
+      expect(asked).toHaveLength(1);
+    } finally {
+      removeTrip(dir);
+      rmSync(bin, { recursive: true, force: true });
+    }
+  });
+
+  test('the menu Delete takes every selected photo, through the same action', async ({ page, request }) => {
+    const { asked } = await fakeTrash(page, request);
+    const dir = await openTrip(page, request);
+    try {
+      await page.getByLabel('Stack similar').uncheck();
+      const tiles = page.locator('.gallery-tile');
+      const count = await tiles.count();
+      await tiles.nth(0).click();
+      await tiles.nth(1).click({ modifiers: ['Shift'] });
+      await tiles.nth(1).click({ button: 'right' });
+      await page.getByRole('menuitem', { name: /Delete/ }).click();
+      await expect(tiles).toHaveCount(count - 2);
+      expect(asked).toEqual([[expect.any(String), expect.any(String)]]);
+    } finally {
+      removeTrip(dir);
     }
   });
 });

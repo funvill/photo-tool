@@ -1752,3 +1752,103 @@ describe('#2 gallery store: regenerate a description', () => {
     expect(useGallery.getState().items[0].tags.description).toBe('A picture of lake.');
   });
 });
+
+describe('#9 gallery store: select all, select none, Delete', () => {
+  const g = () => useGallery.getState();
+  const photos = (...names: string[]) => names.map((n) => item({ path: n, fileName: `${n}.jpg`, key: n }));
+  const setup = (items: GalleryItem[], selected: string | null, extra: Record<string, unknown> = {}) =>
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items, sort: 'name', filter: {}, stacked: false, openStacks: [], view: 'grid', selected, selection: selected ? [selected] : [], anchor: selected, ...extra });
+  let disconnect: (() => void) | null = null;
+  afterEach(() => {
+    disconnect?.();
+    disconnect = null;
+  });
+
+  it('selectAll selects every shown photo in one store update, keeping the focused one', () => {
+    setup([...photos('a', 'b', 'c'), item({ path: 'h', key: 'h', info: { hidden: true } })], 'b');
+    let updates = 0;
+    const stop = useGallery.subscribe(() => updates++);
+    g().selectAll();
+    stop();
+    expect(updates).toBe(1);
+    expect(g().selection).toEqual(['a', 'b', 'c']);
+    expect(g().selected).toBe('b');
+    expect(g().anchor).toBe('b');
+  });
+
+  it('selectAll with nothing shown selected focuses the first shown photo', () => {
+    setup(photos('a', 'b'), null);
+    g().selectAll();
+    expect(g().selection).toEqual(['a', 'b']);
+    expect(g().selected).toBe('a');
+  });
+
+  it('selectAll on 10,000 photos is one update', () => {
+    const many = Array.from({ length: 10_000 }, (_, n) => item({ path: `p${String(n).padStart(5, '0')}`, fileName: `p${n}.jpg`, key: `k${n}` }));
+    setup(many, 'p00005');
+    let updates = 0;
+    const stop = useGallery.subscribe(() => updates++);
+    g().selectAll();
+    stop();
+    expect(updates).toBe(1);
+    expect(g().selection).toHaveLength(10_000);
+  });
+
+  it('selectNone clears the selection and the preview', () => {
+    setup(photos('a', 'b'), 'a', { selection: ['a', 'b'] });
+    g().selectNone();
+    expect(g().selected).toBeNull();
+    expect(g().selection).toEqual([]);
+    expect(g().anchor).toBeNull();
+  });
+
+  it('trashSelected sends only the shown selected photos, removes them, and selects the next photo', async () => {
+    // 'b' is selected but hidden, so not shown: it is left out.
+    setup([...photos('a'), item({ path: 'b', key: 'b', fileName: 'b.jpg', info: { hidden: true } }), ...photos('c', 'd', 'e')], 'c', { selection: ['b', 'c', 'd'] });
+    const asked: string[][] = [];
+    disconnect = connectDesktop({ trashPhotos: async (paths: string[]) => (asked.push(paths), { trashed: paths, failed: [], cancelled: false }) });
+    await g().trashSelected();
+    expect(asked).toEqual([['c', 'd']]);
+    expect(g().items.map((i) => i.path)).toEqual(['a', 'b', 'e']);
+    expect(g().selected).toBe('e');
+    expect(g().selection).toEqual(['e']);
+  });
+
+  it('trashSelected at the end of the list selects the photo before', async () => {
+    setup(photos('a', 'b', 'c'), 'c');
+    disconnect = connectDesktop({ trashPhotos: async (paths: string[]) => ({ trashed: paths, failed: [], cancelled: false }) });
+    await g().trashSelected();
+    expect(g().selected).toBe('b');
+  });
+
+  it('trashSelected: cancelled moves nothing; a failure is toasted and only what was trashed goes', async () => {
+    setup(photos('a', 'b', 'c'), 'a', { selection: ['a', 'b'] });
+    disconnect = connectDesktop({ trashPhotos: async () => ({ trashed: [], failed: [], cancelled: true }) });
+    await g().trashSelected();
+    expect(g().items).toHaveLength(3);
+    expect(g().toasts).toEqual([]);
+    disconnect();
+    disconnect = connectDesktop({ trashPhotos: async () => ({ trashed: ['a'], failed: [{ path: 'b', message: 'no bin' }], cancelled: false }) });
+    await g().trashSelected();
+    expect(g().items.map((i) => i.path)).toEqual(['b', 'c']);
+    expect(g().toasts).toEqual([expect.objectContaining({ kind: 'error', text: expect.stringMatching(/b\.jpg.*no bin/) })]);
+  });
+
+  it('trashSelected with given paths (the photo menu) sends those; without the desktop app it does nothing', async () => {
+    setup(photos('a', 'b', 'c'), 'a');
+    await g().trashSelected();
+    expect(g().items).toHaveLength(3);
+    const asked: string[][] = [];
+    disconnect = connectDesktop({ trashPhotos: async (paths: string[]) => (asked.push(paths), { trashed: [], failed: [], cancelled: true }) });
+    await g().trashSelected(['b', 'c']);
+    expect(asked).toEqual([['b', 'c']]);
+  });
+
+  it('trashSelected with nothing selected does not ask', async () => {
+    setup(photos('a'), null);
+    const asked: string[][] = [];
+    disconnect = connectDesktop({ trashPhotos: async (paths: string[]) => (asked.push(paths), { trashed: [], failed: [], cancelled: true }) });
+    await g().trashSelected();
+    expect(asked).toEqual([]);
+  });
+});

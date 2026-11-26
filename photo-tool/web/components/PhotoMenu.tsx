@@ -21,14 +21,9 @@ export interface PhotoMenuProps {
 const SETTLE_MS = 200;
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
-const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-/** The review keys (move, favourite, hide, edit): they act on the photos, so the menu goes away. */
-const REVIEW_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'f', 'F', 'h', 'H', 'e', 'E']);
-
-/** Where a deleted photo goes, named as the desktop app's confirm names it. */
-const BIN = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent) ? 'Recycle Bin' : 'Trash';
+/** The review keys (move, favourite, hide, edit, delete): they act on the photos, so the menu goes away. */
+const REVIEW_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'f', 'F', 'h', 'H', 'e', 'E', 'Delete']);
 
 /**
  * Text onto the clipboard. In the desktop app the main process does it (the app turns every web
@@ -88,20 +83,8 @@ async function showInFolder(path: string) {
   }
 }
 
-async function trash(path: string) {
-  const { toast } = useGallery.getState();
-  try {
-    const r = await desktop!.trashPhotos!(menuTargets(path));
-    if (r.cancelled) return;
-    if (r.trashed.length) useGallery.getState().removeItems(r.trashed);
-    if (r.failed.length) {
-      const first = r.failed[0];
-      toast('error', `Couldn't move ${r.failed.length === 1 ? fileName(first.path) : plural(r.failed.length, 'photo')} to the ${BIN}: ${first.message}`);
-    }
-  } catch (e) {
-    toast('error', `Couldn't delete: ${message(e)}`);
-  }
-}
+/** Delete, as the Delete key does it, on the photos the menu acts on. */
+const trash = (path: string) => useGallery.getState().trashSelected(menuTargets(path));
 
 /** Edit mode on the photo right-clicked (it is the selected one: a right-click selects it). */
 function edit(path: string) {
@@ -188,7 +171,7 @@ export function PhotoMenu({ x, y, path, onClose }: PhotoMenuProps) {
       <MenuItem icon="star" label={starred ? 'Unfavourite' : 'Favourite'} hint="F" onClick={go(() => toggleFlag('star'))} />
       <MenuItem icon={hidden ? 'eye' : 'eye-off'} label={hidden ? 'Unhide' : 'Hide'} hint="H" onClick={go(() => toggleFlag('hidden'))} />
       <div className="ctx-sep" />
-      <MenuItem icon="trash" label="Delete" danger disabled={!desktop?.trashPhotos} onClick={go(() => trash(path))} />
+      <MenuItem icon="trash" label="Delete" hint="Del" danger disabled={!desktop?.trashPhotos} onClick={go(() => trash(path))} />
     </div>
   );
 }

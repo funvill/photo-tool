@@ -140,6 +140,16 @@ export interface GalleryState {
   toggleFlag(field: 'star' | 'hidden'): Promise<void>;
   /** Drop photos from the list (they were deleted); the selection moves on to the next one. */
   removeItems(paths: string[]): void;
+  /** Ctrl+A: select every photo shown (filters and folded stacks respected), in one update; the focused one stays in the preview. */
+  selectAll(): void;
+  /** Ctrl+D: select nothing (the preview empties). */
+  selectNone(): void;
+  /**
+   * Delete (the key and the photo menu): move these photos (default: the selected ones that are shown, else
+   * the focused one) to the Recycle Bin through the desktop app, which asks first. What was moved leaves the
+   * list and the selection moves on, as after H. Nothing without the desktop app.
+   */
+  trashSelected(paths?: string[]): Promise<void>;
   /** Stop reading and watching the open folder, and go back to the start screen. */
   close(): void;
   setTidyOpen(open: boolean): void;
@@ -299,6 +309,9 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const baseName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 /** Up to three names, then "…". */
 const someNames = (paths: string[]) => `${paths.slice(0, 3).map(baseName).join(', ')}${paths.length > 3 ? '…' : ''}`;
+
+/** Where a deleted photo goes, named as the desktop app's confirm names it. */
+export const BIN = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent) ? 'Recycle Bin' : 'Trash';
 
 /** A format that can't be written (HEIC): in photo-file mode such a photo is saved only as a copy (JPEG). */
 export const copyOnly = (path: string) => formatOf(path)?.capabilities.editInPlace === false;
@@ -1024,6 +1037,42 @@ export const useGallery = create<GalleryState>()((set, get) => {
         pendingEdits: paths.some((p) => p in s.pendingEdits) ? Object.fromEntries(Object.entries(s.pendingEdits).filter(([p]) => !gone.has(p))) : s.pendingEdits,
       }));
       settleSelection(before);
+    },
+
+    selectAll() {
+      const s = get();
+      const paths = selectablePaths(s);
+      if (!paths.length) return;
+      const focus = s.selected !== null && paths.includes(s.selected) ? s.selected : paths[0];
+      set({ selection: paths, selected: focus, anchor: focus, ...(focus === s.editing ? {} : withEditUndo(s, endEditAsDone(s))) });
+    },
+
+    selectNone() {
+      get().select(null);
+    },
+
+    async trashSelected(paths) {
+      const trash = host?.trashPhotos;
+      if (!trash) return;
+      const s = get();
+      let targets = paths;
+      if (!targets) {
+        const shown = new Set(selectablePaths(s));
+        targets = s.selection.filter((p) => shown.has(p));
+        if (!targets.length && s.selected !== null && shown.has(s.selected)) targets = [s.selected];
+      }
+      if (!targets.length) return;
+      try {
+        const r = await trash(targets);
+        if (r.cancelled) return;
+        if (r.trashed.length) get().removeItems(r.trashed);
+        if (r.failed.length) {
+          const first = r.failed[0];
+          get().toast('error', `Couldn't move ${r.failed.length === 1 ? nameOf(first.path) : plural(r.failed.length, 'photo')} to the ${BIN}: ${first.message}`);
+        }
+      } catch (e) {
+        get().toast('error', `Couldn't delete: ${message(e)}`);
+      }
     },
 
     close() {
