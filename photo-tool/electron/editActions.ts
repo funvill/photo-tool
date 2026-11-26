@@ -207,3 +207,11 @@ export function unsavedClosePrompt(count: number): MessageBoxOptions {
 export function shouldQuit(count: number, ask: (count: number) => boolean): boolean {
   return count <= 0 || ask(count);
 }
+
+/**
+ * The page's own question stopped a close (or reload): let it go? Without asking when the close was
+ * already confirmed (Restart now asks shouldQuit first, then closes the window); otherwise as shouldQuit.
+ */
+export function letPageClose(o: { count: number; confirmed: boolean }, ask: (count: number) => boolean): boolean {
+  return o.confirmed || shouldQuit(o.count, ask);
+}

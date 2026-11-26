@@ -5,7 +5,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { copyablePatch, MOVE_RETRY_MS, MOVE_TRIES, saveAs, saveToFile, shouldQuit, unsavedClosePrompt } from '../electron/editActions';
+import { copyablePatch, MOVE_RETRY_MS, MOVE_TRIES, saveAs, saveToFile, letPageClose, shouldQuit, unsavedClosePrompt } from '../electron/editActions';
 import { readEditTarget, readMapConsent, writeEditTarget, writeMapConsent } from '../electron/mapTiles';
 
 const edit = { rotate: 90 as const, straighten: 0, crop: { x: 0, y: 0, w: 1, h: 1 } };
@@ -298,6 +298,23 @@ describe('shouldQuit', () => {
     expect(shouldQuit(2, yes)).toBe(true);
     expect(yes).toHaveBeenCalledWith(2);
     expect(shouldQuit(2, () => false)).toBe(false);
+  });
+});
+
+describe('letPageClose', () => {
+  it('lets the page go without asking when the close was already confirmed (Restart now asked once)', () => {
+    const ask = vi.fn(() => false);
+    expect(letPageClose({ count: 3, confirmed: true }, ask)).toBe(true);
+    expect(ask).not.toHaveBeenCalled();
+  });
+
+  it('otherwise asks as quitting does', () => {
+    const ask = vi.fn(() => false);
+    expect(letPageClose({ count: 0, confirmed: false }, ask)).toBe(true);
+    expect(ask).not.toHaveBeenCalled();
+    expect(letPageClose({ count: 2, confirmed: false }, ask)).toBe(false);
+    expect(ask).toHaveBeenCalledWith(2);
+    expect(letPageClose({ count: 2, confirmed: false }, () => true)).toBe(true);
   });
 });
 

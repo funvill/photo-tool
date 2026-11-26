@@ -200,20 +200,42 @@ describe('checkNow', () => {
     expect(t.progress.at(-1)).toBeNull();
   });
 
-  it('prepareInstall false → nothing is installed', async () => {
-    const t = setup({ answers: ['Download', 'Restart now'], prepareInstall: async () => false });
+  it('prepareInstall false (Keep editing) → nothing is installed, and the update stays ready to install', async () => {
+    let ok = false;
+    const t = setup({ answers: ['Download', 'Restart now', 'Restart now'], prepareInstall: async () => ok });
     t.updater.checks = [available('0.1.40')];
     await t.updates.checkNow();
     expect(t.events).toContain('prepareInstall');
     expect(t.updater.calls).toEqual(['check', 'download']);
+    // Later: straight to Restart now, with no second check or download.
+    ok = true;
+    await t.updates.checkNow();
+    expect(t.asked.at(-1)).toEqual({ message: updateText.ready('Photo Tool', '0.1.40'), buttons: ['Restart now', 'Later'] });
+    expect(t.updater.calls).toEqual(['check', 'download', 'quitAndInstall(true,true)']);
   });
 
-  it('Later after the download installs nothing', async () => {
-    const t = setup({ answers: ['Download', 'Later'] });
+  it('Later after the download installs nothing, and the update stays ready to install', async () => {
+    const t = setup({ answers: ['Download', 'Later', 'Restart now'] });
     t.updater.checks = [available('0.1.40')];
     await t.updates.checkNow();
     expect(t.events).not.toContain('prepareInstall');
     expect(t.updater.calls).toEqual(['check', 'download']);
+    expect(t.updates.menuItems()[0]).toMatchObject({ label: updateText.installMenu('0.1.40'), enabled: true });
+    (t.updates.menuItems()[0]!.click as () => void)();
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(t.updater.calls).toEqual(['check', 'download', 'quitAndInstall(true,true)']);
+  });
+
+  it('the check at start does not offer again an update that is already downloaded', async () => {
+    const t = setup({ answers: ['Download', 'Later'] });
+    t.updater.checks = [available('0.1.40')];
+    await t.updates.checkNow();
+    const asked = t.asked.length;
+    writeUpdateSettings(t.settingsFile, { auto: true, lastCheck: null }); // due again
+    await t.updates.checkAtStart({ selfTest: false, disabledByEnv: false });
+    expect(t.asked).toHaveLength(asked);
+    expect(t.updater.calls).toEqual(['check', 'download', 'check']);
   });
 
   it('Later on the offer downloads nothing', async () => {

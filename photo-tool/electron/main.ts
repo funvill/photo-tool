@@ -60,6 +60,7 @@ function photoTool(): DesktopProgram {
     singleInstanceData: () => ({ argv: process.argv, cwd: process.cwd(), defaultApp: !!process.defaultApp }) satisfies LaunchData,
     onSecondInstance: (data) => folders?.secondInstance(data),
     confirmQuit: () => !edits || edits.confirmQuit(),
+    allowClose: (on) => edits?.allowClose(on),
     onWindow: (win) => {
       folders?.watch(win);
       edits?.watch(win);

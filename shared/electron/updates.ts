@@ -6,7 +6,8 @@
 //   Help menu        "Check for updates…" (always shows a result) and "Check for updates automatically"
 //   update found     Download / Release notes / Later
 //   downloading      the taskbar progress bar, and the menu item reads "Downloading update… 42 %"
-//   downloaded       Restart now / Later; Restart now runs the shell's prepareInstall, then installs
+//   downloaded       Restart now / Later; Restart now runs the shell's prepareInstall, then installs. Until
+//                    installed (Later, or the install called off) the menu item reads "Install update 1.2.3…"
 //
 // One check and one download at a time: a second request shares the one in flight.
 import type { OutgoingHttpHeaders } from 'node:http';
@@ -109,6 +110,10 @@ export function createUpdates(d: UpdateDeps): Updates {
   let checking: Promise<Outcome> | null = null;
   let offering: Promise<void> | null = null;
   let downloading: Promise<void> | null = null;
+  /** The Restart now / Later question while it is open. */
+  let installOffer: Promise<void> | null = null;
+  /** The version downloaded and not yet installed (Later, or the install called off): offered again from the menu. */
+  let ready: string | null = null;
   /** The download's progress in percent, or null when nothing is downloading. */
   let percent: number | null = null;
 
@@ -155,15 +160,22 @@ export function createUpdates(d: UpdateDeps): Updates {
     d.refreshMenu();
   }
 
-  async function offerInstall(version: string) {
-    if ((await ask(updateText.ready(d.productName, version), [BUTTONS.restart, BUTTONS.later])) !== BUTTONS.restart) return;
-    if (!(await d.prepareInstall())) {
-      d.log('update install called off');
-      return;
-    }
-    d.log('installing update', version);
-    // Silently, then start the new version (the NSIS installer is one-click; Linux ignores the first flag).
-    updater.quitAndInstall(true, true);
+  /** Downloaded: Restart now / Later. Anything but an install leaves it ready, for the menu to offer again. */
+  function offerInstall(version: string): Promise<void> {
+    installOffer ??= (async () => {
+      if ((await ask(updateText.ready(d.productName, version), [BUTTONS.restart, BUTTONS.later])) !== BUTTONS.restart) return;
+      if (!(await d.prepareInstall())) {
+        d.log('update install called off');
+        return;
+      }
+      d.log('installing update', version);
+      // Silently, then start the new version (the NSIS installer is one-click; Linux ignores the first flag).
+      updater.quitAndInstall(true, true);
+    })().finally(() => {
+      installOffer = null;
+      d.refreshMenu();
+    });
+    return installOffer;
   }
 
   function download(version: string): Promise<void> {
@@ -178,6 +190,7 @@ export function createUpdates(d: UpdateDeps): Updates {
           if ((await ask(updateText.downloadFailed(reason(e)), [BUTTONS.again, BUTTONS.close])) === BUTTONS.again) continue;
           return;
         }
+        ready = version;
         setPercent(null);
         d.log('update downloaded', version);
         break;
@@ -212,7 +225,8 @@ export function createUpdates(d: UpdateDeps): Updates {
   /** The manual check in progress (its dialogs included): a second click joins it. */
   let manual: Promise<void> | null = null;
   function checkNow(): Promise<void> {
-    if (downloading || offering) return Promise.resolve();
+    if (downloading || offering || installOffer) return Promise.resolve();
+    if (ready) return offerInstall(ready);
     manual ??= (async () => {
       if (!d.packaged) {
         await ask(updateText.notPackaged(d.productName), [BUTTONS.ok]);
@@ -242,7 +256,8 @@ export function createUpdates(d: UpdateDeps): Updates {
         return;
       }
       d.log('update check at start', r);
-      if (r.kind === 'available') await offer(r.version);
+      // Already downloaded: the Help menu offers to install it.
+      if (r.kind === 'available' && r.version !== ready) await offer(r.version);
     } catch (e) {
       d.log('update check at start failed', String(e));
     }
@@ -251,7 +266,9 @@ export function createUpdates(d: UpdateDeps): Updates {
   function menuItems(): MenuItemConstructorOptions[] {
     const auto = settings().auto;
     return [
-      percent === null ? { label: 'Check for &updates…', enabled: true, click: () => void checkNow() } : { label: updateText.downloading(percent), enabled: false },
+      percent !== null
+        ? { label: updateText.downloading(percent), enabled: false }
+        : { label: ready ? updateText.installMenu(ready) : 'Check for &updates…', enabled: true, click: () => void checkNow() },
       {
         label: 'Check for updates &automatically',
         type: 'checkbox',

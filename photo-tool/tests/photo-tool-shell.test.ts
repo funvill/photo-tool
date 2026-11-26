@@ -218,6 +218,13 @@ describe('the Photo Tool program', () => {
     );
   });
 
+  it('Restart now asks about unsaved edits once: after confirmQuit, closing the window does not ask again', () => {
+    expect(main()).toContain('allowClose: (on) => edits?.allowClose(on),');
+    const gallery = read('photo-tool/electron/gallery.ts');
+    expect(gallery).toMatch(/w\.webContents\.on\('will-prevent-unload', \(event\) => \{\s*if \(letPageClose\(\{ count: unsaved\.get\(id\) \?\? 0, confirmed: closeConfirmed \}, \(n\) => dialog\.showMessageBoxSync\(w, unsavedClosePrompt\(n\)\) === 0\)\) event\.preventDefault\(\);/);
+    expect(gallery).toMatch(/allowClose\(on: boolean\) \{\s*closeConfirmed = on;\s*\}/);
+  });
+
   it('takes the folder to open as its first argument that is not a flag', () => {
     expect(main()).toContain('launchFolder(process.argv, !!process.defaultApp)');
     expect(launchFolder(['Photo Tool.exe', 'D:\\Pics'], false)).toBe('D:\\Pics');

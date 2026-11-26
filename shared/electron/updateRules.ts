@@ -119,4 +119,6 @@ export const updateText = {
   downloading: (percent: number) => `Downloading update… ${Math.round(percent)} %`,
   stillSaving: 'Your latest changes are still being saved. Try again in a moment.',
   downloadFailed: (reason: string) => `The update did not download: ${reason}`,
+  /** The Help menu's first item once an update is downloaded and not yet installed. */
+  installMenu: (version: string) => `Install &update ${version}…`,
 };

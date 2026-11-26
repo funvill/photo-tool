@@ -198,6 +198,13 @@ describe('updates in the shell', () => {
     };
     expect(at('program.confirmQuit()')).toBeLessThan(at('installing = true'));
     expect(at('installing = true')).toBeLessThan(at('win.close()'));
+    // Asked once: "Keep editing" returns before anything is closed; after "Close without saving" the
+    // window's own unload question is not asked again, and is asked again after this close attempt.
+    expect(p).toMatch(/if \(program\.confirmQuit && !program\.confirmQuit\(\)\) return false;/);
+    expect(at('program.confirmQuit()')).toBeLessThan(at('program.allowClose?.(true)'));
+    expect(at('program.allowClose?.(true)')).toBeLessThan(at('win.close()'));
+    expect(p).toMatch(/try \{\s*while \(win[\s\S]*?\} finally \{\s*program\.allowClose\?\.\(false\);\s*\}/);
+    expect(code).toMatch(/allowClose\?\(on: boolean\): void;/);
     expect(p).toMatch(/Date\.now\(\) \+ 10_000/);
     expect(p).toMatch(/while \(win && !win\.isDestroyed\(\) && Date\.now\(\) < until\)/);
     // Still open (the editor's pending save cancelled the close): nothing was stopped, and the user is told.

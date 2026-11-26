@@ -56,6 +56,11 @@ export interface DesktopProgram {
   onSecondInstance?(data: unknown): void;
   /** Before quitting: false keeps the app running (e.g. unsaved edits the user wants to keep). */
   confirmQuit?(): boolean;
+  /**
+   * While on, closing the window does not ask about unsaved work again: confirmQuit has just been
+   * answered (Restart now, before an update installs). Turned off again after the close attempt.
+   */
+  allowClose?(on: boolean): void;
   /** The program's self-test steps, run once the page has loaded. */
   selfTest(ctx: SelfTestContext & ProgramContext): Promise<Record<string, Step>>;
   /** Before anything else of a self-test (e.g. copying the photos); a throw fails the start. */
@@ -566,12 +571,18 @@ export function runDesktopApp(program: DesktopProgram): void {
       if (repo) void shell.openExternal(latestReleasePage(repo));
       return false;
     }
+    // Asked once: "Keep editing" calls the install off here, before anything is closed.
     if (program.confirmQuit && !program.confirmQuit()) return false;
     installing = true;
+    program.allowClose?.(true);
     const until = Date.now() + 10_000;
-    while (win && !win.isDestroyed() && Date.now() < until) {
-      win.close();
-      await new Promise((r) => setTimeout(r, 1000));
+    try {
+      while (win && !win.isDestroyed() && Date.now() < until) {
+        win.close();
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    } finally {
+      program.allowClose?.(false);
     }
     if (win && !win.isDestroyed()) {
       installing = false;
