@@ -1,13 +1,15 @@
 // The update controller (shared/electron/updates.ts) driving a fake updater: what it asks, in which
 // order it downloads and installs, what the check at start keeps quiet about, and that two checks or
-// two downloads never run at once. No Electron, no electron-updater and no network.
-import { mkdtempSync, writeFileSync } from 'node:fs';
+// two downloads never run at once. No Electron and no network; the request headers and the install's
+// failure are checked against electron-updater's own updater class.
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { newError } from 'builder-util-runtime';
+import { BaseUpdater } from 'electron-updater';
 import { describe, expect, it } from 'vitest';
 import { readUpdateSettings, updateText, writeUpdateSettings } from '../electron/updateRules';
-import { createUpdates, type UpdateDeps, type UpdaterLike } from '../electron/updates';
+import { NO_STAGING_ID, createUpdates, type UpdateDeps, type UpdaterLike } from '../electron/updates';
 
 type CheckResult = Awaited<ReturnType<UpdaterLike['checkForUpdates']>>;
 
@@ -31,6 +33,7 @@ class FakeUpdater implements UpdaterLike {
   autoInstallOnAppQuit = true;
   allowDowngrade = false;
   disableDifferentialDownload = false;
+  requestHeaders: Record<string, string> | null = null;
   calls: string[] = [];
   /** What the next checks return (or throw), in order; the last one repeats. */
   checks: (CheckResult | Error | Promise<CheckResult>)[] = [null];
@@ -60,7 +63,36 @@ class FakeUpdater implements UpdaterLike {
   }
 }
 
-const available = (version: string): CheckResult => ({ isUpdateAvailable: true, updateInfo: { version } });
+/** electron-updater's own updater class, with an app stand-in instead of Electron's app; installs nothing. */
+function realUpdater(dir: string, install: () => boolean = () => false) {
+  const app = {
+    version: '0.1.33',
+    name: 'Photo Tool',
+    isPackaged: true,
+    appUpdateConfigPath: join(dir, 'app-update.yml'),
+    userDataPath: dir,
+    baseCachePath: dir,
+    whenReady: () => Promise.resolve(),
+    relaunch: () => {},
+    quit: () => {},
+    onQuit: () => {},
+  };
+  class Updater extends BaseUpdater {
+    constructor() {
+      super({ provider: 'generic', url: 'http://127.0.0.1:1/' }, app);
+      this.logger = null;
+    }
+    protected doDownloadUpdate(): never {
+      throw new Error('not in this test');
+    }
+    protected doInstall(): boolean {
+      return install();
+    }
+  }
+  return new Updater();
+}
+
+const available = (version: string): CheckResult =>({ isUpdateAvailable: true, updateInfo: { version } });
 const same: CheckResult = { isUpdateAvailable: false, updateInfo: { version: '0.1.33' } };
 
 function setup(o: { answers?: string[]; packaged?: boolean; settings?: { auto: boolean; lastCheck: number | null }; prepareInstall?: () => Promise<boolean>; repo?: UpdateDeps['repo'] } = {}) {
@@ -129,6 +161,28 @@ describe('createUpdates', () => {
     const { deps } = setup();
     createUpdates({ ...deps, updater });
     expect(updater.allowDowngrade).toBe(false);
+  });
+
+  // electron-updater gives every install a random id (<userData>/.updaterId) and sends it as
+  // x-user-staging-id with every check. Checked against its real AppUpdater, not the fake.
+  it('sends no per-install id with any request, and never makes one', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'updater-'));
+    const updater = realUpdater(dir);
+    const sent: Record<string, unknown>[] = [];
+    const client = {
+      setRequestHeaders: (h: Record<string, unknown> | null) => sent.push({ ...h }),
+      getLatestVersion: async () => ({ version: '0.1.33', files: [{ url: 'x.exe', sha512: 'x' }], path: 'x.exe', sha512: 'x' }),
+    };
+    const { deps } = setup();
+    createUpdates({ ...deps, updater });
+    const internals = updater as unknown as { clientPromise: Promise<unknown>; getUpdateInfoAndProvider(): Promise<unknown>; computeRequestHeaders(p: object): Record<string, unknown> };
+    internals.clientPromise = Promise.resolve(client);
+    await internals.getUpdateInfoAndProvider();
+    await internals.getUpdateInfoAndProvider();
+    const download = internals.computeRequestHeaders({});
+    for (const headers of [...sent, download]) expect(headers['x-user-staging-id'] ?? NO_STAGING_ID).toBe(NO_STAGING_ID);
+    expect(sent).toHaveLength(2);
+    expect(existsSync(join(dir, '.updaterId'))).toBe(false);
   });
 });
 

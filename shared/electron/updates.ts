@@ -9,6 +9,7 @@
 //   downloaded       Restart now / Later; Restart now runs the shell's prepareInstall, then installs
 //
 // One check and one download at a time: a second request shares the one in flight.
+import type { OutgoingHttpHeaders } from 'node:http';
 import type { MenuItemConstructorOptions } from 'electron';
 import { isNoRelease, readUpdateSettings, releasePage, shouldCheckAtStart, updateText, writeUpdateSettings, type UpdateSettings } from './updateRules';
 
@@ -19,6 +20,8 @@ export interface UpdaterLike {
   autoInstallOnAppQuit: boolean;
   allowDowngrade: boolean;
   disableDifferentialDownload: boolean;
+  /** Added to every request, last (so these win over electron-updater's own). */
+  requestHeaders: OutgoingHttpHeaders | null;
   checkForUpdates(): Promise<{ isUpdateAvailable: boolean; updateInfo: { version: string } } | null>;
   downloadUpdate(): Promise<unknown>;
   quitAndInstall(isSilent?: boolean, isForceRunAfter?: boolean): void;
@@ -75,6 +78,23 @@ function reason(e: unknown): string {
   return line.trim().slice(0, 300);
 }
 
+/** Sent in place of electron-updater's per-install id: the same for everyone, so it says nothing about the user. */
+export const NO_STAGING_ID = '00000000-0000-0000-0000-000000000000';
+
+/**
+ * electron-updater makes a random id per install (<userData>/.updaterId), for staged rollouts, and
+ * sends it as x-user-staging-id with every check. Releases here are never staged, so: every user is in
+ * every rollout, the id is never made, and the header (which cannot be left out, only overridden: the
+ * request headers are applied last) carries the same zeros for everyone. stagingUserIdPromise is
+ * electron-updater's own (not typed); shared/tests/updates.test.ts checks this against its real class.
+ */
+function withoutStagingId(updater: UpdaterLike) {
+  updater.requestHeaders = { ...updater.requestHeaders, 'x-user-staging-id': NO_STAGING_ID };
+  const u = updater as unknown as { isUserWithinRollout?: unknown; stagingUserIdPromise?: unknown };
+  if ('isUserWithinRollout' in u) u.isUserWithinRollout = () => true;
+  if ('stagingUserIdPromise' in u) u.stagingUserIdPromise = { value: Promise.resolve(NO_STAGING_ID) };
+}
+
 export function createUpdates(d: UpdateDeps): Updates {
   const { updater } = d;
   // electron-updater turns allowDowngrade on whenever a channel is set; an older release is never offered.
@@ -84,6 +104,7 @@ export function createUpdates(d: UpdateDeps): Updates {
   updater.autoInstallOnAppQuit = false;
   // Every update downloads the whole installer (no block maps are published).
   updater.disableDifferentialDownload = true;
+  withoutStagingId(updater);
 
   let checking: Promise<Outcome> | null = null;
   let offering: Promise<void> | null = null;
