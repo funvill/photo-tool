@@ -4,6 +4,7 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { newError } from 'builder-util-runtime';
 import { describe, expect, it } from 'vitest';
 import { readUpdateSettings, updateText, writeUpdateSettings } from '../electron/updateRules';
 import { createUpdates, type UpdateDeps, type UpdaterLike } from '../electron/updates';
@@ -177,9 +178,17 @@ describe('checkNow', () => {
 
   it('a 404 (nothing published yet) → says it is the newest, not an error', async () => {
     const t = setup();
-    t.updater.checks = [new Error('HttpError: 404 Not Found')];
+    t.updater.checks = [newError('No published versions on GitHub', 'ERR_XML_MISSED_ELEMENT')];
     await t.updates.checkNow();
     expect(t.asked).toEqual([{ message: updateText.upToDate('Photo Tool', '0.1.33'), buttons: ['OK'] }]);
+  });
+
+  it('a release without this program\'s update file → a failure, not "newest"; lastCheck stays', async () => {
+    const t = setup();
+    t.updater.checks = [newError('Cannot find photo-tool.yml in the latest release artifacts (u): HttpError: 404 Not Found', 'ERR_UPDATER_CHANNEL_FILE_NOT_FOUND')];
+    await t.updates.checkNow();
+    expect(t.asked).toEqual([{ message: updateText.failed('Cannot find photo-tool.yml in the latest release artifacts (u): HttpError: 404 Not Found'), buttons: ['OK'] }]);
+    expect(readUpdateSettings(t.settingsFile).lastCheck).toBeNull();
   });
 
   it('another error → says the check failed, with the first line of the reason', async () => {
@@ -266,7 +275,7 @@ describe('the check at start', () => {
 
   it('nothing published yet (404) → nothing shown; lastCheck = now', async () => {
     const t = setup();
-    t.updater.checks = [new Error('HttpError: 404 Not Found')];
+    t.updater.checks = [newError('No published versions on GitHub', 'ERR_XML_MISSED_ELEMENT')];
     await t.updates.checkAtStart({ selfTest: false, disabledByEnv: false });
     expect(t.asked).toEqual([]);
     expect(readUpdateSettings(t.settingsFile).lastCheck).toBe(NOW);

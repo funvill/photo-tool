@@ -4,6 +4,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { HttpError, newError } from 'builder-util-runtime';
 import { describe, expect, it } from 'vitest';
 import { hostResolverRules } from '../electron/netGuard';
 import { CHECK_INTERVAL_MS, UPDATE_HOSTS, githubRepo, isNoRelease, latestReleasePage, readUpdateSettings, releasePage, shouldCheckAtStart, updateText, writeUpdateSettings } from '../electron/updateRules';
@@ -84,16 +85,34 @@ describe('where releases live', () => {
 });
 
 describe('isNoRelease', () => {
+  // The errors as electron-updater 6.8 builds them (providers/GitHubProvider.js): getLatestTagName's
+  // error is thrown inside the feed's try, so it reaches the caller rewrapped as INVALID_RELEASE_FEED.
+  const http = (status: number) => new HttpError(status, `${status} Not Found\nHeaders: {"content-length":"404"}`);
+  const latestNotFound = (cause: Error) =>
+    newError(
+      `Cannot parse releases feed: ${newError(`Unable to find latest version on GitHub (https://github.com/funvill/photo-tool/releases/latest), please ensure a production release exists: ${cause.stack || cause.message}`, 'ERR_UPDATER_LATEST_VERSION_NOT_FOUND').stack},\nXML:\n<feed/>`,
+      'ERR_UPDATER_INVALID_RELEASE_FEED',
+    );
+
   it('is true for "nothing published yet" answers from GitHub', () => {
-    expect(isNoRelease(new Error('HttpError: 404 Not Found'))).toBe(true);
-    expect(isNoRelease(new Error('Unable to find latest version on GitHub (https://github.com/funvill/photo-tool/releases/latest), please ensure a production release exists'))).toBe(true);
-    expect(isNoRelease(new Error('No published versions on GitHub'))).toBe(true);
-    expect(isNoRelease('HttpError: 404')).toBe(true);
+    expect(isNoRelease(newError('No published versions on GitHub', 'ERR_XML_MISSED_ELEMENT'))).toBe(true); // the feed has no entries
+    expect(isNoRelease(newError('No published versions on GitHub', 'ERR_UPDATER_NO_PUBLISHED_VERSIONS'))).toBe(true);
+    expect(isNoRelease(latestNotFound(http(404)))).toBe(true); // releases/latest: only drafts or pre-releases
+    expect(isNoRelease(http(404))).toBe(true); // the releases feed itself
   });
 
-  it('is false for other failures', () => {
+  it('is false when the release is there but this program\'s update file is not', () => {
+    const missing = newError(`Cannot find photo-tool.yml in the latest release artifacts (https://github.com/funvill/photo-tool/releases/download/v0.1.404/photo-tool.yml): ${http(404).stack}`, 'ERR_UPDATER_CHANNEL_FILE_NOT_FOUND');
+    expect(isNoRelease(missing)).toBe(false);
+    expect(isNoRelease(newError('Cannot find channel "photo-tool.yml" update info: HttpError: 404', 'ERR_UPDATER_CHANNEL_FILE_NOT_FOUND'))).toBe(false); // a local feed
+  });
+
+  it('is false for other failures, including a 404 that only shows up in a version or a header', () => {
     expect(isNoRelease(new Error('net::ERR_INTERNET_DISCONNECTED'))).toBe(false);
-    expect(isNoRelease(new Error('HttpError: 403 rate limit exceeded'))).toBe(false);
+    expect(isNoRelease(latestNotFound(new Error('net::ERR_INTERNET_DISCONNECTED')))).toBe(false);
+    expect(isNoRelease(http(403))).toBe(false);
+    expect(isNoRelease(new Error('Cannot download https://github.com/funvill/photo-tool/releases/download/v0.1.404/x.exe'))).toBe(false);
+    expect(isNoRelease('HttpError: 404')).toBe(false);
     expect(isNoRelease(null)).toBe(false);
     expect(isNoRelease(undefined)).toBe(false);
   });

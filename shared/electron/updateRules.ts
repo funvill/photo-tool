@@ -81,12 +81,23 @@ export function latestReleasePage(repo: { owner: string; repo: string }): string
 
 /**
  * Does this error only say that nothing is published yet? Until the first release is published (and
- * while only drafts exist) GitHub answers 404; that is "up to date", never an error box.
+ * while only drafts exist) GitHub has no entries, or answers 404 for the latest release; that is
+ * "up to date", never an error box. Decided on electron-updater's error code and HTTP status, not on
+ * any "404" in the text. A release without this program's update file (<channel>.yml) is a failure:
+ * the release is broken, and saying "up to date" would hide that.
  */
 export function isNoRelease(e: unknown): boolean {
-  if (e === null || e === undefined) return false;
-  const text = e instanceof Error ? e.message : String(e);
-  return /\b404\b|Unable to find latest version on GitHub|No published versions on GitHub/.test(text);
+  if (!(e instanceof Error)) return false;
+  const { code, statusCode } = e as Error & { code?: unknown; statusCode?: unknown };
+  if (code === 'ERR_UPDATER_CHANNEL_FILE_NOT_FOUND') return false;
+  if (code === 'ERR_UPDATER_NO_PUBLISHED_VERSIONS' || code === 'ERR_XML_MISSED_ELEMENT') return /^No published versions on GitHub/.test(e.message);
+  // The releases feed itself.
+  if (e.name === 'HttpError') return statusCode === 404;
+  // releases/latest, which electron-updater rewraps (as ERR_UPDATER_INVALID_RELEASE_FEED): only a 404 there.
+  if (code === 'ERR_UPDATER_LATEST_VERSION_NOT_FOUND' || code === 'ERR_UPDATER_INVALID_RELEASE_FEED') {
+    return /Unable to find latest version on GitHub \([^)]*\), please ensure a production release exists: HttpError: 404\b/.test(e.message);
+  }
+  return false;
 }
 
 /** Everything the update dialogs and the Help menu say. */
