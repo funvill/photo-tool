@@ -146,6 +146,43 @@ describe('SVG is untrusted', () => {
     }
   });
 
+  it('loads no other kind of outside reference either: <use>, XInclude, entities, stylesheets', async () => {
+    // Each would turn the blue square red if it loaded. They are offered both beside the SVG and on
+    // a local web server, which must see no request at all.
+    writeFileSync(join(dir, 'red.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50"><rect id="r" width="50" height="50" fill="#ff0000"/></svg>');
+    writeFileSync(join(dir, 'red.css'), 'rect { fill: #ff0000 !important; }');
+    writeFileSync(join(dir, 'red.xml'), '<rect xmlns="http://www.w3.org/2000/svg" width="50" height="50" fill="#ff0000"/>');
+    const requests: string[] = [];
+    const { createServer } = await import('node:http');
+    const server = createServer((req, res) => {
+      requests.push(req.url ?? '');
+      res.end();
+    });
+    await new Promise<void>((r) => server.listen(5897, '127.0.0.1', () => r()));
+    try {
+      for (const base of ['', 'http://127.0.0.1:5897/']) {
+        const head = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns:xi="http://www.w3.org/2001/XInclude" width="50" height="50"><rect width="50" height="50" fill="#0000ff"/>';
+        const docs: Record<string, string> = {
+          use: `${head}<use href="${base}red.svg#r" xlink:href="${base}red.svg#r"/></svg>`,
+          xinclude: `${head}<xi:include href="${base}red.xml" parse="xml"/></svg>`,
+          entity: `<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY red SYSTEM "${base}red.xml">]>${head}&red;</svg>`,
+          import: `${head}<style>@import url(${base}red.css);</style></svg>`,
+          pi: `<?xml version="1.0"?><?xml-stylesheet type="text/css" href="${base}red.css"?>${head}</svg>`,
+        };
+        for (const [kind, svg] of Object.entries(docs)) {
+          const file = join(dir, `${kind}-${base ? 'net' : 'local'}.svg`);
+          writeFileSync(file, svg);
+          // Refused outright is as good as drawn without it; drawn, it must be blue.
+          const work = await workingFile(file, join(dir, 'data'), () => hashFile(file)).catch(() => null);
+          if (work) expect(await isBlue(work.path), `${kind} ${base || 'beside it'}`).toBe(true);
+        }
+      }
+      expect(requests).toEqual([]);
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  });
+
   it('caps the raster of a huge drawing, and scales up a tiny one', async () => {
     mkdirSync(join(dir, 'data', 'derived'), { recursive: true });
     const huge = svgFile('huge.svg', '<rect width="100%" height="100%" fill="#0000ff"/>', 'width="50000" height="25000"');

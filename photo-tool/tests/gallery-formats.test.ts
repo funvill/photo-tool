@@ -84,6 +84,15 @@ describe.runIf(existsSync(FORMATS))('the new formats in Photo Tool', () => {
     }
   });
 
+  it('zooms a see-through picture on white, as its thumbnails show it (not on black)', async () => {
+    const svg = items.find((i) => i.fileName === 'svg-badge.svg');
+    const corner = async (img: Buffer) => [...(await sharp(img).extract({ left: 0, top: 0, width: 1, height: 1 }).removeAlpha().raw().toBuffer())];
+    const full = await corner((await get(`/api/gallery/full?path=${encodeURIComponent(svg.path)}`)).body);
+    const thumb = await corner((await get(`/api/gallery/thumb?key=${encodeURIComponent(svg.key)}&size=m`)).body);
+    expect(full.every((v) => v > 240), String(full)).toBe(true);
+    expect(thumb.every((v) => v > 240), String(thumb)).toBe(true);
+  });
+
   it('shows an animated GIF as its first (red) frame', async () => {
     const gif = items.find((i) => i.fileName === 'gif-animated.gif');
     const { data } = await sharp((await get(`/api/gallery/full?path=${encodeURIComponent(gif.path)}`)).body).resize(1, 1).raw().toBuffer({ resolveWithObject: true });

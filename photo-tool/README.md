@@ -58,7 +58,7 @@ Unsaved edits are lost if you close the Photo Tool window or open another folder
 **Settings.** The **⚙** button in the top bar opens Settings. **When I save an edit** has two choices, kept at once:
 
 - **Change only the photo's info file** (the default). The photo is untouched; the crop and rotation go into `photoinfo.json`, and Photobook Editor applies them when it imports or re-syncs the photo. If you change the edit later and re-sync, the editor applies the new one. The editor renders such a photo as a JPEG, so a PNG's transparency is lost there.
-- **Change the photo file itself**. The photo is rewritten (JPEG at quality 95, PNG and WebP in their own format, EXIF kept) and the original goes to the Recycle Bin; if the bin is not available, nothing changes. A HEIC photo can only be saved with **Save as**, as a JPEG. This choice needs the desktop program.
+- **Change the photo file itself**. The photo is rewritten (JPEG at quality 95, PNG and WebP in their own format, EXIF kept) and the original goes to the Recycle Bin; if the bin is not available, nothing changes. A HEIC, AVIF or TIFF photo can only be saved with **Save as**, as a JPEG, and a GIF, SVG, BMP or ICO picture as a PNG (an animated GIF is shown and edited as its first frame). This choice needs the desktop program.
 
 Run from source in a plain browser (`npm run dev:photo-tool`), Photo Tool can edit and save to the info file, but Save as and saving into the photo file need the desktop program.
 

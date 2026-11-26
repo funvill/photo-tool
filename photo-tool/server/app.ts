@@ -412,11 +412,12 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     res.json(itemsFor(out));
   }));
 
-  // A photo of the open folder at full size, upright, as JPEG (the zoomed view).
+  // A photo of the open folder at full size, upright, as JPEG (the zoomed view). See-through parts
+  // (a cutout PNG, an SVG, an icon) go on white, as in its thumbnails; JPEG would make them black.
   app.get('/api/gallery/full', wrap(async (req, res) => {
     const photo = openPhoto(q(req, 'path'));
     if (!existsSync(photo.path)) throw new HttpError(404, 'That photo is not in the open folder any more.');
-    const jpeg = await sharp(await workPathOf(photo), { failOn: 'none' }).rotate().jpeg({ quality: 90 }).toBuffer();
+    const jpeg = await sharp(await workPathOf(photo), { failOn: 'none' }).rotate().flatten({ background: '#ffffff' }).jpeg({ quality: 90 }).toBuffer();
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.type('image/jpeg').send(jpeg);
   }));
