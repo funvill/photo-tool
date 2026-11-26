@@ -3,6 +3,7 @@ import type { DesktopApi } from '../../shared/desktop/desktopApi';
 import { filterItems, galleryFacts, sortItems, type GalleryFacts, type GalleryFilter, type GallerySortKey, type TagFilter } from '../core/gallerySort';
 import { clickSelect, dragPaths, flagTargets, nextAfterRemoval } from '../core/galleryViewer';
 import { stackItems, type StackInfo } from '../core/galleryStacks';
+import { formatOf } from '../../shared/core/mediaFormats';
 import { IDENTITY_EDIT, isIdentityEdit, parseEdit, type PhotoEdit } from '../../shared/core/photoEdit';
 import { photoScores, scoreAdjustOf, type PhotoScore } from '../core/photoScore';
 import { loadEditTarget, saveEditTarget, type EditTarget } from './editSettings';
@@ -299,9 +300,10 @@ const baseName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 /** Up to three names, then "…". */
 const someNames = (paths: string[]) => `${paths.slice(0, 3).map(baseName).join(', ')}${paths.length > 3 ? '…' : ''}`;
 
-/** HEIC can't be written: in photo-file mode such a photo is saved only as a copy (JPEG). */
-export const isHeic = (path: string) => /\.(heic|heif)$/i.test(path);
-export const HEIC_SAVE_NOTE = 'HEIC photos can only be saved as a copy';
+/** A format that can't be written (HEIC): in photo-file mode such a photo is saved only as a copy (JPEG). */
+export const copyOnly = (path: string) => formatOf(path)?.capabilities.editInPlace === false;
+/** Why such a photo isn't saved over: "HEIC photos can only be saved as a copy". */
+export const copyOnlyNote = (path: string) => `${formatOf(path)?.label ?? 'These'} photos can only be saved as a copy`;
 
 /** A GalleryItem from the desktop app (it hands back the server's reply untyped). */
 const asItem = (v: unknown): GalleryItem | null =>
@@ -415,7 +417,7 @@ export function editActions(s: Pick<GalleryState, 'pendingEdits' | 'editTarget'>
   const file = s.editTarget === 'file';
   return {
     save: pending,
-    saveBlocked: file && isHeic(item.path) ? HEIC_SAVE_NOTE : null,
+    saveBlocked: file && copyOnly(item.path) ? copyOnlyNote(item.path) : null,
     saveTitle: file ? 'Save the edit into the photo file (the original goes to the Recycle Bin)' : "Save the edit in the photo's info file",
     saveAsBlocked: host?.saveEditAs ? null : 'Save as needs the desktop app',
     saveAll: Object.keys(s.pendingEdits).length,
@@ -687,7 +689,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
       if (ok && get().pendingEdits[path] === edit) set((x) => ({ pendingEdits: without(x.pendingEdits, path) }));
       return ok;
     }
-    if (isHeic(path)) return fail(HEIC_SAVE_NOTE);
+    if (copyOnly(path)) return fail(copyOnlyNote(path));
     // No edit, in photo-file mode: the file is as it should be already. An edit saved in its info file
     // (from info-file mode) is what "no edit" takes away: only photoinfo.json is written.
     if (isIdentityEdit(edit)) {
@@ -1179,7 +1181,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
       const paths = Object.keys(s.pendingEdits);
       if (!paths.length) return;
       const gen = generation;
-      const skipped = s.editTarget === 'file' ? paths.filter(isHeic) : [];
+      const skipped = s.editTarget === 'file' ? paths.filter(copyOnly) : [];
       // A photo whose save is on its way already is left to that save.
       const todo = paths.filter((p) => !skipped.includes(p) && !s.savingPaths.includes(p));
       // Names are read now: a folder changed meanwhile takes its list with it.
@@ -1197,7 +1199,7 @@ export const useGallery = create<GalleryState>()((set, get) => {
         }
       });
       let text = failed.length ? `Saved ${ok}, ${failed.length} failed: ${named(failed)}` : `Saved ${plural(ok, 'photo')}`;
-      if (skipped.length) text += `. Skipped ${named(skipped)}: ${HEIC_SAVE_NOTE}`;
+      if (skipped.length) text += `. Skipped ${named(skipped)}: ${copyOnlyNote(skipped[0])}`;
       get().toast(failed.length ? 'error' : skipped.length ? 'info' : 'success', text);
     },
 

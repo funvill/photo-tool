@@ -2,8 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, realpathSync, statSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
-import sharp from 'sharp';
-import { heicImage } from '../../shared/server/heic';
+import { handlerFor } from '../../shared/server/mediaHandlers';
 import { isInside, resolveFolder, scanFolder } from './importer';
 import type { Store } from './db';
 
@@ -36,9 +35,6 @@ export interface ShelfListing {
 
 const PREVIEW_COUNT = 3;
 const PREVIEW_PX = 160;
-const PREVIEWABLE = /\.(jpe?g|png|webp|heic|heif)$/i;
-// sharp's bundled libvips can't decode HEIC: those are decoded with the bundled libheif first.
-const HEIC = /\.hei[cf]$/i;
 
 export function shelfRoot(store: Store): string {
   return resolveFolder(store.getSetting('shelf_root') ?? process.env.PHOTOBOOK_SHELF_DIR ?? DEFAULT_SHELF);
@@ -68,7 +64,7 @@ export async function listShelf(store: Store, pathInput?: string): Promise<Shelf
     if (!e.isDirectory() || e.name.startsWith('.')) continue;
     const p = join(path, e.name);
     const [files, inner] = await Promise.all([scanFolder(p, true), readdir(p, { withFileTypes: true })]);
-    const dated = await Promise.all(files.filter((f) => PREVIEWABLE.test(f)).map(async (f) => ({ f, t: (await stat(f)).mtimeMs })));
+    const dated = await Promise.all(files.filter((f) => handlerFor(f)).map(async (f) => ({ f, t: (await stat(f)).mtimeMs })));
     folders.push({
       name: e.name,
       path: p,
@@ -86,7 +82,8 @@ export async function listShelf(store: Store, pathInput?: string): Promise<Shelf
 export async function shelfPreview(store: Store, dataDir: string, pathInput: string): Promise<string> {
   const root = shelfRoot(store);
   const path = resolveFolder(pathInput);
-  if (!PREVIEWABLE.test(path) || !existsSync(path) || !existsSync(root)) throw new Error('No preview');
+  const handler = handlerFor(path);
+  if (!handler || !existsSync(path) || !existsSync(root)) throw new Error('No preview');
   // Follow symlinks before checking, so a link inside the shelf can't reach outside it.
   if (!isInside(realpathSync(path), realpathSync(root))) throw new Error('No preview');
   const st = statSync(path);
@@ -95,7 +92,8 @@ export async function shelfPreview(store: Store, dataDir: string, pathInput: str
   const out = join(dir, `${key}.webp`);
   if (!existsSync(out)) {
     mkdirSync(dir, { recursive: true });
-    const img = HEIC.test(path) ? await heicImage(path) : sharp(path, { failOn: 'none' }).rotate();
+    // Decoded in memory by the format's handler (HEIC with the bundled libheif, the rest by sharp).
+    const img = await handler.image(path);
     await img.resize(PREVIEW_PX, PREVIEW_PX, { fit: 'inside', withoutEnlargement: true }).webp({ quality: 72, alphaQuality: 80 }).toFile(out);
   }
   return out;

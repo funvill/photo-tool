@@ -11,7 +11,8 @@ import { textOutline } from './textOutline';
 import { listPlaces, placeOutline, suggestPlaces } from '../../shared/server/places';
 import { exportFlipbook, type FlipbookSize } from './flipbook';
 import { exportPosterImage } from './imageExport';
-import { ALPHA_FORMATS, colorFeatures, existingThumb, hashFile, hasTransparency, isSupported, makeThumbnails, THUMB_SIZES, type ThumbSize } from '../../shared/server/media';
+import { formatById } from '../../shared/core/mediaFormats';
+import { colorFeatures, existingThumb, hashFile, hasTransparency, isSupported, makeThumbnails, THUMB_SIZES, type ThumbSize } from '../../shared/server/media';
 import { exportCoverPdf, exportPdf, exportPosterPdf, type ExportAsset, type ExportOptions } from './pdf';
 import { setResourceRoot } from '../../shared/server/resources';
 import { PhotoInfoWriteError } from '../../shared/photoinfo';
@@ -169,7 +170,7 @@ export function createApp(dataDir: string, opts: AppOptions) {
           // unreadable thumbnail: leave it; ordering falls back to time for this photo
         }
       }
-      if (analysis.transparent === undefined && ALPHA_FORMATS.has(r.format) && existsSync(r.original_path)) {
+      if (analysis.transparent === undefined && formatById(r.format)?.capabilities.alpha && existsSync(r.original_path)) {
         try {
           const transparent = await hasTransparency(r.original_path);
           if (transparent) await makeThumbnails(r.original_path, dataDir, r.id, true);
