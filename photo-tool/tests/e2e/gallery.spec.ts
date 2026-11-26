@@ -1668,3 +1668,50 @@ test.describe('album tags sidecar: generated tags live in the album folder', () 
     }
   });
 });
+
+test.describe('#6 phase 2: AVIF, TIFF, GIF, SVG, BMP and ICO', () => {
+  const FORMATS = join(process.cwd(), 'fixtures', 'generated', 'formats');
+
+  test('the new formats show as tiles, and a TIFF opens in the viewer', async ({ page, request }) => {
+    const dir = join(mkdtempSync(join(tmpdir(), 'photobook-gallery-')), 'formats');
+    cpSync(FORMATS, dir, { recursive: true });
+    try {
+      expect((await request.post('/api/gallery/open', { data: { folder: dir, recursive: false } })).status()).toBe(202);
+      await page.addInitScript(() => {
+        localStorage.setItem('gallery.gridWidth', '900');
+        localStorage.setItem('gallery.thumbSize', '96');
+      });
+      await page.goto('/');
+      await page.getByRole('button', { name: dir }).click();
+      await expect(page.getByRole('progressbar')).toHaveCount(0, { timeout: 60_000 });
+      await page.getByLabel('Stack similar').uncheck();
+      await expect(page.locator('.gallery-tile')).toHaveCount(readdirSync(dir).filter(isSupported).length);
+
+      // Each tile's thumbnail really loaded (a JPEG the server made from the TIFF and the AVIF).
+      for (const name of ['tiff-harbour.tif', 'avif-lake.avif', 'gif-animated.gif', 'svg-badge.svg', 'bmp-garden.bmp', 'ico-app.ico']) {
+        const img = page.locator(`.gallery-tile img[alt="${name}"]`);
+        await expect(img).toBeVisible();
+        await expect.poll(() => img.evaluate((e) => (e as HTMLImageElement).naturalWidth), { message: name }).toBeGreaterThan(0);
+      }
+
+      // Double-click the TIFF: the viewer shows its large picture.
+      await page.locator('.gallery-tile', { has: page.locator('img[alt="tiff-harbour.tif"]') }).dblclick();
+      const viewer = page.getByRole('dialog', { name: 'Photo viewer' });
+      await expect(viewer).toBeVisible();
+      const shown = viewer.locator('img');
+      await expect(shown).toHaveAttribute('alt', 'tiff-harbour.tif');
+      await expect(shown).toHaveAttribute('src', /size=m/);
+      await expect.poll(() => shown.evaluate((e) => (e as HTMLImageElement).naturalWidth)).toBe(1200);
+      await page.keyboard.press('i');
+      await expect(viewer.getByRole('complementary', { name: 'Photo details' })).toContainText('1200 × 800 px');
+      await page.keyboard.press('Escape');
+
+      // The zoomed view's full-size picture of the AVIF.
+      const full = await request.get(`/api/gallery/full?path=${encodeURIComponent(join(dir, 'avif-lake.avif'))}`);
+      expect(full.status()).toBe(200);
+      expect(full.headers()['content-type']).toContain('image/jpeg');
+    } finally {
+      rmSync(join(dir, '..'), { recursive: true, force: true });
+    }
+  });
+});

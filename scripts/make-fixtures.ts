@@ -4,6 +4,7 @@
 // an EXIF-rotated file, and an undated PNG.
 //
 //   npm run fixtures            → fixtures/generated/trip  (20 photos)
+//                                 and fixtures/generated/formats (one AVIF, TIFF, GIF, SVG, BMP, ICO)
 //   npm run fixtures -- 500     → fixtures/generated/large-500
 
 import { copyFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -121,6 +122,104 @@ async function trip(dir: string) {
   writeFileSync(join(dir, `${heic.name}.heic`), encoded.data);
 }
 
+/** A 24-bit, bottom-up BMP (sharp can't write BMP). */
+function bmpBytes(rgb: Buffer, width: number, height: number): Buffer {
+  const stride = Math.ceil((width * 3) / 4) * 4;
+  const out = Buffer.alloc(54 + stride * height);
+  out.write('BM', 0, 'latin1');
+  out.writeUInt32LE(out.length, 2);
+  out.writeUInt32LE(54, 10);
+  out.writeUInt32LE(40, 14);
+  out.writeInt32LE(width, 18);
+  out.writeInt32LE(height, 22);
+  out.writeUInt16LE(1, 26);
+  out.writeUInt16LE(24, 28);
+  out.writeUInt32LE(stride * height, 34);
+  for (let y = 0; y < height; y++) {
+    const row = 54 + (height - 1 - y) * stride;
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 3;
+      out[row + x * 3] = rgb[i + 2];
+      out[row + x * 3 + 1] = rgb[i + 1];
+      out[row + x * 3 + 2] = rgb[i];
+    }
+  }
+  return out;
+}
+
+/** An icon with a 256 px PNG picture and a 32 px 32-bit BMP one (with its, empty, 1-bit mask). */
+function icoBytes(png256: Buffer, rgba32: Buffer): Buffer {
+  const side = 32;
+  const dib = Buffer.alloc(40 + side * side * 4 + (side / 8) * side);
+  dib.writeUInt32LE(40, 0);
+  dib.writeInt32LE(side, 4);
+  dib.writeInt32LE(side * 2, 8);
+  dib.writeUInt16LE(1, 12);
+  dib.writeUInt16LE(32, 14);
+  for (let y = 0; y < side; y++) {
+    for (let x = 0; x < side; x++) {
+      const i = (y * side + x) * 4;
+      const o = 40 + ((side - 1 - y) * side + x) * 4;
+      dib[o] = rgba32[i + 2];
+      dib[o + 1] = rgba32[i + 1];
+      dib[o + 2] = rgba32[i];
+      dib[o + 3] = rgba32[i + 3];
+    }
+  }
+  const header = Buffer.alloc(6 + 2 * 16);
+  header.writeUInt16LE(1, 2);
+  header.writeUInt16LE(2, 4);
+  const entries: [number, Buffer][] = [[side, dib], [0, png256]];
+  let offset = header.length;
+  entries.forEach(([size, data], i) => {
+    const e = 6 + i * 16;
+    header[e] = size;
+    header[e + 1] = size;
+    header.writeUInt16LE(1, e + 4);
+    header.writeUInt16LE(32, e + 6);
+    header.writeUInt32LE(data.length, e + 8);
+    header.writeUInt32LE(offset, e + 12);
+    offset += data.length;
+  });
+  return Buffer.concat([header, ...entries.map(([, d]) => d)]);
+}
+
+/** A solid picture of one colour, as PNG bytes. */
+const solid = (w: number, h: number, colour: string) => sharp({ create: { width: w, height: h, channels: 3, background: colour } }).png().toBuffer();
+
+// One small file per format phase 2 of #6 added, in a folder of their own (tests count the trip's photos).
+async function formats(dir: string) {
+  const L = { w: 1200, h: 800 };
+  let seed = 100;
+  const sc = (name: string, size: { w: number; h: number }, hue: number, label: string): Scene => ({
+    name, ...size, day: 1, time: '12:00', hue, subjectX: 0.5, subjectY: 0.45, label, seed: seed++,
+  });
+  const scene = (s: Scene) => sharp(Buffer.from(sceneSvg(s))).png().toBuffer();
+  // AVIF, with an EXIF date (sharp writes EXIF into the HEIF container).
+  const avif = sc('avif-lake', L, 1, 'AVIF lake');
+  await sharp(await scene(avif)).avif({ quality: 60 })
+    .withExif({ IFD0: { Make: 'Photobook Fixture', Model: 'Synthetic' }, IFD2: { DateTimeOriginal: '2026:04:02 12:00:00' } })
+    .toFile(join(dir, `${avif.name}.avif`));
+  // A two-page TIFF: the scene, then a magenta page that must never be the one shown.
+  const tiff = sc('tiff-harbour', L, 4, 'TIFF harbour');
+  await sharp([await scene(tiff), await solid(L.w, L.h, '#ff00ff')], { join: { animated: true } }).tiff({ compression: 'lzw' }).toFile(join(dir, `${tiff.name}.tif`));
+  // An animated GIF: a red frame first, then a blue one. It is shown as its first frame.
+  await sharp([await solid(320, 240, '#ff0000'), await solid(320, 240, '#0000ff')], { join: { animated: true } }).gif({ delay: [400, 400], loop: 0 }).toFile(join(dir, 'gif-animated.gif'));
+  // A 300 × 200 SVG drawing with a see-through background around its rounded box.
+  writeFileSync(join(dir, 'svg-badge.svg'), `<svg xmlns="http://www.w3.org/2000/svg" width="300" height="200" viewBox="0 0 300 200">
+  <rect x="10" y="10" width="280" height="180" rx="24" fill="#2e7d32"/>
+  <circle cx="150" cy="100" r="60" fill="#ffeb3b"/>
+</svg>
+`);
+  // A 24-bit BMP.
+  const bmp = sc('bmp-garden', { w: 600, h: 400 }, 5, 'BMP garden');
+  const raw = await sharp(await scene(bmp)).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  writeFileSync(join(dir, `${bmp.name}.bmp`), bmpBytes(raw.data, raw.info.width, raw.info.height));
+  // An icon: a 256 px orange PNG picture (the one shown) and a 32 px grey BMP one.
+  const small = await sharp({ create: { width: 32, height: 32, channels: 4, background: { r: 128, g: 128, b: 128, alpha: 1 } } }).raw().toBuffer();
+  writeFileSync(join(dir, 'ico-app.ico'), icoBytes(await solid(256, 256, '#ff8800'), small));
+}
+
 async function large(dir: string, count: number) {
   for (let i = 0; i < count; i++) {
     const day = 1 + Math.floor(i / 60);
@@ -136,8 +235,11 @@ async function large(dir: string, count: number) {
 
 const count = Number(process.argv[2] ?? 0);
 const root = join(process.cwd(), 'fixtures', 'generated');
-const dir = join(root, count ? `large-${count}` : 'trip');
-rmSync(dir, { recursive: true, force: true });
-mkdirSync(dir, { recursive: true });
-await (count ? large(dir, count) : trip(dir));
-console.log(`Wrote fixtures to ${dir}`);
+const jobs: [string, (dir: string) => Promise<void>][] = count ? [[`large-${count}`, (d) => large(d, count)]] : [['trip', trip], ['formats', formats]];
+for (const [name, make] of jobs) {
+  const dir = join(root, name);
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  await make(dir);
+  console.log(`Wrote fixtures to ${dir}`);
+}

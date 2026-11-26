@@ -20,7 +20,10 @@ export interface MediaCapabilities {
 }
 
 export interface MediaFormat {
-  /** Equal to sharp's `metadata().format` name for the format, which the catalogues store. */
+  /**
+   * The name the catalogues store. Usually sharp's `metadata().format` name, but not always (sharp
+   * calls AVIF 'heif'), so the catalogues take it from here, never from sharp.
+   */
   id: string;
   /** Lower case, with the dot; the first is the one new files get. */
   extensions: readonly string[];
@@ -48,6 +51,38 @@ export const MEDIA_FORMATS: readonly MediaFormat[] = [
     // sharp's bundled libvips reads the HEIF container but can't decode HEVC: its handler decodes it.
     id: 'heif', extensions: ['.heic', '.heif'], mime: 'image/heic', kind: 'image', label: 'HEIC',
     capabilities: { editInPlace: false, alpha: false, saveAs: 'jpeg', animated: false },
+  },
+  // The formats below can't be edited in place: an edit is written as `saveAs`, and Save writes that
+  // into the photo's own path, so a .tif would end up holding JPEG bytes. They are saved as a copy.
+  {
+    // sharp reads AVIF itself (its libheif has an AV1 decoder), though it calls the format 'heif'.
+    id: 'avif', extensions: ['.avif'], mime: 'image/avif', kind: 'image', label: 'AVIF',
+    capabilities: { editInPlace: false, alpha: true, saveAs: 'jpeg', animated: false },
+  },
+  {
+    // A multi-page TIFF is shown as its first page.
+    id: 'tiff', extensions: ['.tif', '.tiff'], mime: 'image/tiff', kind: 'image', label: 'TIFF',
+    capabilities: { editInPlace: false, alpha: true, saveAs: 'jpeg', animated: false },
+  },
+  {
+    // An animated GIF is shown, and edited, as its first frame; the file itself is never changed.
+    id: 'gif', extensions: ['.gif'], mime: 'image/gif', kind: 'image', label: 'GIF',
+    capabilities: { editInPlace: false, alpha: true, saveAs: 'png', animated: true },
+  },
+  {
+    // Untrusted: rasterised from its bytes (never its path, so it can't load files beside it) into a
+    // capped PNG; the page never gets the SVG itself.
+    id: 'svg', extensions: ['.svg'], mime: 'image/svg+xml', kind: 'image', label: 'SVG',
+    capabilities: { editInPlace: false, alpha: true, saveAs: 'png', animated: false },
+  },
+  {
+    // sharp has no BMP or ICO loader: a small decoder of our own turns them into a PNG.
+    id: 'bmp', extensions: ['.bmp'], mime: 'image/bmp', kind: 'image', label: 'BMP',
+    capabilities: { editInPlace: false, alpha: true, saveAs: 'png', animated: false },
+  },
+  {
+    id: 'ico', extensions: ['.ico'], mime: 'image/x-icon', kind: 'image', label: 'ICO',
+    capabilities: { editInPlace: false, alpha: true, saveAs: 'png', animated: false },
   },
 ];
 
