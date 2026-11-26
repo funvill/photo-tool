@@ -1,11 +1,14 @@
 import sharp from 'sharp';
 import { formatById } from '../../core/mediaFormats';
 import type { MediaHandler } from './index';
-import { looksLikeText, readHead } from './sniff';
+import { looksLikeText, rasterFormat, readHead } from './sniff';
 
 // Formats sharp's bundled libvips decodes itself: the original is the working file, never copied.
-// sharp picks its decoder by content, not by name, so the file's first bytes are checked first: an
-// SVG (or any text) under a photo's name is refused here, before sharp could read it by its path.
+// sharp picks its decoder by content, not by name, so the file's first bytes are checked first: it
+// must start with the magic bytes of a raster format sharp reads (sniff.ts rasterFormat). Anything
+// else, an SVG (or any text) under a photo's name included, is refused here, before sharp could
+// read it by its path. A picture under another raster format's name (a PNG called .jpg) is read as
+// what it really is, as it always was: that is safe, and such files exist.
 
 /** The EXIF block sharp finds in a file, as the TIFF structure exifr reads (without its "Exif\0\0" mark). */
 export async function sharpExifBlock(data: Buffer): Promise<Buffer | null> {
@@ -21,7 +24,11 @@ export async function sharpExifBlock(data: Buffer): Promise<Buffer | null> {
 export function sharpHandler(id: string, opts: { exifFromSharp?: boolean } = {}): MediaHandler {
   const label = formatById(id)?.label ?? id.toUpperCase();
   const checked = async (file: string) => {
-    if (looksLikeText(await readHead(file))) throw new Error(`This file holds text, not a ${label} picture (it may be an SVG drawing under another name).`);
+    const head = await readHead(file);
+    if (rasterFormat(head)) return file;
+    throw new Error(looksLikeText(head)
+      ? `This file is not a ${label} picture: it holds text (it may be an SVG drawing under another name).`
+      : `This file is not a ${label} picture, nor any picture format this program reads.`);
     return file;
   };
   return {

@@ -62,10 +62,14 @@ export async function mediaSelfCheck(): Promise<MediaSelfCheck> {
         formats[id] = { ok: false, error: e instanceof Error ? e.message : String(e) };
       }
     }
-    // An SVG named .jpg must be refused, by our own content check, whatever sharp does.
-    const disguised = join(dir, 'disguised.jpg');
-    await writeFile(disguised, SVG);
-    const disguisedRefused = await workingFile(disguised, dataDir, 'selfcheck-disguised').then(() => false, () => true);
+    // An SVG named .jpg must be refused, by our own content check, whatever sharp does: plain, and
+    // behind 600 spaces (libvips still finds that <svg; a fixed-size look at the first bytes did not).
+    let disguisedRefused = true;
+    for (const [name, bytes] of [['disguised.jpg', SVG], ['spaced.jpg', ' '.repeat(600) + SVG]]) {
+      const disguised = join(dir, name);
+      await writeFile(disguised, bytes);
+      if (await workingFile(disguised, dataDir, `selfcheck-${name}`).then(() => true, () => false)) disguisedRefused = false;
+    }
     const guard = await checkSvgGuard(() => undefined);
     const svgGuard = { ...guard, disguisedRefused };
     return { ok: Object.values(formats).every((f) => f.ok) && disguisedRefused, formats, svgGuard };

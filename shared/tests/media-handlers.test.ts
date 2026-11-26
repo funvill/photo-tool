@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import sharp from 'sharp';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { handlerFor } from '../server/mediaHandlers';
+import { rasterFormat } from '../server/mediaHandlers/sniff';
 import { checkSvgGuard, SVG_MAX_SIDE, SVG_MIN_SIDE, svgPathRefused } from '../server/mediaHandlers/svg';
 import { hashFile, orientedSize, readMetadata, THUMB_SIZES, workingFile, writeJpegThumb } from '../server/media';
 
@@ -189,12 +190,14 @@ describe('SVG is untrusted', () => {
     const inner = Buffer.concat([Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50"><!--'), Buffer.alloc(200_000_000, 0x20), Buffer.from('--><rect width="50" height="50" fill="#0000ff"/></svg>')]);
     const bomb = join(dir, 'bomb.svg');
     writeFileSync(bomb, gzipSync(inner, { level: 9 }));
-    const before = process.memoryUsage().rss;
+    // Refused before decoding: this exact message comes only from svg.ts's check of the first bytes,
+    // which runs before sharp (or zlib) is given anything. Expanding 200 MB of XML would also take
+    // libxml seconds; the time bound is loose so a busy CI machine can't fail it.
+    const refused = 'This SVG is compressed (gzip), which is not supported.';
     const started = Date.now();
-    await expect(workingFile(bomb, join(dir, 'data'), () => hashFile(bomb))).rejects.toThrow(/compressed/i);
-    await expect(handlerFor(bomb)!.image(bomb)).rejects.toThrow(/compressed/i);
-    expect(Date.now() - started).toBeLessThan(2000);
-    expect(process.memoryUsage().rss - before).toBeLessThan(100 * 1024 * 1024);
+    await expect(workingFile(bomb, join(dir, 'data'), () => hashFile(bomb))).rejects.toThrow(refused);
+    await expect(handlerFor(bomb)!.image(bomb)).rejects.toThrow(refused);
+    expect(Date.now() - started).toBeLessThan(10_000);
   });
 
   it('refuses a .svg that does not start with markup', async () => {
@@ -216,25 +219,69 @@ describe('SVG is untrusted', () => {
     writeFileSync(join(dir, 'utf16.png'), Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(readFileSync(join(dir, 'disguised2.jpg'), 'utf8'), 'utf16le')]));
     writeFileSync(join(dir, 'zipped.tif'), gzipSync(readFileSync(join(dir, 'disguised2.jpg'))));
     names.push('bom2.jpg', 'utf16.png', 'zipped.tif');
+    // Past any fixed-size look at the first bytes: 600 spaces (libvips still finds the <svg), and a long
+    // XML comment, alone and after the spaces.
+    const markup = readFileSync(join(dir, 'disguised2.jpg'), 'utf8');
+    writeFileSync(join(dir, 'spaces600.jpg'), ' '.repeat(600) + markup);
+    const comment = `<?xml version="1.0"?><!--${'x'.repeat(4000)}-->`;
+    writeFileSync(join(dir, 'comment.jpg'), comment + markup);
+    writeFileSync(join(dir, 'spacedcomment.jpg'), ' '.repeat(600) + comment + markup);
+    writeFileSync(join(dir, 'tabs.png'), '\t\r\n'.repeat(300) + markup);
+    names.push('spaces600.jpg', 'comment.jpg', 'spacedcomment.jpg', 'tabs.png');
     const ops = ['VipsForeignLoadSvgFile', 'VipsForeignLoadSvgSource'];
     sharp.unblock({ operation: ops });
     try {
       // Without the block sharp would read it by path, drawing the file beside it: the guard must notice.
       expect((await sharp(join(dir, 'disguised2.jpg')).metadata()).format).toBe('svg');
+      expect((await sharp(join(dir, 'spaces600.jpg')).metadata()).format).toBe('svg');
       expect(await svgPathRefused()).toBe(false);
       const warnings: string[] = [];
       expect((await checkSvgGuard((m) => warnings.push(m))).pathRefused).toBe(false);
       expect(warnings.join(' ')).toMatch(/SVG/);
       for (const name of names) {
         const file = join(dir, name);
-        await expect(workingFile(file, join(dir, 'data'), () => hashFile(file)), name).rejects.toThrow(/text, not a/);
-        await expect(handlerFor(file)!.image(file), name).rejects.toThrow(/text, not a/);
+        await expect(workingFile(file, join(dir, 'data'), () => hashFile(file)), name).rejects.toThrow(/is not a \w+ picture/);
+        await expect(handlerFor(file)!.image(file), name).rejects.toThrow(/is not a \w+ picture/);
       }
     } finally {
       sharp.block({ operation: ops });
     }
     expect(await svgPathRefused()).toBe(true);
     expect((await checkSvgGuard(() => undefined)).pathRefused).toBe(true);
+  });
+
+  it('reads a picture by its own magic bytes, whatever its name says, and refuses one with none', async () => {
+    const jpeg = await sharp({ create: { width: 6, height: 4, channels: 3, background: '#0000ff' } }).jpeg().toBuffer();
+    const png = await sharp({ create: { width: 6, height: 4, channels: 3, background: '#0000ff' } }).png().toBuffer();
+    // Odd but valid, all read by sharp before this check: a picture under another raster format's
+    // name is read as what it really is, and a JPEG with bytes after its end, or whose first marker
+    // is not FF (libvips only looks at FF D8), still loads.
+    const ok: Record<string, Buffer> = {
+      'png-named.jpg': png, 'jpeg-named.png': jpeg, 'jpeg-named.tif': jpeg, 'jpeg-named.webp': jpeg, 'jpeg-named.gif': jpeg,
+      'avif-named.jpg': readFileSync(join(FORMATS, 'avif-lake.avif')), 'tiff-named.avif': readFileSync(join(FORMATS, 'tiff-harbour.tif')),
+      'gif-named.png': readFileSync(join(FORMATS, 'gif-animated.gif')),
+      'trailing.jpg': Buffer.concat([jpeg, Buffer.from('trailing bytes')]),
+    };
+    for (const [name, bytes] of Object.entries(ok)) {
+      const file = join(dir, name);
+      writeFileSync(file, bytes);
+      expect(await handlerFor(file)!.preview(file, { derivedDir: join(dir, 'data', 'derived'), contentHash: () => hashFile(file) }), name).toBe(file);
+      const { info } = await (await handlerFor(file)!.image(file)).raw().toBuffer({ resolveWithObject: true });
+      expect(info.width, name).toBeGreaterThan(0);
+    }
+    // No picture format's first bytes: refused here (sharp could not read these either), including
+    // an SVG behind another format's magic, and an empty file.
+    const refused: Record<string, Buffer> = {
+      'junk-first.jpg': Buffer.concat([Buffer.from('junkjunk'), jpeg]),
+      'bmp-named.jpg': Buffer.concat([Buffer.from('BM'), Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="5" height="5"/>')]),
+      'empty.png': Buffer.alloc(0),
+      'unknown-brand.avif': Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from('ftypqwer'), Buffer.alloc(12)]),
+    };
+    for (const [name, bytes] of Object.entries(refused)) {
+      const file = join(dir, name);
+      writeFileSync(file, bytes);
+      await expect(handlerFor(file)!.image(file), name).rejects.toThrow(/is not a \w+ picture/);
+    }
   });
 
   it('caps the raster of a huge drawing, and scales up a tiny one', async () => {
@@ -260,5 +307,34 @@ describe('SVG is untrusted', () => {
     await expect(sharp(file).metadata()).rejects.toThrow();
     await expect(sharp(jpg).metadata()).rejects.toThrow();
     await expect(orientedSize(jpg)).rejects.toThrow();
+  });
+});
+
+describe('rasterFormat: the magic bytes a file must start with to be read by sharp', () => {
+  const b = (...parts: (string | number[])[]) => Buffer.concat(parts.map((p) => (typeof p === 'string' ? Buffer.from(p, 'latin1') : Buffer.from(p))));
+  const ftyp = (size: number, major: string, ...compatible: string[]) => b([0, 0, 0, size], 'ftyp', major, [0, 0, 0, 0], ...compatible);
+
+  it('knows each format sharp reads by file', () => {
+    expect(rasterFormat(b([0xff, 0xd8, 0xff, 0xe0]))).toBe('jpeg');
+    expect(rasterFormat(b([0xff, 0xd8]))).toBe('jpeg');
+    expect(rasterFormat(b([0x89], 'PNG\r\n\x1a\n'))).toBe('png');
+    expect(rasterFormat(b('GIF87a'))).toBe('gif');
+    expect(rasterFormat(b('GIF89a'))).toBe('gif');
+    expect(rasterFormat(b('RIFF', [1, 2, 3, 4], 'WEBPVP8 '))).toBe('webp');
+    expect(rasterFormat(b('II', [0x2a, 0]))).toBe('tiff');
+    expect(rasterFormat(b('MM', [0, 0x2a]))).toBe('tiff');
+    expect(rasterFormat(b('II', [0x2b, 0]))).toBe('tiff');
+    expect(rasterFormat(b('MM', [0, 0x2b]))).toBe('tiff');
+    expect(rasterFormat(ftyp(0x18, 'avif', 'mif1', 'miaf'))).toBe('heif');
+    expect(rasterFormat(ftyp(0x18, 'heic', 'mif1', 'heic'))).toBe('heif');
+    expect(rasterFormat(ftyp(0x1c, 'qwer', 'mif1', 'avif', 'xxxx'))).toBe('heif');
+  });
+
+  it('knows nothing else, markup least of all', () => {
+    for (const head of [
+      b(''), b([0xff]), b('BM'), b([0, 0, 1, 0]), b('<svg'), b(' '.repeat(600)), b([0xef, 0xbb, 0xbf], '<svg'), b([0x1f, 0x8b, 8]),
+      b('GIF88a'), b('RIFF', [1, 2, 3, 4], 'WAVE'), b('II', [0x2a, 1]), b('MM', [0x2a, 0]), b('P6\n'),
+      ftyp(0x18, 'mp42', 'isom', 'mp41'), ftyp(8, 'avif'), b([0, 0, 0, 0x18], 'ftypav'),
+    ]) expect(rasterFormat(head), JSON.stringify(head.toString('latin1'))).toBeNull();
   });
 });
