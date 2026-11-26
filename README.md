@@ -1,5 +1,10 @@
 # Photo Tool and Photobook Editor
 
+> [!WARNING]
+> **This repository has been abandoned.** Work continues in [Owlbum](https://github.com/funvill/Owlbum). Nothing here will be updated, and issues and pull requests here will not be looked at.
+>
+> The unfinished work is kept on the `issues-integration`, `timeline-reopen-whatsnew` and `raw-previews` branches. Start with `docs/issue-work/README.md` and `docs/photo-tool-design/` on `issues-integration`.
+
 Two local-first desktop programs for your own photos, for Windows and Linux. Photos never leave your computer.
 
 - **[Photo Tool](photo-tool/README.md)**: look through a folder of photos, star, hide, score, edit and tag them, and drag the best ones out. It was called Photobook Gallery.
