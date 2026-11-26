@@ -27,7 +27,7 @@ Each program has its own commands:
 | Make the installed folder only, without an installer | `npm run dist:dir:photo-tool` | `npm run dist:dir:editor` |
 | End-to-end tests (in your installed Chrome) | `npm run e2e:photo-tool` | `npm run e2e:editor` |
 
-- `npm test` runs every unit test (both programs and `shared/`), `npm run typecheck` checks all the code, and `npm run test:e2e` runs both programs' end-to-end tests.
+- `npm test` runs every unit test (both programs and `shared/`: the fast set, then the slow set; see "Fast loop vs full loop" below), `npm run typecheck` checks all the code, and `npm run test:e2e` runs both programs' end-to-end tests.
 - `npm run dist:all` makes both installers. Each builds for the platform it runs on, into its own folder, `dist/installer/photo-tool/` and `dist/installer/photobook-editor/`: on Windows a per-user installer (`Photo Tool Setup <version>.exe`, `Photobook Editor Setup <version>.exe`, no administrator prompt), on Linux a `.deb` and an AppImage (x64 only, `photo-tool-<version>-amd64.deb`, `photo-tool-<version>-x86_64.AppImage` and the same for `photobook-editor`). Everything a program needs is inside; nothing is downloaded when installing or running it (the one exception, checking for a new version, is below).
 - The installers are not code-signed, so Windows shows "Windows protected your PC" (choose **More info**, then **Run anyway**).
 - From Windows, `node scripts/desktop/linux/docker-build.mjs` makes the Linux packages in Docker, and `node scripts/desktop/linux/docker-test.mjs` installs and self-tests them on clean Linux desktops with the network off.
