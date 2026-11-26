@@ -142,17 +142,34 @@ describe('updates in the shell', () => {
   };
 
   it('uses electron-updater, and has no crash reporter', () => {
-    expect(code).toMatch(/import \{ autoUpdater \} from 'electron-updater';/);
+    expect(code).toMatch(/import \{ AppImageUpdater, autoUpdater \} from 'electron-updater';/);
     expect(code).not.toMatch(/crashReporter|update-electron-app/);
     for (const f of ['serverHost', 'selfTest', 'dataFolders', 'config', 'netGuard', 'updateRules', 'updates']) expect(read(`shared/electron/${f}.ts`), f).not.toMatch(/crashReporter|from 'electron-updater'|update-electron-app/);
   });
 
-  it('touches autoUpdater only when it is not a self-test', () => {
+  it('touches the updater only when it is not a self-test', () => {
     const start = fn('startUpdates');
     expect(start).toMatch(/if \(selfTest\) return;/);
     expect(start.indexOf('if (selfTest) return;')).toBeLessThan(start.indexOf('autoUpdater'));
-    // Everywhere else autoUpdater is only named inside startUpdates.
-    expect(code.replace(start, '').replace("import { autoUpdater } from 'electron-updater';", '')).not.toContain('autoUpdater');
+    expect(start.indexOf('if (selfTest) return;')).toBeLessThan(start.indexOf('new AppImageUpdater()'));
+    // Everywhere else autoUpdater and AppImageUpdater are only named inside startUpdates.
+    const rest = code.replace(start, '').replace("import { AppImageUpdater, autoUpdater } from 'electron-updater';", '');
+    expect(rest).not.toContain('autoUpdater');
+    expect(rest).not.toContain('AppImageUpdater');
+  });
+
+  it("an AppImage updates as an AppImage (APPIMAGE decides, not resources/package-type), without touching autoUpdater", () => {
+    // autoUpdater is a getter that picks DebUpdater from package-type; on the AppImage path it is never read.
+    expect(fn('startUpdates')).toMatch(/updaterKind\(\{ platform: process\.platform, appImage: env\.APPIMAGE \}\) === 'appimage' \? new AppImageUpdater\(\) : autoUpdater/);
+    expect(fn('startUpdates').match(/autoUpdater/g)).toHaveLength(1);
+  });
+
+  it('a failure setting up the updater (a malformed UPDATE_FEED, say) is logged and never blocks start-up', () => {
+    const start = fn('startUpdates');
+    expect(start).toMatch(/if \(selfTest\) return;\s*try \{/);
+    expect(start).toMatch(/\} catch \(e\) \{\s*updates = null;\s*log\('[^']*', String\(e\)\);\s*\}\s*$/);
+    // No updates: About offers no Check button.
+    expect(code).toMatch(/canCheckForUpdates: !!updates && app\.isPackaged && !selfTest/);
   });
 
   it('runs the check at start a few seconds after the page loads, never in a self-test', () => {
@@ -164,7 +181,7 @@ describe('updates in the shell', () => {
 
   it('a test feed (<PREFIX>_UPDATE_FEED) is used only when it is set', () => {
     expect(code.match(/setFeedURL\(/g)).toHaveLength(1);
-    expect(fn('startUpdates')).toMatch(/const feed = envVar\('UPDATE_FEED'\);[\s\S]{0,300}if \(feed\) autoUpdater\.setFeedURL\(\{ provider: 'generic', url: feed, channel: program\.updateChannel \}\)/);
+    expect(fn('startUpdates')).toMatch(/const feed = envVar\('UPDATE_FEED'\);[\s\S]{0,300}if \(feed\) updater\.setFeedURL\(\{ provider: 'generic', url: feed, channel: program\.updateChannel \}\)/);
   });
 
   it('window-all-closed does not quit while installing; before-quit lets a quit through once quitting', () => {
@@ -211,7 +228,7 @@ describe('F1: About', () => {
   });
 
   it('offers Check for updates in the installed program only, and shows Electron and the platform', () => {
-    expect(code).toMatch(/canCheckForUpdates: app\.isPackaged && !selfTest/);
+    expect(code).toMatch(/canCheckForUpdates: !!updates && app\.isPackaged && !selfTest/);
     expect(code).toContain('const runtime = () => `Electron ${process.versions.electron}, ${process.platform} ${process.arch}`;');
     expect(code).toContain('runtime: runtime(),');
   });

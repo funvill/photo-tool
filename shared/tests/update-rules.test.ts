@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { HttpError, newError } from 'builder-util-runtime';
 import { describe, expect, it } from 'vitest';
 import { hostResolverRules } from '../electron/netGuard';
-import { CHECK_INTERVAL_MS, UPDATE_HOSTS, githubRepo, isNoRelease, latestReleasePage, readUpdateSettings, releasePage, shouldCheckAtStart, updateText, writeUpdateSettings } from '../electron/updateRules';
+import { CHECK_INTERVAL_MS, UPDATE_HOSTS, githubRepo, isNoRelease, latestReleasePage, readUpdateSettings, releasePage, shouldCheckAtStart, updateText, updaterKind, writeUpdateSettings } from '../electron/updateRules';
 
 const tempFile = () => join(mkdtempSync(join(tmpdir(), 'updates-')), 'updates.json');
 
@@ -115,6 +115,21 @@ describe('isNoRelease', () => {
     expect(isNoRelease('HttpError: 404')).toBe(false);
     expect(isNoRelease(null)).toBe(false);
     expect(isNoRelease(undefined)).toBe(false);
+  });
+});
+
+describe('updaterKind', () => {
+  // Both Linux packages are built from one folder, so the AppImage may carry resources/package-type
+  // = deb, and electron-updater would then update it as a .deb. The AppImage's own APPIMAGE decides.
+  it('is the AppImage updater on Linux whenever APPIMAGE is set, whatever package-type says', () => {
+    expect(updaterKind({ platform: 'linux', appImage: '/home/me/Apps/Photo-Tool-0.1.40.AppImage' })).toBe('appimage');
+  });
+
+  it("is electron-updater's own choice otherwise", () => {
+    expect(updaterKind({ platform: 'linux', appImage: undefined })).toBe('default');
+    expect(updaterKind({ platform: 'linux', appImage: '' })).toBe('default');
+    expect(updaterKind({ platform: 'win32', appImage: 'C:\\x.AppImage' })).toBe('default');
+    expect(updaterKind({ platform: 'darwin', appImage: undefined })).toBe('default');
   });
 });
 

@@ -100,6 +100,15 @@ export function isNoRelease(e: unknown): boolean {
   return false;
 }
 
+/**
+ * Which updater: on Linux the AppImage sets APPIMAGE to its own path, and that decides. electron-updater
+ * itself picks DebUpdater whenever resources/package-type says deb, and the AppImage may carry that file
+ * (both Linux packages are built from one folder), so an AppImage would otherwise update as a .deb.
+ */
+export function updaterKind(o: { platform: string; appImage: string | undefined }): 'appimage' | 'default' {
+  return o.platform === 'linux' && !!o.appImage ? 'appimage' : 'default';
+}
+
 /** Everything the update dialogs and the Help menu say. */
 export const updateText = {
   available: (name: string, latest: string, current: string) => `${name} ${latest} is available (you have ${current}).`,

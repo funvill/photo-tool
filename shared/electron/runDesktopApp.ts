@@ -14,13 +14,13 @@ import { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, screen, session, 
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
-import { autoUpdater } from 'electron-updater';
+import { AppImageUpdater, autoUpdater } from 'electron-updater';
 import { CHECK_UPDATES_BUTTON, LICENCE_FILE, MIN_WINDOW, NOTICES_BUTTON, NOTICES_FILE, describeAbout, describeFailure, feedbackUrl, parseSavedPort, parseSelfTest, restoreWindow, serverPortRequest, type ProgramNames, type SelfTestArgs, type WindowState } from './config';
 import { CarryOverError, carryOverRefusal, prepareProgramFolders } from './dataFolders';
 import { isAppNavigation, requestHost, type GuardOptions } from './netGuard';
 import { SELF_TEST_CONTROL_URLS, type SelfTestContext, type Step } from './selfTest';
 import type { HostMessage, HostReply, StartMessage } from './serverHost';
-import { githubRepo, latestReleasePage, updateText } from './updateRules';
+import { githubRepo, latestReleasePage, updateText, updaterKind } from './updateRules';
 import { createUpdates, type Updates } from './updates';
 
 /** What a program gives the shell: everything in which the editor and Photo Tool differ. */
@@ -477,7 +477,7 @@ export function runDesktopApp(program: DesktopProgram): void {
       repository: program.repository,
       hasNotices: !!legalFile(NOTICES_FILE),
       // Updates work only in the installed program, and never during a self-test.
-      canCheckForUpdates: app.isPackaged && !selfTest,
+      canCheckForUpdates: !!updates && app.isPackaged && !selfTest,
       runtime: runtime(),
     });
   }
@@ -591,32 +591,42 @@ export function runDesktopApp(program: DesktopProgram): void {
     return true;
   }
 
-  /** Set up checking for updates. Never in a self-test: there autoUpdater is not even touched. */
+  /**
+   * Set up checking for updates. Never in a self-test: there no updater is even made. An AppImage gets
+   * electron-updater's AppImageUpdater directly (see updateRules.updaterKind); autoUpdater, a getter that
+   * picks by resources/package-type, is then never read. A failure here only turns updates off.
+   */
   function startUpdates() {
     if (selfTest) return;
-    autoUpdater.logger = { info: (m: unknown) => log('[updater]', m), warn: (m: unknown) => log('[updater warn]', m), error: (m: unknown) => log('[updater error]', m), debug: () => {} };
-    // Testing only: an update feed served on this computer (electron-updater's generic provider).
-    const feed = envVar('UPDATE_FEED');
-    if (feed) log('update feed', feed);
-    if (feed) autoUpdater.setFeedURL({ provider: 'generic', url: feed, channel: program.updateChannel });
-    updates = createUpdates({
-      updater: autoUpdater,
-      channel: program.updateChannel,
-      productName: NAME,
-      currentVersion: app.getVersion(),
-      packaged: app.isPackaged,
-      repo: githubRepo(program.repository),
-      settingsFile: join(layout.profileDir, 'updates.json'),
-      ask: ({ message: text, buttons }) => message(text, buttons),
-      openExternal: (url) => void shell.openExternal(url),
-      setProgress: (f) => {
-        if (win && !win.isDestroyed()) win.setProgressBar(f ?? -1);
-      },
-      refreshMenu: () => buildMenu(),
-      prepareInstall,
-      log,
-      now: () => Date.now(),
-    });
+    try {
+      const updater = updaterKind({ platform: process.platform, appImage: env.APPIMAGE }) === 'appimage' ? new AppImageUpdater() : autoUpdater;
+      updater.logger = { info: (m: unknown) => log('[updater]', m), warn: (m: unknown) => log('[updater warn]', m), error: (m: unknown) => log('[updater error]', m), debug: () => {} };
+      // Testing only: an update feed served on this computer (electron-updater's generic provider).
+      const feed = envVar('UPDATE_FEED');
+      if (feed) log('update feed', feed);
+      if (feed) updater.setFeedURL({ provider: 'generic', url: feed, channel: program.updateChannel });
+      updates = createUpdates({
+        updater,
+        channel: program.updateChannel,
+        productName: NAME,
+        currentVersion: app.getVersion(),
+        packaged: app.isPackaged,
+        repo: githubRepo(program.repository),
+        settingsFile: join(layout.profileDir, 'updates.json'),
+        ask: ({ message: text, buttons }) => message(text, buttons),
+        openExternal: (url) => void shell.openExternal(url),
+        setProgress: (f) => {
+          if (win && !win.isDestroyed()) win.setProgressBar(f ?? -1);
+        },
+        refreshMenu: () => buildMenu(),
+        prepareInstall,
+        log,
+        now: () => Date.now(),
+      });
+    } catch (e) {
+      updates = null;
+      log('updates are off: the updater could not be set up', String(e));
+    }
   }
 
   // ---- the page's functions (see each program's preload.ts)
