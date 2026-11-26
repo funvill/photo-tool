@@ -279,8 +279,9 @@ describe('architecture boundaries', () => {
       const allowed = (u: string) =>
         /^https?:\/\/(127\.0\.0\.1|localhost)/.test(u) ||
         // The SVG namespace is a name, never fetched: the tiny SVGs the server makes to check itself
-        // (shared/server/mediaHandlers/svg.ts, shared/server/mediaSelfCheck.ts) must carry it to be SVGs.
-        (u === 'http://www.w3.org/2000/svg' && ['shared/server/mediaHandlers/svg.ts', 'shared/server/mediaSelfCheck.ts'].map((p) => join(p)).includes(join(f))) ||
+        // (shared/server/mediaHandlers/svg.ts, shared/server/mediaSelfCheck.ts) and the "no preview"
+        // picture it draws for a RAW (shared/server/mediaHandlers/raw.ts) must carry it to be SVGs.
+        (u === 'http://www.w3.org/2000/svg' && ['shared/server/mediaHandlers/svg.ts', 'shared/server/mediaSelfCheck.ts', 'shared/server/mediaHandlers/raw.ts'].map((p) => join(p)).includes(join(f))) ||
         (tileFiles.has(join(f)) && /^https:\/\/tile\.openstreetmap\.org(\/\{z\}\/\{x\}\/\{y\}\.png)?$/.test(u)) ||
         (join(f) === join('photo-tool/server/models/download.ts') && u === 'https://huggingface.co/${m.repo}/resolve/${m.revision}/${f.path}') ||
         // The third: checking for updates and leaving feedback, both on GitHub, the address written down once

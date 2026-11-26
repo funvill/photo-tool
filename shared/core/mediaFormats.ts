@@ -84,6 +84,20 @@ export const MEDIA_FORMATS: readonly MediaFormat[] = [
     id: 'ico', extensions: ['.ico'], mime: 'image/x-icon', kind: 'image', label: 'ICO',
     capabilities: { editInPlace: false, alpha: true, saveAs: 'png', animated: false },
   },
+  // Camera RAW: shown through the biggest JPEG preview the camera stored in the file (the raw handler
+  // in shared/server/mediaHandlers/raw.ts); the sensor data itself is not decoded yet. Never written:
+  // an edit is saved as a JPEG copy.
+  ...([
+    ['dng', 'image/x-adobe-dng'], ['cr2', 'image/x-canon-cr2'], ['cr3', 'image/x-canon-cr3'], ['crw', 'image/x-canon-crw'],
+    ['nef', 'image/x-nikon-nef'], ['nrw', 'image/x-nikon-nrw'], ['arw', 'image/x-sony-arw'], ['srf', 'image/x-sony-srf'],
+    ['sr2', 'image/x-sony-sr2'], ['raf', 'image/x-fuji-raf'], ['orf', 'image/x-olympus-orf'], ['rw2', 'image/x-panasonic-rw2'],
+    ['pef', 'image/x-pentax-pef'], ['srw', 'image/x-samsung-srw'], ['rwl', 'image/x-leica-rwl'], ['3fr', 'image/x-hasselblad-3fr'],
+    ['iiq', 'image/x-phaseone-iiq'], ['erf', 'image/x-epson-erf'], ['mef', 'image/x-mamiya-mef'], ['mos', 'image/x-leaf-mos'],
+    ['kdc', 'image/x-kodak-kdc'], ['dcr', 'image/x-kodak-dcr'], ['x3f', 'image/x-sigma-x3f'],
+  ] as const).map(([id, mime]): MediaFormat => ({
+    id, extensions: [`.${id}`], mime, kind: 'raw', label: id.toUpperCase(),
+    capabilities: { editInPlace: false, alpha: false, saveAs: 'jpeg', animated: false },
+  })),
 ];
 
 const BY_EXTENSION = new Map<string, MediaFormat>(MEDIA_FORMATS.flatMap((f) => f.extensions.map((e) => [e, f] as const)));
@@ -121,6 +135,53 @@ export function formatById(id: string): MediaFormat | null {
  */
 export function isSupported(name: string): boolean {
   return formatOf(name) !== null && !baseOf(name).startsWith('._');
+}
+
+/**
+ * Sidecar files: notes a program keeps beside a photo (an XMP file holds a RAW's rating and edits).
+ * Never photos, never shown, never reported as files that could not be read.
+ */
+const SIDECAR_EXTENSIONS: ReadonlySet<string> = new Set(['.xmp']);
+
+/** Whether this file is a sidecar (`IMG_0001.xmp`, `IMG_0001.CR3.xmp`), not a photo. */
+export function isSidecar(name: string): boolean {
+  return SIDECAR_EXTENSIONS.has(extensionOf(name));
+}
+
+/** The formats a camera saves beside a RAW of the same name ("RAW + JPEG"): the picture shown for both. */
+const TWIN_FORMATS: ReadonlySet<string> = new Set(['jpeg', 'heif']);
+
+/**
+ * RAW + JPEG pairs: a RAW and a JPEG (or HEIC) with the same base name, in any case, in the same folder
+ * are one photo. The JPEG is the one shown (`shown`), and `twinOf` gives its RAW; the RAW is not in
+ * `shown`. Everything else is kept, in the order given. A picture takes at most one RAW and a RAW at
+ * most one picture, the first of each in the order given.
+ */
+export function pairRawTwins(paths: readonly string[]): { shown: string[]; twinOf: Map<string, string> } {
+  /** The folder and base name, lower case, without the extension: what a pair has in common. */
+  const stem = (p: string) => {
+    const ext = extensionOf(p);
+    const cut = p.replace(/[\\/]+$/, '');
+    return ext ? cut.slice(0, cut.length - ext.length).toLowerCase() : null;
+  };
+  const raws = new Map<string, string>();
+  for (const p of paths) {
+    const s = stem(p);
+    if (s !== null && formatOf(p)?.kind === 'raw' && !raws.has(s)) raws.set(s, p);
+  }
+  const twinOf = new Map<string, string>();
+  const taken = new Set<string>();
+  for (const p of paths) {
+    const s = stem(p);
+    const format = formatOf(p);
+    if (s === null || !format || !TWIN_FORMATS.has(format.id) || baseOf(p).startsWith('.')) continue;
+    const raw = raws.get(s);
+    if (raw && !taken.has(raw)) {
+      taken.add(raw);
+      twinOf.set(p, raw);
+    }
+  }
+  return { shown: paths.filter((p) => !taken.has(p)), twinOf };
 }
 
 /** The `accept` attribute for a file input that takes every supported format: MIME types and extensions. */

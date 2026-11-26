@@ -2,6 +2,7 @@ import type { Sharp } from 'sharp';
 import { formatOf, MEDIA_FORMATS } from '../../core/mediaFormats';
 import { bmpHandler, icoHandler } from './bitmap';
 import { heifHandler } from './heic';
+import { rawHandlers } from './raw';
 import { sharpHandler } from './sharp';
 import { svgHandler } from './svg';
 
@@ -40,6 +41,8 @@ const HANDLERS: readonly MediaHandler[] = [
   sharpHandler('avif', { exifFromSharp: true }), sharpHandler('tiff'), sharpHandler('gif'),
   // These get a decoded PNG in the derived cache: SVG for safety, BMP and ICO because sharp can't read them.
   svgHandler, bmpHandler, icoHandler,
+  // Camera RAW: the biggest embedded JPEG preview, found by our own parser (raw.ts).
+  ...rawHandlers(MEDIA_FORMATS.filter((f) => f.kind === 'raw').map((f) => f.id)),
 ];
 
 const BY_ID = new Map(HANDLERS.map((h) => [h.id, h]));
