@@ -68,12 +68,19 @@ describe('builder config', () => {
     expect(text).not.toMatch(/tagging|onnxruntime|fpm/i);
   });
 
-  it('ships a self-contained installer: no web installer, no updater, no crash reporter', () => {
-    const config = code('photobook-editor/electron-builder.config.cjs');
-    expect(config).not.toMatch(/nsis-web|squirrel/i);
-    expect(config).toMatch(/publish: null/);
-    expect(code('photobook-editor/electron/main.ts', 'photobook-editor/electron/preload.ts', 'photobook-editor/electron/server-host.ts', 'photobook-editor/electron/selfTest.ts')).not.toMatch(/crashReporter|autoUpdater|electron-updater|update-electron-app/);
-    expect(JSON.stringify(JSON.parse(read('package.json')).devDependencies)).not.toMatch(/updater/);
+  it('publishes to its own update channel on GitHub, whole installers only, and has no crash reporter', () => {
+    for (const platform of ['win32', 'linux'] as const) {
+      const config = builderConfig(platform);
+      expect(config.publish, platform).toEqual({ provider: 'github', owner: 'funvill', repo: 'photo-tool', channel: 'photobook-editor', releaseType: 'draft' });
+      expect(config.nsis, platform).toMatchObject({ oneClick: true, perMachine: false, allowElevation: false, differentialPackage: false });
+    }
+    // Owner and repo come from product.json, never written out a second time.
+    expect(code('photobook-editor/electron-builder.config.cjs')).not.toMatch(/funvill|nsis-web|squirrel/i);
+    expect(code('photobook-editor/electron/main.ts', 'photobook-editor/electron/preload.ts', 'photobook-editor/electron/server-host.ts', 'photobook-editor/electron/selfTest.ts')).not.toMatch(/crashReporter|update-electron-app/);
+    // electron-updater runs in the installed program: a run-time dependency, at one exact version.
+    const pkg = JSON.parse(read('package.json'));
+    expect(pkg.dependencies['electron-updater']).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(JSON.stringify(pkg.devDependencies)).not.toMatch(/updater/);
   });
 
   it('names the program in product.json, which the config and main read', () => {

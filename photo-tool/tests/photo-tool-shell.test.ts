@@ -78,12 +78,16 @@ describe('builder config', () => {
     expect([...code.matchAll(/!macro (\w+)/g)].map((m) => m[1]).sort()).toEqual(['customInstall', 'customUnInstall', 'removeInstallerCopy']);
   });
 
-  it('ships a self-contained installer: no web installer, no updater, no crash reporter', () => {
+  it('publishes to its own update channel on GitHub, whole installers only, and has no crash reporter', () => {
     const code = (...files: string[]) => files.map(read).join('\n').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
-    const config = code('photo-tool/electron-builder.config.cjs');
-    expect(config).not.toMatch(/nsis-web|squirrel/i);
-    expect(config).toMatch(/publish: null/);
-    expect(code('photo-tool/electron/main.ts', 'photo-tool/electron/preload.ts', 'photo-tool/electron/server-host.ts', 'photo-tool/electron/selfTest.ts')).not.toMatch(/crashReporter|autoUpdater|electron-updater|update-electron-app/);
+    for (const platform of ['win32', 'linux'] as const) {
+      const config = builderConfig(platform);
+      expect(config.publish, platform).toEqual({ provider: 'github', owner: 'funvill', repo: 'photo-tool', channel: 'photo-tool', releaseType: 'draft' });
+      expect(config.nsis, platform).toMatchObject({ oneClick: true, perMachine: false, allowElevation: false, differentialPackage: false });
+    }
+    // Owner and repo come from product.json, never written out a second time.
+    expect(code('photo-tool/electron-builder.config.cjs')).not.toMatch(/funvill|nsis-web|squirrel/i);
+    expect(code('photo-tool/electron/main.ts', 'photo-tool/electron/preload.ts', 'photo-tool/electron/server-host.ts', 'photo-tool/electron/selfTest.ts')).not.toMatch(/crashReporter|update-electron-app/);
   });
 
   it("names the program in product.json, which the config and main read", () => {

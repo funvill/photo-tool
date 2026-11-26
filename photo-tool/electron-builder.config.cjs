@@ -3,10 +3,14 @@
 // folder. Run from the project folder: the paths below are relative to it.
 //
 // The app's name and id come from photo-tool/product.json and nowhere else.
-// Everything the app needs is inside the installer: no nsis-web, no publish, no updater.
+// Everything the app needs is inside the installer: no nsis-web. Its update files (<channel>.yml on
+// Windows, <channel>-linux.yml on Linux) and resources/app-update.yml point the installed program's
+// updater at this program's own channel of the GitHub releases (see shared/electron/updates.ts).
 const { rmSync } = require('node:fs');
 const { join } = require('node:path');
 const product = require('./product.json');
+// Releases live where product.json's repository says ("github:owner/repo").
+const [owner, repo] = product.repository.replace(/^github:/, '').split('/');
 const electronVersion = require('../node_modules/electron/package.json').version;
 const linux = process.platform === 'linux';
 
@@ -41,7 +45,9 @@ module.exports = {
   extraResources: [{ from: `${desktop}/resources`, to: 'assets' }],
   // English only; Chromium's other locale packs are left out.
   electronLanguages: ['en-US'],
-  publish: null,
+  // `--publish never` (the package scripts) still writes the update files; CI uploads them to a draft
+  // release (.github/workflows/desktop.yml). Each program has its own channel, so neither can install the other.
+  publish: { provider: 'github', owner, repo, channel: 'photo-tool', releaseType: 'draft' },
   // Electron's own demo app comes along with the copied distribution; it is not ours to ship.
   afterPack: async (context) => {
     const resources = context.electronPlatformName === 'darwin' ? join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`, 'Contents', 'Resources') : join(context.appOutDir, 'resources');
@@ -61,7 +67,7 @@ module.exports = {
     runAfterFinish: true,
     // Uninstalling never deletes the user's stars, thumbnails or settings.
     deleteAppDataOnUninstall: false,
-    // No updater: leave out the elevation helper and the block map that only updates use.
+    // Updates download the whole installer (no block map) and install per user (no elevation helper).
     packElevateHelper: false,
     differentialPackage: false,
     // Only removes the copy of the installer that electron-builder would otherwise leave behind.
