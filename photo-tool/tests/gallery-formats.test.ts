@@ -100,3 +100,24 @@ describe.runIf(existsSync(FORMATS))('the new formats in Photo Tool', () => {
     expect(data[2]).toBeLessThan(60);
   });
 });
+
+describe('the media check the desktop self-test asks for', () => {
+  it('answers that this sharp build decodes each new format and refuses an SVG by path and under another name', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'gallery-media-check-'));
+    const made = createGalleryApp(join(root, 'data'), { photoInfoFallbackDir: join(root, 'fallback') });
+    let server: Server | undefined;
+    try {
+      await new Promise<void>((r) => (server = made.app.listen(0, '127.0.0.1', () => r())));
+      const res = await fetch(`http://127.0.0.1:${(server!.address() as AddressInfo).port}/api/gallery/media-check`);
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as any;
+      expect(body.ok).toBe(true);
+      expect(Object.keys(body.formats).sort()).toEqual(['avif', 'bmp', 'gif', 'svg', 'tiff']);
+      expect(body.svgGuard).toEqual({ blockApplied: true, pathRefused: true, disguisedRefused: true });
+    } finally {
+      await new Promise<void>((r) => (server ? server.close(() => r()) : r()));
+      made.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});

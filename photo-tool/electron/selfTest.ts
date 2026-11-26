@@ -5,7 +5,8 @@
 //
 // It opens a copy of the folder (<folder>/photos: the photos given are never written), waits for it
 // to be read, stars one photo in the viewer and checks the star in that copy's photoinfo.json. Then it
-// checks that the photo-tagging worker loads its runtime (onnxruntime-node), with no model.
+// checks that the photo-tagging worker loads its runtime (onnxruntime-node), with no model. Before
+// all that, it checks this build decodes the newer formats and refuses SVG by path (mediaFormats).
 import { cpSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { basename, dirname, join, relative } from 'node:path';
 import { Worker } from 'node:worker_threads';
@@ -55,6 +56,15 @@ export async function runGallerySelfTest(ctx: SelfTestContext & { source: string
   await step('health', async () => {
     const r = await api('GET', '/api/health');
     return { ok: r.ok === true && r.app === 'gallery', app: r.app };
+  });
+
+  // The formats #6 phase 2 added, decoded by this installed sharp build from tiny pictures made on the
+  // spot (AVIF, TIFF, GIF, SVG, BMP), and SVG refused when loaded by path (sharp.block) and when
+  // disguised under a photo's name. Here the block itself must hold too: a build without it (Linux's
+  // wasm sharp, say) still refuses SVG by content, but CI should hear about it.
+  await step('mediaFormats', async () => {
+    const r = await api('GET', '/api/gallery/media-check');
+    return { ...r, ok: r.ok === true && r.svgGuard?.pathRefused === true && r.svgGuard?.blockApplied === true };
   });
 
   await step('openFolder', async () => {

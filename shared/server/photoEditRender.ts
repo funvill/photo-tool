@@ -48,7 +48,8 @@ export async function renderEdited(
   if (keep) out = out.withMetadata({ orientation: 1 });
   if (format === 'png') out = out.png();
   else if (format === 'webp') out = out.webp({ quality: 95 });
-  else out = out.jpeg({ quality: 95 });
+  // JPEG has no see-through: those parts go on white, as every view shows them (libvips would make them black).
+  else out = out.flatten({ background: '#ffffff' }).jpeg({ quality: 95 });
 
   const tmp = `${outFile}.${randomUUID()}.tmp`;
   try {

@@ -25,9 +25,14 @@ export const BITMAP_MAX_BYTES = 256 * 1024 * 1024;
 /** Pictures with more pixels than this are refused. */
 export const BITMAP_MAX_PIXELS = 50_000_000;
 
+/** How many pixels each byte of an RLE stream may stand for, plus a little more for any file. */
+const RLE_PIXELS_PER_BYTE = 1024;
+const RLE_PIXELS_SLACK = 65_536;
+
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
-class BitmapError extends Error {}
+/** A file this decoder refuses: not one, damaged, or too large. */
+export class BitmapError extends Error {}
 const bad = (what: string) => new BitmapError(what);
 
 /** One colour channel picked out of a pixel by its bit mask, scaled to 0..255. */
@@ -115,6 +120,15 @@ function decodeDib(buf: Buffer, at: number, pixels: number | null, icon: boolean
   }
   const start = pixels ?? paletteAt + palette.length * paletteEntry;
   need(start);
+  // The file must be able to hold the picture before room is made for it.
+  const stride = Math.floor((bpp * width + 31) / 32) * 4;
+  if (compression === 1 || compression === 2) {
+    // An RLE pair of bytes draws at most 255 pixels, and a skip at most 255 rows: plenty is allowed,
+    // but a few bytes claiming a huge picture (a 60-byte file of 49 MP) is refused.
+    if (width * height > (buf.length - start) * RLE_PIXELS_PER_BYTE + RLE_PIXELS_SLACK) throw bad('The picture is too large for its data.');
+  } else {
+    need(start + stride * height);
+  }
 
   const data = Buffer.alloc(width * height * 4);
   const put = (x: number, row: number, r: number, g: number, b: number, a = 255) => {
@@ -163,8 +177,6 @@ function decodeDib(buf: Buffer, at: number, pixels: number | null, icon: boolean
       }
     }
   } else {
-    const stride = Math.floor((bpp * width + 31) / 32) * 4;
-    need(start + stride * height);
     const [rOf, gOf, bOf, aOf] = masks.map(channel);
     const hasAlphaMask = masks[3] !== 0;
     for (let y = 0; y < height; y++) {

@@ -1,13 +1,14 @@
 // Phase 2 of #6: the new formats' handlers, on the generated fixtures (fixtures/generated/formats,
 // made by `npm run fixtures`). For each one: the working image, both thumbnails and the full-size
 // JPEG the zoomed view gets, and that the right picture (first page, first frame) is the one shown.
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { gzipSync } from 'node:zlib';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { handlerFor } from '../server/mediaHandlers';
-import { SVG_MAX_SIDE, SVG_MIN_SIDE } from '../server/mediaHandlers/svg';
+import { checkSvgGuard, SVG_MAX_SIDE, SVG_MIN_SIDE, svgPathRefused } from '../server/mediaHandlers/svg';
 import { hashFile, orientedSize, readMetadata, THUMB_SIZES, workingFile, writeJpegThumb } from '../server/media';
 
 const FORMATS = join(process.cwd(), 'fixtures', 'generated', 'formats');
@@ -181,6 +182,59 @@ describe('SVG is untrusted', () => {
     } finally {
       await new Promise<void>((r) => server.close(() => r()));
     }
+  });
+
+  it('refuses a gzipped SVG (a decompression bomb) at once, without expanding it', async () => {
+    // About 200 MB of XML once expanded, a few hundred KB as stored, under a plain .svg name.
+    const inner = Buffer.concat([Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="50" height="50"><!--'), Buffer.alloc(200_000_000, 0x20), Buffer.from('--><rect width="50" height="50" fill="#0000ff"/></svg>')]);
+    const bomb = join(dir, 'bomb.svg');
+    writeFileSync(bomb, gzipSync(inner, { level: 9 }));
+    const before = process.memoryUsage().rss;
+    const started = Date.now();
+    await expect(workingFile(bomb, join(dir, 'data'), () => hashFile(bomb))).rejects.toThrow(/compressed/i);
+    await expect(handlerFor(bomb)!.image(bomb)).rejects.toThrow(/compressed/i);
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(process.memoryUsage().rss - before).toBeLessThan(100 * 1024 * 1024);
+  });
+
+  it('refuses a .svg that does not start with markup', async () => {
+    const odd = join(dir, 'odd.svg');
+    writeFileSync(odd, Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="5" height="5"/>')]));
+    await expect(workingFile(odd, join(dir, 'data'), () => hashFile(odd))).rejects.toThrow(/not an SVG/);
+    // A BOM and white space before the markup are fine.
+    const bom = svgFile('bom.svg', '<rect width="50" height="50" fill="#0000ff"/>');
+    writeFileSync(bom, Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from('\n  '), readFileSync(bom)]));
+    expect(await isBlue((await workingFile(bom, join(dir, 'data'), () => hashFile(bom))).path)).toBe(true);
+  });
+
+  it('refuses an SVG under a photo extension itself, even if sharp\'s block were not in effect', async () => {
+    const svg = '<rect width="50" height="50" fill="#0000ff"/><image href="red.png" width="50" height="50"/>';
+    const names = ['disguised2.jpg', 'disguised2.png', 'disguised2.webp', 'disguised2.tif', 'disguised2.gif', 'disguised2.avif'];
+    for (const name of names) svgFile(name, svg);
+    // Also with a BOM and leading space, UTF-16, and gzipped.
+    writeFileSync(join(dir, 'bom2.jpg'), Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf, 0x20, 0x0a]), readFileSync(join(dir, 'disguised2.jpg'))]));
+    writeFileSync(join(dir, 'utf16.png'), Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from(readFileSync(join(dir, 'disguised2.jpg'), 'utf8'), 'utf16le')]));
+    writeFileSync(join(dir, 'zipped.tif'), gzipSync(readFileSync(join(dir, 'disguised2.jpg'))));
+    names.push('bom2.jpg', 'utf16.png', 'zipped.tif');
+    const ops = ['VipsForeignLoadSvgFile', 'VipsForeignLoadSvgSource'];
+    sharp.unblock({ operation: ops });
+    try {
+      // Without the block sharp would read it by path, drawing the file beside it: the guard must notice.
+      expect((await sharp(join(dir, 'disguised2.jpg')).metadata()).format).toBe('svg');
+      expect(await svgPathRefused()).toBe(false);
+      const warnings: string[] = [];
+      expect((await checkSvgGuard((m) => warnings.push(m))).pathRefused).toBe(false);
+      expect(warnings.join(' ')).toMatch(/SVG/);
+      for (const name of names) {
+        const file = join(dir, name);
+        await expect(workingFile(file, join(dir, 'data'), () => hashFile(file)), name).rejects.toThrow(/text, not a/);
+        await expect(handlerFor(file)!.image(file), name).rejects.toThrow(/text, not a/);
+      }
+    } finally {
+      sharp.block({ operation: ops });
+    }
+    expect(await svgPathRefused()).toBe(true);
+    expect((await checkSvgGuard(() => undefined)).pathRefused).toBe(true);
   });
 
   it('caps the raster of a huge drawing, and scales up a tiny one', async () => {

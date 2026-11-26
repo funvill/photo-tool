@@ -20,6 +20,7 @@ describe.runIf(existsSync(FORMATS))('the new formats in the Photobook Editor', (
   let server: Server;
   let base: string;
   let closeStore: () => void;
+  let store: ReturnType<typeof createApp>['store'];
   let projectId: string;
 
   const api = async <T = any>(method: string, path: string, body?: unknown) => {
@@ -50,9 +51,10 @@ describe.runIf(existsSync(FORMATS))('the new formats in the Photobook Editor', (
     mkdirSync(join(shelf, 'Sneaky'));
     await sharp({ create: { width: 64, height: 64, channels: 3, background: '#ff0000' } }).png().toFile(join(shelf, 'Sneaky', 'red.png'));
     writeFileSync(join(shelf, 'Sneaky', 'sneaky.svg'), '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="#0000ff"/><image href="red.png" width="64" height="64"/></svg>');
-    const { app, store } = createApp(dataDir, { photoInfoFallbackDir: join(root, 'photoinfo') });
+    const made = createApp(dataDir, { photoInfoFallbackDir: join(root, 'photoinfo') });
+    store = made.store;
     store.setSetting('shelf_root', shelf);
-    await new Promise<void>((r) => (server = app.listen(0, '127.0.0.1', () => r())));
+    await new Promise<void>((r) => (server = made.app.listen(0, '127.0.0.1', () => r())));
     base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     closeStore = () => store.close();
     projectId = (await api('POST', '/api/projects', { title: 'Formats', product: 'poster', sizeId: 'p11x14' })).body.doc.id;
@@ -96,6 +98,27 @@ describe.runIf(existsSync(FORMATS))('the new formats in the Photobook Editor', (
     expect(gr - gb).toBeGreaterThan(150);
     const [ir, ig, ib] = await centre(await thumbOf('ico-app.ico'));
     expect([ir > 200, ig > 100 && ig < 170, ib < 60]).toEqual([true, true, true]);
+  });
+
+  it('puts an edited see-through picture (SVG, cutout PNG) on white, not black, in its edited copy', async () => {
+    const folder = join(root, 'Edited');
+    mkdirSync(folder);
+    const names = ['svg-badge.svg'];
+    for (const n of names) cpSync(join(FORMATS, n), join(folder, n));
+    // A cutout PNG: see-through but for a red square in the middle.
+    const red = await sharp({ create: { width: 20, height: 20, channels: 4, background: { r: 255, g: 0, b: 0, alpha: 1 } } }).png().toBuffer();
+    await sharp({ create: { width: 100, height: 80, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).composite([{ input: red, left: 40, top: 30 }]).png().toFile(join(folder, 'cutout.png'));
+    names.push('cutout.png');
+    const edit = { rotate: 90, straighten: 0, crop: { x: 0, y: 0, w: 1, h: 1 } };
+    writeFileSync(join(folder, 'photoinfo.json'), JSON.stringify({ format: 'photoinfo/1', photos: Object.fromEntries(names.map((n) => [n, { edit }])) }));
+    const job = await finish((await api('POST', `/api/projects/${projectId}/import`, { folder, recursive: false })).body);
+    expect(job.errors).toEqual([]);
+    for (const n of names) {
+      const row = store.assetByPath(join(folder, n))!;
+      expect(row.derived_path, n).toMatch(/-edit-[0-9a-z]+\.jpg$/);
+      const { data } = await sharp(row.derived_path!).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+      expect([...data.subarray(0, 3)].every((v) => v > 240), `${n}: ${[...data.subarray(0, 3)]}`).toBe(true);
+    }
   });
 
   it('never lets an SVG draw the file beside it, on the Shelf or once imported', async () => {

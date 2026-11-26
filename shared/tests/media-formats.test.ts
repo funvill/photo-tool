@@ -2,7 +2,10 @@
 // (shared/server/mediaHandlers/). Phase 1 of #6 reproduces exactly what the scattered lists did.
 // The reference uses win32's basename/extname, which split on both slashes, as the registry does on
 // every platform (so this runs the same on Windows and Linux CI).
-import { win32 } from 'node:path';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, win32 } from 'node:path';
+import sharp from 'sharp';
 import { describe, expect, it } from 'vitest';
 import { acceptAttribute, extensionOf, formatById, formatOf, isSupported, MEDIA_FORMATS, SUPPORTED_EXTENSIONS } from '../core/mediaFormats';
 import { handlerFor, mediaHandlers } from '../server/mediaHandlers';
@@ -147,6 +150,17 @@ describe('the handlers', () => {
 
   it('works from the original for the formats sharp reads safely, without hashing it', async () => {
     const ctx = { derivedDir: '/nowhere', contentHash: async () => { throw new Error('hashed'); } };
-    for (const n of ['a.jpg', 'b.png', 'c.webp', 'd.avif', 'e.tif', 'f.tiff', 'g.gif']) expect(await handlerFor(n)!.preview(n, ctx)).toBe(n);
+    // Each handler looks at the file's first bytes, so the files exist (one binary picture serves for all).
+    const dir = mkdtempSync(join(tmpdir(), 'media-formats-'));
+    try {
+      const png = await sharp({ create: { width: 2, height: 2, channels: 3, background: '#808080' } }).png().toBuffer();
+      for (const n of ['a.jpg', 'b.png', 'c.webp', 'd.avif', 'e.tif', 'f.tiff', 'g.gif']) {
+        const file = join(dir, n);
+        writeFileSync(file, png);
+        expect(await handlerFor(file)!.preview(file, ctx)).toBe(file);
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

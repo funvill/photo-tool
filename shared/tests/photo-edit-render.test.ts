@@ -117,3 +117,35 @@ describe('editFormatFor', () => {
     expect(editFormatFor('a.webp')).toBe('webp');
   });
 });
+
+describe('renderEdited, see-through pictures', () => {
+  /** 100 × 80, see-through except a red square in the middle. */
+  async function cutout(file: string) {
+    const red = await sharp({ create: { width: 20, height: 20, channels: 4, background: { r: 255, g: 0, b: 0, alpha: 1 } } }).png().toBuffer();
+    await sharp({ create: { width: 100, height: 80, channels: 4, background: { r: 0, g: 0, b: 0, alpha: 0 } } }).composite([{ input: red, left: 40, top: 30 }]).png().toFile(file);
+  }
+
+  it('writes a JPEG on white, as every view shows it (not on black)', async () => {
+    const src = join(dir, 'cutout.png');
+    await cutout(src);
+    for (const edit of [id(), id({ rotate: 90 }), id({ straighten: 5 })]) {
+      const out = join(dir, `cutout-${edit.rotate}-${edit.straighten}.jpg`);
+      await renderEdited(src, edit, out, 'jpeg');
+      const { width, height } = await sharp(out).metadata();
+      for (const v of await pixel(out, 1, 1)) expect(v, `${JSON.stringify(edit)} corner`).toBeGreaterThan(245);
+      const [r, g, b] = await pixel(out, Math.floor(width! / 2), Math.floor(height! / 2));
+      expect([r > 200, g < 60, b < 60]).toEqual([true, true, true]);
+    }
+  });
+
+  it('keeps see-through parts see-through in a PNG or WebP', async () => {
+    const src = join(dir, 'cutout2.png');
+    await cutout(src);
+    for (const format of ['png', 'webp'] as const) {
+      const out = join(dir, `cutout2.${format}`);
+      await renderEdited(src, id(), out, format);
+      const { data } = await sharp(out).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
+      expect(data[3], format).toBe(0);
+    }
+  });
+});

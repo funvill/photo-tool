@@ -12,6 +12,7 @@ import { listPlaces, placeOutline, suggestPlaces } from '../../shared/server/pla
 import { exportFlipbook, type FlipbookSize } from './flipbook';
 import { exportPosterImage } from './imageExport';
 import { formatById } from '../../shared/core/mediaFormats';
+import { checkSvgGuardOnce } from '../../shared/server/mediaHandlers/svg';
 import { colorFeatures, existingThumb, hashFile, hasTransparency, isSupported, makeThumbnails, THUMB_SIZES, workingFile, type ThumbSize } from '../../shared/server/media';
 import { exportCoverPdf, exportPdf, exportPosterPdf, type ExportAsset, type ExportOptions } from './pdf';
 import { setResourceRoot } from '../../shared/server/resources';
@@ -43,6 +44,8 @@ export interface AppOptions {
 }
 
 export function createApp(dataDir: string, opts: AppOptions) {
+  // Warns (once) if this sharp build would load an SVG by its path; SVGs are refused by content anyway.
+  checkSvgGuardOnce();
   if (opts.resourceRoot) setResourceRoot(opts.resourceRoot);
   const store = new Store(dataDir);
   const photoInfoOptions = { fallbackDir: opts.photoInfoFallbackDir };

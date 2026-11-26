@@ -1,8 +1,8 @@
 // The small BMP and ICO decoder (shared/server/mediaHandlers/bitmap.ts), on files built here byte by
 // byte: each kind of BMP it reads, icons with a BMP or PNG picture, and files that lie about themselves.
 import sharp from 'sharp';
-import { describe, expect, it } from 'vitest';
-import { BITMAP_MAX_PIXELS, decodeBmp, decodeIco, type Bitmap } from '../server/mediaHandlers/bitmap';
+import { describe, expect, it, vi } from 'vitest';
+import { BITMAP_MAX_PIXELS, BitmapError, decodeBmp, decodeIco, type Bitmap } from '../server/mediaHandlers/bitmap';
 
 /** A BMP file: 14-byte file header + `dib` (header, masks, palette) + `pixels`. */
 function bmp(dib: Buffer, pixels: Buffer): Buffer {
@@ -187,5 +187,116 @@ describe('ICO', () => {
     const bad = ico([2, 24, Buffer.alloc(20)]);
     bad.writeUInt32LE(10_000, 6 + 12);
     expect(() => decodeIco(bad)).toThrow(/cut short/);
+  });
+});
+
+describe('hostile and unusual BMP and ICO files', () => {
+  it('refuses a tiny RLE file that claims a huge picture, before making room for it', () => {
+    // 60 bytes claiming 7000 × 7000: an end-of-picture straight away.
+    const tiny = bmp(Buffer.concat([info(7000, 7000, 8, 1, 2), palette(RED, BLUE)]), Buffer.from([0, 1]));
+    expect(tiny.length).toBeLessThan(80);
+    const alloc = vi.spyOn(Buffer, 'alloc');
+    try {
+      expect(() => decodeBmp(tiny)).toThrow(BitmapError);
+      expect(alloc.mock.calls.filter(([n]) => (n as number) > 1_000_000)).toEqual([]);
+    } finally {
+      alloc.mockRestore();
+    }
+  });
+
+  it('refuses an uncompressed file too short for its pixels, before making room for them', () => {
+    const short = bmp(info(7000, 7000, 24), Buffer.alloc(16));
+    const alloc = vi.spyOn(Buffer, 'alloc');
+    try {
+      expect(() => decodeBmp(short)).toThrow(/cut short/);
+      expect(alloc.mock.calls.filter(([n]) => (n as number) > 1_000_000)).toEqual([]);
+    } finally {
+      alloc.mockRestore();
+    }
+  });
+
+  it('reads 2 bits per pixel, and top-down 8 and 32 bits per pixel', () => {
+    const two = decodeBmp(bmp(Buffer.concat([info(3, 1, 2, 0, 4), palette(RED, BLUE, [0, 255, 0], [9, 9, 9])]), Buffer.from([0b01101100, 0, 0, 0])));
+    expect([0, 1, 2].map((x) => px(two, x, 0))).toEqual([[0, 0, 255, 255], [0, 255, 0, 255], [9, 9, 9, 255]]);
+    const eight = decodeBmp(bmp(Buffer.concat([info(1, -2, 8, 0, 2), palette(RED, BLUE)]), Buffer.from([0, 0, 0, 0, 1, 0, 0, 0])));
+    expect([px(eight, 0, 0), px(eight, 0, 1)]).toEqual([[255, 0, 0, 255], [0, 0, 255, 255]]);
+    const thirtyTwo = decodeBmp(bmp(info(1, -2, 32), Buffer.from([0, 0, 255, 255, 255, 0, 0, 255])));
+    expect([px(thirtyTwo, 0, 0), px(thirtyTwo, 0, 1)]).toEqual([[255, 0, 0, 255], [0, 0, 255, 255]]);
+  });
+
+  it('reads an RLE4 absolute run of odd length, word padded, and refuses one cut short', () => {
+    // 3 pixels absolute (2 bytes, padded to 4), then end of picture.
+    const ok = decodeBmp(bmp(Buffer.concat([info(3, 1, 4, 2, 2), palette(RED, BLUE)]), Buffer.from([0, 3, 0x10, 0x10, 0, 1])));
+    expect([0, 1, 2].map((x) => px(ok, x, 0))).toEqual([BLUE, RED, BLUE].map((c) => [...c, 255]));
+    expect(() => decodeBmp(bmp(Buffer.concat([info(8, 1, 8, 1, 2), palette(RED, BLUE)]), Buffer.from([0, 8, 1, 1])))).toThrow(/cut short/);
+  });
+
+  it('stops at a delta that jumps past the last row', () => {
+    const b = decodeBmp(bmp(Buffer.concat([info(2, 2, 8, 1, 2), palette(RED, BLUE)]), Buffer.from([0, 2, 0, 200, 2, 1, 0, 1])));
+    expect([b.width, b.height]).toEqual([2, 2]);
+    expect(px(b, 0, 0)[3]).toBe(0);
+  });
+
+  it('reads ALPHABITFIELDS, and 40-byte BITFIELDS with masks using bit 31', () => {
+    const alpha = decodeBmp(bmp(Buffer.concat([info(1, 1, 32, 6), u32(0x00ff0000, 0x0000ff00, 0x000000ff, 0xff000000)]), Buffer.from([30, 20, 10, 128])));
+    expect(px(alpha, 0, 0)).toEqual([10, 20, 30, 128]);
+    // Red in the top byte (bit 31 set): read unsigned.
+    const top = decodeBmp(bmp(Buffer.concat([info(1, 1, 32, 3), u32(0xff000000, 0x00ff0000, 0x0000ff00)]), Buffer.from([0, 0, 0, 255])));
+    expect(px(top, 0, 0)).toEqual([255, 0, 0, 255]);
+    // A zero mask gives 0 for that channel.
+    const zero = decodeBmp(bmp(Buffer.concat([info(1, 1, 16, 3), u32(0, 0x07e0, 0x001f)]), Buffer.from([0xff, 0xff, 0, 0])));
+    expect(px(zero, 0, 0)).toEqual([0, 255, 255, 255]);
+  });
+
+  it('refuses a negative width and the most negative height', () => {
+    expect(() => decodeBmp(bmp(info(-2, 2, 24), Buffer.alloc(16)))).toThrow(BitmapError);
+    expect(() => decodeBmp(bmp(info(2, -2147483648, 24), Buffer.alloc(16)))).toThrow(BitmapError);
+  });
+
+  it('reads the OS/2 header at 24 bits per pixel', () => {
+    const core = Buffer.alloc(12);
+    core.writeUInt32LE(12, 0);
+    core.writeUInt16LE(1, 4);
+    core.writeInt16LE(1, 6);
+    core.writeUInt16LE(1, 8);
+    core.writeUInt16LE(24, 10);
+    expect(px(decodeBmp(bmp(core, Buffer.from([255, 0, 0, 0]))), 0, 0)).toEqual([0, 0, 255, 255]);
+  });
+
+  it('reads a 4-bit palette icon with its mask, and masks a 32-bit icon whose alpha is all 0', () => {
+    // 2 × 1, 4 bits: indices 1, 0; the mask makes the second pixel see-through.
+    const four = decodeIco(ico([2, 4, Buffer.concat([info(2, 2, 4, 0, 2), palette(RED, BLUE), Buffer.from([0x10, 0, 0, 0]), Buffer.from([0b01000000, 0, 0, 0])])])) as Bitmap;
+    expect([px(four, 0, 0), px(four, 1, 0)]).toEqual([[0, 0, 255, 255], [255, 0, 0, 0]]);
+    const zeroAlpha = decodeIco(ico([2, 32, Buffer.concat([info(2, 2, 32), Buffer.from([0, 0, 255, 0, 0, 0, 255, 0]), Buffer.from([0b10000000, 0, 0, 0])])])) as Bitmap;
+    expect([px(zeroAlpha, 0, 0)[3], px(zeroAlpha, 1, 0)[3]]).toEqual([0, 255]);
+  });
+
+  it('refuses an icon picture with more pixels than the cap', () => {
+    expect(() => decodeIco(ico([0, 32, Buffer.concat([info(100_000, 200_000, 32), Buffer.alloc(64)])]))).toThrow(/too large/);
+  });
+
+  it('survives random damage: a picture of the size it says, or a BitmapError', async () => {
+    const seeds = [
+      bmp(Buffer.concat([info(5, 3, 8, 0, 2), palette(RED, BLUE)]), Buffer.alloc(24, 1)),
+      bmp(Buffer.concat([info(4, 2, 8, 1, 2), palette(RED, BLUE)]), Buffer.from([4, 1, 0, 0, 0, 3, 0, 1, 0, 0, 1, 0, 0, 1])),
+      bmp(Buffer.concat([info(3, 2, 16, 3), u32(0xf800, 0x07e0, 0x001f)]), Buffer.alloc(16, 7)),
+      bmp(info(3, 3, 24), Buffer.alloc(36, 200)),
+      ico([2, 32, Buffer.concat([info(2, 4, 32), Buffer.alloc(16, 9), Buffer.alloc(8)])]),
+    ];
+    let state = 12345;
+    const rnd = () => ((state = (state * 1103515245 + 12345) >>> 0) / 2 ** 32);
+    for (let i = 0; i < 20_000; i++) {
+      const seed = seeds[i % seeds.length];
+      const b = Buffer.from(seed);
+      const hits = 1 + Math.floor(rnd() * 4);
+      for (let k = 0; k < hits; k++) b[Math.floor(rnd() * b.length)] = Math.floor(rnd() * 256);
+      const cut = rnd() < 0.2 ? b.subarray(0, Math.floor(rnd() * b.length)) : b;
+      try {
+        const out = i % seeds.length === 4 ? decodeIco(cut) : decodeBmp(cut);
+        if ('data' in out) expect(out.data.length).toBe(out.width * out.height * 4);
+      } catch (e) {
+        expect(e, `case ${i}`).toBeInstanceOf(BitmapError);
+      }
+    }
   });
 });
