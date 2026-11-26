@@ -11,7 +11,7 @@ import { editFormatFor, type PhotoEdit } from '../../shared/core/photoEdit';
 import { launchFolder } from '../../shared/electron/config';
 import { dragFiles, dragRequest, preparedDragFor, sameDragList, type DragCheck, type PreparedDrag } from './drag';
 import { copyTextRequest, trashConfirm, trashPhotos, type TrashResult } from './fileActions';
-import { saveAs, saveToFile, shouldQuit, unsavedClosePrompt, type EditSaveAsResult, type EditSaveResult } from './editActions';
+import { letPageClose, saveAs, saveToFile, shouldQuit, unsavedClosePrompt, type EditSaveAsResult, type EditSaveResult } from './editActions';
 import { readEditTarget, readMapConsent, writeEditTarget, writeMapConsent, type EditTarget } from './mapTiles';
 
 /** What a second launch hands over (see requestSingleInstanceLock): Chromium may reorder the argv it passes itself. */
@@ -522,14 +522,16 @@ export function galleryEditActions(o: { window: () => BrowserWindow | null; from
     else unsaved.delete(e.sender.id);
   });
 
+  // Set while the shell closes the window after confirmQuit was answered (Restart now): no second question.
+  let closeConfirmed = false;
+
   return {
     /** Call for the gallery's window: closing (or reloading) a page that says it has unsaved edits asks first. */
     watch(w: BrowserWindow) {
       const id = w.webContents.id;
+      // preventDefault here lets the page go: the page's own beforeunload is what stopped it.
       w.webContents.on('will-prevent-unload', (event) => {
-        const n = unsaved.get(id) ?? 0;
-        // preventDefault here lets the page go: the page's own beforeunload is what stopped it.
-        if (!n || dialog.showMessageBoxSync(w, unsavedClosePrompt(n)) === 0) event.preventDefault();
+        if (letPageClose({ count: unsaved.get(id) ?? 0, confirmed: closeConfirmed }, (n) => dialog.showMessageBoxSync(w, unsavedClosePrompt(n)) === 0)) event.preventDefault();
       });
       // A new page starts with nothing unsaved; a closed window has nothing left to save.
       w.webContents.on('did-start-navigation', (e) => {
@@ -545,6 +547,10 @@ export function galleryEditActions(o: { window: () => BrowserWindow | null; from
       const w = o.window();
       if (!w || w.isDestroyed()) return true;
       return shouldQuit(unsaved.get(w.webContents.id) ?? 0, (n) => dialog.showMessageBoxSync(w, unsavedClosePrompt(n)) === 0);
+    },
+    /** The shell's DesktopProgram.allowClose: while on, closing the window lets unsaved edits go without asking. */
+    allowClose(on: boolean) {
+      closeConfirmed = on;
     },
   };
 }

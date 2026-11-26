@@ -78,12 +78,16 @@ describe('builder config', () => {
     expect([...code.matchAll(/!macro (\w+)/g)].map((m) => m[1]).sort()).toEqual(['customInstall', 'customUnInstall', 'removeInstallerCopy']);
   });
 
-  it('ships a self-contained installer: no web installer, no updater, no crash reporter', () => {
+  it('publishes to its own update channel on GitHub, whole installers only, and has no crash reporter', () => {
     const code = (...files: string[]) => files.map(read).join('\n').split('\n').filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l)).join('\n');
-    const config = code('photo-tool/electron-builder.config.cjs');
-    expect(config).not.toMatch(/nsis-web|squirrel/i);
-    expect(config).toMatch(/publish: null/);
-    expect(code('photo-tool/electron/main.ts', 'photo-tool/electron/preload.ts', 'photo-tool/electron/server-host.ts', 'photo-tool/electron/selfTest.ts')).not.toMatch(/crashReporter|autoUpdater|electron-updater|update-electron-app/);
+    for (const platform of ['win32', 'linux'] as const) {
+      const config = builderConfig(platform);
+      expect(config.publish, platform).toEqual({ provider: 'github', owner: 'funvill', repo: 'photo-tool', channel: 'photo-tool', releaseType: 'draft' });
+      expect(config.nsis, platform).toMatchObject({ oneClick: true, perMachine: false, allowElevation: false, differentialPackage: false });
+    }
+    // Owner and repo come from product.json, never written out a second time.
+    expect(code('photo-tool/electron-builder.config.cjs')).not.toMatch(/funvill|nsis-web|squirrel/i);
+    expect(code('photo-tool/electron/main.ts', 'photo-tool/electron/preload.ts', 'photo-tool/electron/server-host.ts', 'photo-tool/electron/selfTest.ts')).not.toMatch(/crashReporter|update-electron-app/);
   });
 
   it("names the program in product.json, which the config and main read", () => {
@@ -205,6 +209,20 @@ describe('the Photo Tool program', () => {
     expect(m).toMatch(/requestAllowed: \(url, method, guard\) => galleryRequestAllowed\(/);
     expect(m).toContain('hostResolverRules: mapHostResolverRules()');
     expect(m).not.toContain('MAP * ~NOTFOUND');
+  });
+
+  it('checks for updates on its own channel, and says so in its description', () => {
+    expect(main()).toContain("updateChannel: 'photo-tool'");
+    expect(JSON.parse(read('photo-tool/product.json')).description).toBe(
+      'Look through a folder of photos, star the best ones and drag them into other programs. Uses the network only for map tiles (if you choose Load maps), to download photo-tagging models you ask for, and to check GitHub for a new version.',
+    );
+  });
+
+  it('Restart now asks about unsaved edits once: after confirmQuit, closing the window does not ask again', () => {
+    expect(main()).toContain('allowClose: (on) => edits?.allowClose(on),');
+    const gallery = read('photo-tool/electron/gallery.ts');
+    expect(gallery).toMatch(/w\.webContents\.on\('will-prevent-unload', \(event\) => \{\s*if \(letPageClose\(\{ count: unsaved\.get\(id\) \?\? 0, confirmed: closeConfirmed \}, \(n\) => dialog\.showMessageBoxSync\(w, unsavedClosePrompt\(n\)\) === 0\)\) event\.preventDefault\(\);/);
+    expect(gallery).toMatch(/allowClose\(on: boolean\) \{\s*closeConfirmed = on;\s*\}/);
   });
 
   it('takes the folder to open as its first argument that is not a flag', () => {

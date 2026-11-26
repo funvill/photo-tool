@@ -28,7 +28,7 @@ Each program has its own commands:
 | End-to-end tests (in your installed Chrome) | `npm run e2e:photo-tool` | `npm run e2e:editor` |
 
 - `npm test` runs every unit test (both programs and `shared/`: the fast set, then the slow set; see "Fast loop vs full loop" below), `npm run typecheck` checks all the code, and `npm run test:e2e` runs both programs' end-to-end tests.
-- `npm run dist:all` makes both installers. Each builds for the platform it runs on, into its own folder, `dist/installer/photo-tool/` and `dist/installer/photobook-editor/`: on Windows a per-user installer (`Photo Tool Setup <version>.exe`, `Photobook Editor Setup <version>.exe`, no administrator prompt), on Linux a `.deb` and an AppImage (x64 only, `photo-tool-<version>-amd64.deb`, `photo-tool-<version>-x86_64.AppImage` and the same for `photobook-editor`). Everything a program needs is inside; nothing is downloaded when installing or running it.
+- `npm run dist:all` makes both installers. Each builds for the platform it runs on, into its own folder, `dist/installer/photo-tool/` and `dist/installer/photobook-editor/`: on Windows a per-user installer (`Photo Tool Setup <version>.exe`, `Photobook Editor Setup <version>.exe`, no administrator prompt), on Linux a `.deb` and an AppImage (x64 only, `photo-tool-<version>-amd64.deb`, `photo-tool-<version>-x86_64.AppImage` and the same for `photobook-editor`). Everything a program needs is inside; nothing is downloaded when installing or running it (the one exception, checking for a new version, is below).
 - The installers are not code-signed, so Windows shows "Windows protected your PC" (choose **More info**, then **Run anyway**).
 - From Windows, `node scripts/desktop/linux/docker-build.mjs` makes the Linux packages in Docker, and `node scripts/desktop/linux/docker-test.mjs` installs and self-tests them on clean Linux desktops with the network off.
 - `npm run fixtures` writes 21 synthetic trip photos to `fixtures/generated/trip`, to try either program without your own photos.
@@ -80,6 +80,28 @@ Your books, stars, catalogue and tagging models come with you; nothing is copied
 - Nothing is moved for a folder you chose yourself with one of the variables above.
 
 **Uninstall the old program by hand.** The new installers do not remove the old "Photobook Studio" program (it is a different program to Windows and Linux). After installing Photo Tool and Photobook Editor and starting each once, so that your data has moved, uninstall Photobook Studio by hand: on Windows from **Settings → Apps → Installed apps**, on Linux with `sudo apt remove photobook-studio`. Its old shortcuts, including the "Photobook Gallery" one, go with it.
+
+## Updates, feedback and releasing
+
+**Checking for updates.** The installed programs look for a newer release of this repository on GitHub (github.com/funvill/photo-tool):
+
+- quietly at start, at most once a day, a few seconds after the window opens. If there is nothing new, or there is no network, nothing is shown. **Help → Check for updates automatically** turns this off (the setting is kept in the program's browser-profile folder, as `updates.json`).
+- whenever you choose **Help → Check for updates…**, or the **Check for updates** button in **Help → About** (F1). This always says what it found.
+
+When there is a new version you choose **Download**, **Release notes** (opens the release page in your browser) or **Later**. The download shows on the taskbar and in the Help menu; then **Restart now** closes the program safely (Photo Tool asks about unsaved edits once, the editor finishes saving), installs the new version and starts it. Choosing **Later**, or **Keep editing** at the unsaved-edits question, keeps the downloaded update: the first Help item then reads **Install update <version>…**. Only the whole installer is downloaded, and each program only ever installs itself.
+
+- Only GitHub is contacted, and only for this: `github.com`, `api.github.com`, `objects.githubusercontent.com` and `release-assets.githubusercontent.com`. Nothing about you or your install is sent: electron-updater's per-install id (`x-user-staging-id`) is never made, and that header carries the same zeros for everyone. The program's window still reaches nothing but its own local server, and a self-test never checks.
+- Started from source (`npm run start:photo-tool`, `npm run dev:desktop:editor` and the like), updates do not work; **Check for updates…** says so.
+- Setting `PHOTO_TOOL_NO_UPDATE_CHECK` (or `PHOTOBOOK_NO_UPDATE_CHECK`) to any value stops the check at start. `PHOTO_TOOL_UPDATE_FEED` (or `PHOTOBOOK_UPDATE_FEED`) points the program at another update feed, an address such as `http://127.0.0.1:5650/` serving a folder with `<channel>.yml` and the installer; it is for testing only.
+- The installers are not signed, so on Windows SmartScreen may warn about the new version as it did the first time. On Linux the `.deb` asks for your password to install, with a graphical prompt (pkexec): once before the program closes, to be sure it can ask, and once for the install itself. The AppImage replaces itself, so its folder must be writable. Before closing anything, **Restart now** checks what it can (the downloaded file, the AppImage's folder, pkexec and its password prompt); if the install can't work it offers the release page instead. If the install still fails after the program closed (a cancelled or wrong password, say), the program says so, offers the release page, and starts again.
+
+**Feedback.** **Help → Send feedback on GitHub…** (F2) opens a new issue on this repository in your browser, with the program, its version and your system (for example `Electron 45.4.1, win32 x64`) filled in, and nothing else. You need a GitHub account to post it.
+
+**Releasing.** Both programs share the version in `package.json`, and one release carries both:
+
+1. Bump the version and commit it, then tag that commit `v<version>` (for example `v0.1.48`) and push the tag.
+2. CI (`.github/workflows/desktop.yml`) builds and self-tests every installer, then its `release` job checks that the tag matches `package.json`, and uploads both programs' installers and their update files (`photo-tool.yml`, `photo-tool-linux.yml`, `photobook-editor.yml`, `photobook-editor-linux.yml`) to a **draft** release named after the tag. It runs only in funvill/photo-tool.
+3. Read the draft on GitHub (its notes are generated from the commits), edit them, and press **Publish**. Only then are the installed programs offered the update; nobody sees a draft.
 
 ## More
 

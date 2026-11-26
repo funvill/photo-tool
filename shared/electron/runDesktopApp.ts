@@ -3,19 +3,26 @@
 // Everything that differs between the editor and Photo Tool (names, page, menu, IPC, network
 // exceptions, self-test) comes in through a DesktopProgram; nothing here imports a program.
 //
-// Offline by construction: nothing here downloads anything, the window can only reach the app's
-// own local server, and Chromium's own network features are switched off (see hardenSession).
-// A program may allow more through requestAllowed (Photo Tool's map tiles, once the user allows them).
-// There is deliberately no crash reporter and no updater.
+// Offline by construction: the window can only reach the app's own local server, and Chromium's own
+// network features are switched off (see hardenSession). A program may allow more through
+// requestAllowed (Photo Tool's map tiles, once the user allows them).
+// The one thing the shell itself fetches: electron-updater asks GitHub for a new version (once a day
+// at start unless turned off, or from Help; see updates.ts), in its own session, so the window's guard
+// is unchanged. Only GitHub's names may be looked up for it (updateRules.UPDATE_HOSTS in each program's
+// host-resolver-rules), and never in a self-test. There is deliberately no crash reporter.
 import { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, screen, session, shell, utilityProcess, type MenuItemConstructorOptions, type UtilityProcess, type WebContents } from 'electron';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { accessSync, appendFileSync, constants as fsConstants, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-import { LICENCE_FILE, MIN_WINDOW, NOTICES_BUTTON, NOTICES_FILE, describeAbout, describeFailure, parseSavedPort, parseSelfTest, restoreWindow, serverPortRequest, type ProgramNames, type SelfTestArgs, type WindowState } from './config';
+import { delimiter, join, resolve } from 'node:path';
+import { AppImageUpdater, autoUpdater } from 'electron-updater';
+import { CHECK_UPDATES_BUTTON, LICENCE_FILE, MIN_WINDOW, NOTICES_BUTTON, NOTICES_FILE, describeAbout, describeFailure, feedbackUrl, parseSavedPort, parseSelfTest, restoreWindow, serverPortRequest, type ProgramNames, type SelfTestArgs, type WindowState } from './config';
 import { CarryOverError, carryOverRefusal, prepareProgramFolders } from './dataFolders';
 import { isAppNavigation, requestHost, type GuardOptions } from './netGuard';
 import { SELF_TEST_CONTROL_URLS, type SelfTestContext, type Step } from './selfTest';
 import type { HostMessage, HostReply, StartMessage } from './serverHost';
+import { githubRepo, graphicalSudo, installProblem, latestReleasePage, pkexecProbe, relaunchOptions, updateText, updaterKind } from './updateRules';
+import { createUpdates, type Updates } from './updates';
 
 /** What a program gives the shell: everything in which the editor and Photo Tool differ. */
 export interface DesktopProgram {
@@ -30,8 +37,10 @@ export interface DesktopProgram {
   serverHostFile: string;
   /** The URL the window loads, given the server's (or the Vite dev server's) base URL. */
   page(base: string): string;
-  /** Chromium's host-resolver-rules: which names may be looked up at all. */
+  /** Chromium's host-resolver-rules: which names may be looked up at all (the update hosts among them). */
   hostResolverRules: string;
+  /** The program's own update channel: its update files are <channel>.yml and <channel>-linux.yml. */
+  updateChannel: string;
   /** May the window make this request? `guard` names the app's own ports. */
   requestAllowed(url: string, method: string, guard: GuardOptions): boolean;
   /** Set up header rewriting on the session (Photo Tool's map tile requests). */
@@ -48,6 +57,11 @@ export interface DesktopProgram {
   onSecondInstance?(data: unknown): void;
   /** Before quitting: false keeps the app running (e.g. unsaved edits the user wants to keep). */
   confirmQuit?(): boolean;
+  /**
+   * While on, closing the window does not ask about unsaved work again: confirmQuit has just been
+   * answered (Restart now, before an update installs). Turned off again after the close attempt.
+   */
+  allowClose?(on: boolean): void;
   /** The program's self-test steps, run once the page has loaded. */
   selfTest(ctx: SelfTestContext & ProgramContext): Promise<Record<string, Step>>;
   /** Before anything else of a self-test (e.g. copying the photos); a throw fails the start. */
@@ -210,8 +224,16 @@ export function runDesktopApp(program: DesktopProgram): void {
   let serverOutput = '';
   let serverStoppedCleanly = false;
   let quitting = false;
+  /** Closing the window to install an update: closing it must not quit the app (see prepareInstall). */
+  let installing = false;
+  /** Which updater startUpdates made (updateRules.updaterKind). */
+  let updateKind: 'appimage' | 'default' = 'default';
+  /** Ends the app if it is still here 30 s after prepareInstall closed everything (see prepareInstall). */
+  let backstop: ReturnType<typeof setTimeout> | null = null;
   let exitCode = 0;
   let win: BrowserWindow | null = null;
+  /** Checking for updates; null in a self-test. */
+  let updates: Updates | null = null;
 
   const appOrigin = () => (devUrl ? new URL(devUrl).origin : `http://127.0.0.1:${serverPort}`);
   const allowedPorts = () => new Set([serverPort, ...(devUrl ? [Number(new URL(devUrl).port || 80)] : [])]);
@@ -451,6 +473,9 @@ export function runDesktopApp(program: DesktopProgram): void {
     return file && existsSync(file) ? file : null;
   }
 
+  /** Electron and the platform, as About and the feedback page give them. */
+  const runtime = () => `Electron ${process.versions.electron}, ${process.platform} ${process.arch}`;
+
   function aboutBox() {
     const licence = legalFile(LICENCE_FILE);
     return describeAbout({
@@ -461,6 +486,9 @@ export function runDesktopApp(program: DesktopProgram): void {
       licence: licence ? readFileSync(licence, 'utf8') : null,
       repository: program.repository,
       hasNotices: !!legalFile(NOTICES_FILE),
+      // Updates work only in the installed program, and never during a self-test.
+      canCheckForUpdates: !!updates && app.isPackaged && !selfTest,
+      runtime: runtime(),
     });
   }
 
@@ -468,6 +496,11 @@ export function runDesktopApp(program: DesktopProgram): void {
     const { buttons, ...words } = aboutBox();
     const options = { type: 'info' as const, ...words, buttons, defaultId: 0, cancelId: 0, noLink: true };
     const { response } = win && !win.isDestroyed() ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options);
+    // The box has closed by now; the check shows its own result.
+    if (buttons[response] === CHECK_UPDATES_BUTTON) {
+      void updates?.checkNow();
+      return;
+    }
     const notices = legalFile(NOTICES_FILE);
     if (buttons[response] !== NOTICES_BUTTON || !notices) return;
     // A plain text file on this computer, opened by whatever the system uses for those.
@@ -478,9 +511,21 @@ export function runDesktopApp(program: DesktopProgram): void {
     }
   }
 
+  /** The program's own File menu items, kept for building the menu again (the update items change). */
+  let fileItems: MenuItemConstructorOptions[] = [];
   /** `fileItems` (the program's own) come first in the File menu. */
-  function buildMenu(fileItems: MenuItemConstructorOptions[]) {
+  function buildMenu() {
     const about = () => void showAbout();
+    const updateItems = updates?.menuItems() ?? [];
+    // F2 opens the repository's new-issue page in the user's browser (from source too); the window's guard is unaffected.
+    const repo = githubRepo(program.repository);
+    const feedback: MenuItemConstructorOptions[] = repo
+      ? [{ label: 'Send &feedback on GitHub…', accelerator: 'F2', click: () => void shell.openExternal(feedbackUrl(repo, { productName: NAME, version: app.getVersion(), runtime: runtime() })) }]
+      : [];
+    // F1 works whenever the window has focus (neither page uses it; if one ever does, the menu wins).
+    const aboutItem: MenuItemConstructorOptions = { label: `&About ${NAME}`, accelerator: 'F1', click: about };
+    // Help: the update items, then feedback, then About, each group apart. Later Help items go after these.
+    const help = [updateItems, feedback, [aboutItem]].filter((g) => g.length > 0).flatMap((g, i) => (i === 0 ? g : [{ type: 'separator' }, ...g])) as MenuItemConstructorOptions[];
     const template: MenuItemConstructorOptions[] = [
       // macOS expects the app menu and the standard Edit menu; Windows and Linux need neither
       // (the page handles its own shortcuts, and text fields work without a menu).
@@ -493,9 +538,154 @@ export function runDesktopApp(program: DesktopProgram): void {
           ...(app.isPackaged ? [] : ([{ type: 'separator' }, { role: 'reload' }, { role: 'toggleDevTools' }] as MenuItemConstructorOptions[])),
         ],
       },
-      { label: '&Help', submenu: [{ label: `&About ${NAME}`, click: about }] },
+      { label: '&Help', submenu: help },
     ];
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  }
+
+  // ---- updates (the controller is updates.ts; these are its hooks into the app)
+
+  /** A message box over the window (or on its own when there is none); resolves to the button pressed. */
+  async function message(text: string, buttons: string[]): Promise<number> {
+    const options = { type: 'info' as const, title: NAME, message: text, buttons, defaultId: 0, cancelId: buttons.length - 1, noLink: true };
+    const { response } = win && !win.isDestroyed() ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options);
+    return response;
+  }
+
+  /** Can this process write to `path`? */
+  function writable(path: string): boolean {
+    try {
+      accessSync(path, fsConstants.W_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Run a program with nothing on its standard streams; resolves to its exit code (null if it did not run). */
+  function runForExitCode(cmd: string, args: string[]): Promise<number | null> {
+    return new Promise((resolve) => {
+      const child = spawn(cmd, args, { stdio: 'ignore', timeout: 5 * 60_000 });
+      child.on('error', () => resolve(null));
+      child.on('exit', (code) => resolve(code));
+    });
+  }
+
+  /** Restart now cannot work (found before anything is closed): say why, and offer the release page instead. */
+  async function cannotInstall(problem: string): Promise<boolean> {
+    const repo = githubRepo(program.repository);
+    log('the update cannot be installed', problem);
+    const choice = await message(updateText.cannotInstall(NAME, problem), repo ? [updateText.openReleasePage, 'Close'] : ['OK']);
+    if (choice === 0 && repo) void shell.openExternal(latestReleasePage(repo));
+    return false;
+  }
+
+  /**
+   * Restart now, before the installer runs. First everything that can be checked while nothing is closed
+   * yet (updateRules.installProblem): the downloaded files are still there; an AppImage's folder can be
+   * written; a .deb has a graphical sudo, and pkexec is run once (dpkg --version) to find out that it
+   * can actually ask for the password: a missing polkit agent fails here, not after closing. That asks
+   * for the password a first time; the install asks again. Then nothing unsaved may be lost and the
+   * server must close its database: Photo Tool's unsaved-edits question; then the window is closed while
+   * the server still runs (the editor's page cancels the first close to finish its pending save, so it
+   * is tried again each second for up to 10 s); then the server stops. False calls the install off.
+   */
+  async function prepareInstall({ files }: { files: string[] }): Promise<boolean> {
+    const sudo = process.platform === 'linux' ? graphicalSudo((env.PATH ?? '').split(delimiter).filter(Boolean), existsSync) : null;
+    const problem = installProblem({ platform: process.platform, kind: updateKind, files, appImage: env.APPIMAGE, sudo, exists: existsSync, writable });
+    if (problem) return cannotInstall(problem);
+    if (process.platform === 'linux' && updateKind === 'default' && sudo === 'pkexec' && process.getuid?.() !== 0) {
+      const probe = pkexecProbe(await runForExitCode('pkexec', ['--disable-internal-agent', 'dpkg', '--version']));
+      log('pkexec before installing', probe);
+      if (probe === 'dismissed') return false;
+      if (probe === 'unusable') return cannotInstall(updateText.problem.noAgent);
+    }
+    // Asked once: "Keep editing" calls the install off here, before anything is closed.
+    if (program.confirmQuit && !program.confirmQuit()) return false;
+    installing = true;
+    program.allowClose?.(true);
+    const until = Date.now() + 10_000;
+    try {
+      while (win && !win.isDestroyed() && Date.now() < until) {
+        win.close();
+        await new Promise((r) => setTimeout(r, 1000));
+      }
+    } finally {
+      program.allowClose?.(false);
+    }
+    if (win && !win.isDestroyed()) {
+      installing = false;
+      await message(updateText.stillSaving, ['OK']);
+      return false;
+    }
+    // Set first, so that the server's exit is not taken for a crash; before-quit then lets the
+    // updater's quit through without asking again or ending the app early.
+    quitting = true;
+    await stopServer();
+    // A started installer ends the app at once (a failed one is installFailed's); if the app is still
+    // here after 30 s, with no window and no server left, it must not linger.
+    backstop = setTimeout(() => {
+      log('the app did not quit for the update installer; quitting');
+      app.exit(exitCode);
+    }, 30_000);
+    backstop.unref();
+    return true;
+  }
+
+  /**
+   * The install failed after prepareInstall closed the window and stopped the server (a closed password
+   * box, a wrong password, a file that could not be moved): say so, offer the release page, and start
+   * the old version again, rather than leaving an invisible app that exits by itself.
+   */
+  async function installFailed(reason: string) {
+    if (backstop) clearTimeout(backstop);
+    backstop = null;
+    log('the update did not install; starting again', reason);
+    const repo = githubRepo(program.repository);
+    const choice = await message(updateText.installFailed(NAME, reason), repo ? [updateText.openReleasePage, 'OK'] : ['OK']);
+    if (choice === 0 && repo) await shell.openExternal(latestReleasePage(repo));
+    app.relaunch(relaunchOptions({ kind: updateKind, appImage: env.APPIMAGE }));
+    app.exit(exitCode);
+  }
+
+  /**
+   * Set up checking for updates. Never in a self-test: there no updater is even made. An AppImage gets
+   * electron-updater's AppImageUpdater directly (see updateRules.updaterKind); autoUpdater, a getter that
+   * picks by resources/package-type, is then never read. A failure here only turns updates off.
+   */
+  function startUpdates() {
+    if (selfTest) return;
+    try {
+      updateKind = updaterKind({ platform: process.platform, appImage: env.APPIMAGE, appDir: env.APPDIR, execPath: process.execPath });
+      const updater = updateKind === 'appimage' ? new AppImageUpdater() : autoUpdater;
+      updater.logger = { info: (m: unknown) => log('[updater]', m), warn: (m: unknown) => log('[updater warn]', m), error: (m: unknown) => log('[updater error]', m), debug: () => {} };
+      // Testing only: an update feed served on this computer (electron-updater's generic provider).
+      const feed = envVar('UPDATE_FEED');
+      if (feed) log('update feed', feed);
+      if (feed) updater.setFeedURL({ provider: 'generic', url: feed, channel: program.updateChannel });
+      updates = createUpdates({
+        updater,
+        channel: program.updateChannel,
+        productName: NAME,
+        currentVersion: app.getVersion(),
+        packaged: app.isPackaged,
+        repo: githubRepo(program.repository),
+        settingsFile: join(layout.profileDir, 'updates.json'),
+        ask: ({ message: text, buttons }) => message(text, buttons),
+        openExternal: (url) => void shell.openExternal(url),
+        setProgress: (f) => {
+          if (win && !win.isDestroyed()) win.setProgressBar(f ?? -1);
+        },
+        refreshMenu: () => buildMenu(),
+        prepareInstall,
+        installFailed: (reason) => void installFailed(reason),
+        log,
+        now: () => Date.now(),
+      });
+    } catch (e) {
+      updates = null;
+      log('updates are off: the updater could not be set up', String(e));
+    }
   }
 
   // ---- the page's functions (see each program's preload.ts)
@@ -606,7 +796,9 @@ export function runDesktopApp(program: DesktopProgram): void {
       }
     }
     hardenSession();
-    buildMenu(program.fileMenu(ctx));
+    startUpdates();
+    fileItems = program.fileMenu(ctx);
+    buildMenu();
     registerDesktopApi();
     try {
       serverPort = await startServer();
@@ -622,6 +814,11 @@ export function runDesktopApp(program: DesktopProgram): void {
       await win.loadURL(program.page(base));
     } catch (e) {
       return fatal('page', String((e as Error)?.message ?? e));
+    }
+    // The quiet daily check, once the window is up (it shows something only when there is a new version).
+    if (!selfTest && updates) {
+      const u = updates;
+      setTimeout(() => void u.checkAtStart({ selfTest: !!selfTest, disabledByEnv: !!envVar('NO_UPDATE_CHECK') }), 5000);
     }
     if (selfTest) {
       const steps = await program.selfTest({ ...ctx, base: `http://127.0.0.1:${serverPort}`, photos: selfTest.photos, out: selfTest.out, win, session: session.defaultSession, log });
@@ -644,6 +841,7 @@ export function runDesktopApp(program: DesktopProgram): void {
   });
   app.on('web-contents-created', (_e, contents) => hardenContents(contents));
   app.on('window-all-closed', () => {
+    if (installing) return;
     if (!selfTest && !failing) app.quit();
   });
   // Quit only after the server has closed its database.

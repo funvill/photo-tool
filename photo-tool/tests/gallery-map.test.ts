@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { galleryRequestAllowed, isMapTileRequest, mapHostResolverRules, mapTileRequestHeaders, mapTileUserAgent, OSM_TILE_ORIGIN, readMapConsent, writeMapConsent } from '../electron/mapTiles';
 import { locatedItems, noLocationText, OSM_TILE_URL } from '../core/galleryMap';
 import { hostResolverRules } from '../../shared/electron/netGuard';
+import { UPDATE_HOSTS } from '../../shared/electron/updateRules';
 
 describe('map tile requests', () => {
   it('names the OpenStreetMap tile server', () => {
@@ -100,10 +101,11 @@ describe("the gallery window's request guard", () => {
     expect(mapTileRequestHeaders({}, '1.2.3')).toEqual({ 'User-Agent': 'PhotoTool/1.2.3' });
   });
 
-  it("looks up no name in the editor; in the gallery only the tile server's", () => {
-    const editor = 'MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost';
-    expect(hostResolverRules()).toBe(editor);
-    expect(mapHostResolverRules()).toBe(`${editor}, EXCLUDE tile.openstreetmap.org`);
+  it("looks up no name but the tile server's and GitHub's (for updates)", () => {
+    const none = 'MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost';
+    expect(hostResolverRules()).toBe(none);
+    expect(mapHostResolverRules()).toBe(hostResolverRules(['tile.openstreetmap.org', ...UPDATE_HOSTS]));
+    expect(mapHostResolverRules()).toBe(`${none}, EXCLUDE tile.openstreetmap.org, EXCLUDE github.com, EXCLUDE api.github.com, EXCLUDE objects.githubusercontent.com, EXCLUDE release-assets.githubusercontent.com`);
   });
 });
 

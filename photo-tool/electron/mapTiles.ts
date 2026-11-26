@@ -6,6 +6,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { OSM_TILE_ORIGIN } from '../core/galleryMap';
 import { hostResolverRules, isAllowedRequest, type GuardOptions } from '../../shared/electron/netGuard';
+import { UPDATE_HOSTS } from '../../shared/electron/updateRules';
 
 export { OSM_TILE_ORIGIN };
 
@@ -48,11 +49,12 @@ export function mapTileRequestHeaders(headers: Record<string, string | string[]>
 }
 
 /**
- * Photo Tool's host-resolver-rules: no name is ever looked up, except the tile server's. A tile request
- * still has to pass the guard first, so nothing is looked up before "Load maps".
+ * Photo Tool's host-resolver-rules: no name is ever looked up, except the tile server's and GitHub's.
+ * A tile request still has to pass the window's guard first, so no tile is looked up before "Load maps";
+ * GitHub's names are for the updater alone (its own session; the window's guard never lets them through).
  */
 export function mapHostResolverRules(): string {
-  return hostResolverRules([TILE_HOST]);
+  return hostResolverRules([TILE_HOST, ...UPDATE_HOSTS]);
 }
 
 function readSettings(file: string): Record<string, unknown> | null {

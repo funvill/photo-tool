@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { hostResolverRules } from '../../shared/electron/netGuard';
+import { UPDATE_HOSTS } from '../../shared/electron/updateRules';
 
 const require = createRequire(import.meta.url);
 const root = resolve(__dirname, '../..');
@@ -68,12 +69,19 @@ describe('builder config', () => {
     expect(text).not.toMatch(/tagging|onnxruntime|fpm/i);
   });
 
-  it('ships a self-contained installer: no web installer, no updater, no crash reporter', () => {
-    const config = code('photobook-editor/electron-builder.config.cjs');
-    expect(config).not.toMatch(/nsis-web|squirrel/i);
-    expect(config).toMatch(/publish: null/);
-    expect(code('photobook-editor/electron/main.ts', 'photobook-editor/electron/preload.ts', 'photobook-editor/electron/server-host.ts', 'photobook-editor/electron/selfTest.ts')).not.toMatch(/crashReporter|autoUpdater|electron-updater|update-electron-app/);
-    expect(JSON.stringify(JSON.parse(read('package.json')).devDependencies)).not.toMatch(/updater/);
+  it('publishes to its own update channel on GitHub, whole installers only, and has no crash reporter', () => {
+    for (const platform of ['win32', 'linux'] as const) {
+      const config = builderConfig(platform);
+      expect(config.publish, platform).toEqual({ provider: 'github', owner: 'funvill', repo: 'photo-tool', channel: 'photobook-editor', releaseType: 'draft' });
+      expect(config.nsis, platform).toMatchObject({ oneClick: true, perMachine: false, allowElevation: false, differentialPackage: false });
+    }
+    // Owner and repo come from product.json, never written out a second time.
+    expect(code('photobook-editor/electron-builder.config.cjs')).not.toMatch(/funvill|nsis-web|squirrel/i);
+    expect(code('photobook-editor/electron/main.ts', 'photobook-editor/electron/preload.ts', 'photobook-editor/electron/server-host.ts', 'photobook-editor/electron/selfTest.ts')).not.toMatch(/crashReporter|update-electron-app/);
+    // electron-updater runs in the installed program: a run-time dependency, at one exact version.
+    const pkg = JSON.parse(read('package.json'));
+    expect(pkg.dependencies['electron-updater']).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(JSON.stringify(pkg.devDependencies)).not.toMatch(/updater/);
   });
 
   it('names the program in product.json, which the config and main read', () => {
@@ -81,7 +89,7 @@ describe('builder config', () => {
     expect(product).toEqual({
       productName: 'Photobook Editor',
       appId: 'app.photobookeditor.desktop',
-      description: 'Make a photobook from a folder of photos and export print-ready PDFs. Works offline.',
+      description: 'Make a photobook from a folder of photos and export print-ready PDFs. Works offline; checks GitHub once a day for a new version (Help › Check for updates automatically turns this off).',
       maintainer: 'Photobook Editor <photobook-editor@localhost>',
       repository: 'github:funvill/photo-tool',
     });
@@ -178,11 +186,12 @@ describe('the editor program', () => {
     expect(read('shared/electron/runDesktopApp.ts')).toMatch(/setAppUserModelId\(program\.appUserModelId\)/);
   });
 
-  it('may reach only its own server and looks up no name', () => {
+  it("may reach only its own server, and looks up no name but GitHub's (for updates)", () => {
     const shell = read('shared/electron/runDesktopApp.ts');
     expect(main()).toMatch(/requestAllowed: \(url, _method, guard\) => isAllowedRequest\(url, guard\)/);
-    expect(main()).toContain('hostResolverRules: hostResolverRules()');
-    expect(hostResolverRules()).toBe('MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost');
+    expect(main()).toContain('hostResolverRules: hostResolverRules(UPDATE_HOSTS)');
+    expect(main()).toContain("updateChannel: 'photobook-editor'");
+    expect(hostResolverRules(UPDATE_HOSTS)).toBe('MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost, EXCLUDE github.com, EXCLUDE api.github.com, EXCLUDE objects.githubusercontent.com, EXCLUDE release-assets.githubusercontent.com');
     for (const c of [main(), shell]) expect(c).not.toContain('MAP * ~NOTFOUND');
   });
 

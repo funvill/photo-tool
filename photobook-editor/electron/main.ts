@@ -6,6 +6,7 @@ import { existsSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { hostResolverRules, isAllowedRequest } from '../../shared/electron/netGuard';
 import { runDesktopApp, type DesktopProgram, type ProgramContext } from '../../shared/electron/runDesktopApp';
+import { UPDATE_HOSTS } from '../../shared/electron/updateRules';
 import product from '../product.json';
 
 /** The page's "Open" and "Show in folder" for an exported file, named by its file name in the exports folder. */
@@ -45,8 +46,9 @@ function editor(): DesktopProgram {
     repository: product.repository,
     serverHostFile: 'server-host.cjs',
     page: (base) => base,
-    // No name is ever looked up.
-    hostResolverRules: hostResolverRules(),
+    // No name is ever looked up but GitHub's, for the updater (the window still reaches only its own server).
+    hostResolverRules: hostResolverRules(UPDATE_HOSTS),
+    updateChannel: 'photobook-editor',
     requestAllowed: (url, _method, guard) => isAllowedRequest(url, guard),
     fileMenu: () => [],
     registerIpc: (ctx) => exportActions(ctx),
