@@ -4,7 +4,7 @@ import { filterItems, galleryFacts, sortItems, type GalleryFacts, type GalleryFi
 import { clickSelect, dragPaths, flagTargets, nextAfterRemoval } from '../core/galleryViewer';
 import { stackItems, type StackInfo } from '../core/galleryStacks';
 import { formatOf } from '../../shared/core/mediaFormats';
-import { IDENTITY_EDIT, isIdentityEdit, parseEdit, type PhotoEdit } from '../../shared/core/photoEdit';
+import { flipEdit, IDENTITY_EDIT, isIdentityEdit, parseEdit, rotateEditLeft, rotateEditRight, sameEdit, type PhotoEdit } from '../../shared/core/photoEdit';
 import { photoScores, scoreAdjustOf, type PhotoScore } from '../core/photoScore';
 import { loadEditTarget, saveEditTarget, type EditTarget } from './editSettings';
 import { galleryApi, type GalleryItem, type JobUpdate, type RecentFolder, type TaggingStatus } from './api';
@@ -86,6 +86,10 @@ export interface GalleryState {
   editDirty: boolean;
   /** The Settings dialog is open. */
   settingsOpen: boolean;
+  /** \ (or the Before button) is held: the preview and edit mode show the photo with no edit at all. Never saved. */
+  showOriginal: boolean;
+  /** The keyboard shortcuts list (?) is open. */
+  shortcutsOpen: boolean;
   /** Opening another folder (or closing this one) waits for "without saving?": what was asked for. */
   leaving: { folder: string; recursive: boolean } | 'close' | null;
   /** What Ctrl+Z takes back, oldest first (at most UNDO_LIMIT); emptied when a folder is opened or closed. */
@@ -140,10 +144,36 @@ export interface GalleryState {
   toggleFlag(field: 'star' | 'hidden'): Promise<void>;
   /** Drop photos from the list (they were deleted); the selection moves on to the next one. */
   removeItems(paths: string[]): void;
+  /** Ctrl+A: select every photo shown (filters and folded stacks respected), in one update; the focused one stays in the preview. */
+  selectAll(): void;
+  /** Ctrl+D: select nothing (the preview empties). */
+  selectNone(): void;
+  /**
+   * Delete (the key and the photo menu): move these photos (default: the selected ones that are shown, else
+   * the focused one) to the Recycle Bin through the desktop app, which asks first. What was moved leaves the
+   * list and the selection moves on, as after H. Nothing without the desktop app.
+   */
+  trashSelected(paths?: string[]): Promise<void>;
+  /**
+   * Ctrl+C: one photo goes on the clipboard as the picture (as Copy to clipboard does), several as files (at
+   * most 500, as a drag). A toast says how it went. Needs the desktop app (canCopyPhotos).
+   */
+  copySelected(): Promise<void>;
+  /**
+   * [ and ] (and the photo menu): turn every selected photo (the focused one when none is) a quarter, as an
+   * unsaved edit built on what it shows now, exactly as Done in edit mode would leave it. One undo step.
+   */
+  turnSelected(dir: 'left' | 'right'): void;
+  /** The photo menu's Flip horizontally: mirror every selected photo, as turnSelected does. */
+  flipSelected(): void;
   /** Stop reading and watching the open folder, and go back to the start screen. */
   close(): void;
   setTidyOpen(open: boolean): void;
   setSettingsOpen(open: boolean): void;
+  /** Show the original (while \ or Before is held), or the edit again. Changes nothing else. */
+  setShowOriginal(on: boolean): void;
+  /** ? opens or closes the keyboard shortcuts list; `open` says which (Help > Keyboard shortcuts opens it). */
+  toggleShortcuts(open?: boolean): void;
   setGridCols(cols: number): void;
   setView(view: 'grid' | 'map'): void;
   /** Open edit mode on this photo; not while its save is on its way. */
@@ -300,6 +330,9 @@ const baseName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 /** Up to three names, then "…". */
 const someNames = (paths: string[]) => `${paths.slice(0, 3).map(baseName).join(', ')}${paths.length > 3 ? '…' : ''}`;
 
+/** Where a deleted photo goes, named as the desktop app's confirm names it. */
+export const BIN = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent) ? 'Recycle Bin' : 'Trash';
+
 /** A format that can't be written (HEIC): in photo-file mode such a photo is saved only as a copy (JPEG). */
 export const copyOnly = (path: string) => formatOf(path)?.capabilities.editInPlace === false;
 /** Why such a photo isn't saved over: "HEIC photos can only be saved as a copy". */
@@ -353,6 +386,12 @@ let scoreToastId = 0;
 let savingCount = 0;
 /** Saving into the photo file needs the desktop app. */
 const canSaveToFile = () => !!host?.saveEditToFile;
+/** The most photos one Delete takes: the desktop app's own limit (MAX_TRASH_FILES in electron/fileActions.ts). */
+export const MAX_TRASH_PHOTOS = 10_000;
+/** Ctrl+C puts photos on the clipboard only in the desktop app (a plain browser keeps its own Ctrl+C). */
+export const canCopyPhotos = () => !!host?.copyImage;
+/** Ctrl+C copies at most this many photos as files (as many as a drag takes). */
+const MAX_COPY_FILES = 500;
 
 /** The list as it was before a change: its paths, and the stack whose face was the selected photo (null: none). */
 interface Before {
@@ -368,17 +407,6 @@ const without = (edits: Record<string, PhotoEdit>, path: string) => {
   const { [path]: _dropped, ...others } = edits;
   return others;
 };
-
-/** The same edit, to 1e-4 (null is no edit). */
-function sameEdit(a: PhotoEdit | null, b: PhotoEdit | null): boolean {
-  const x = a ?? IDENTITY_EDIT;
-  const y = b ?? IDENTITY_EDIT;
-  const near = (p: number, q: number) => Math.abs(p - q) <= 1e-4;
-  return (
-    x.rotate === y.rotate && near(x.straighten, y.straighten) &&
-    near(x.crop.x, y.crop.x) && near(x.crop.y, y.crop.y) && near(x.crop.w, y.crop.w) && near(x.crop.h, y.crop.h)
-  );
-}
 
 // Read once per stored value, so a selector hands back the same object each time (and nothing re-renders for it).
 const parsedEdits = new WeakMap<object, PhotoEdit | null>();
@@ -643,6 +671,37 @@ export const useGallery = create<GalleryState>()((set, get) => {
     }, MEANING_DEBOUNCE_MS);
   };
 
+  /** What the keys act on: the selected photos that are shown, in the order shown; else the focused one when shown. */
+  const selectedShown = (s: GalleryState): string[] => {
+    const picked = new Set(s.selection);
+    const shown = selectablePaths(s);
+    const paths = shown.filter((p) => picked.has(p));
+    return paths.length ? paths : s.selected !== null && shown.includes(s.selected) ? [s.selected] : [];
+  };
+
+  /**
+   * Change the shown edit of every selected photo (the focused one when none is) with `fn`, each as an
+   * unsaved edit (none when it comes back to what is saved), as one undo step. Not in edit mode, and not
+   * on a photo whose save is on its way.
+   */
+  const changeSelectedEdits = (label: string, fn: (e: PhotoEdit) => PhotoEdit) => {
+    const s = get();
+    if (s.editing !== null) return;
+    const byPath = new Map(s.items.map((i) => [i.path, i]));
+    const paths = selectedShown(s).filter((p) => byPath.has(p) && !s.savingPaths.includes(p));
+    if (!paths.length) return;
+    const pendingEdits = { ...s.pendingEdits };
+    const edits: NonNullable<UndoStep['edits']> = [];
+    for (const path of paths) {
+      const item = byPath.get(path)!;
+      const next = fn(shownEdit(s, item) ?? IDENTITY_EDIT);
+      edits.push({ path, before: s.pendingEdits[path] });
+      if (sameEdit(next, savedEdit(s, item))) delete pendingEdits[path];
+      else pendingEdits[path] = next;
+    }
+    set({ pendingEdits, undoStack: pushUndo(s.undoStack, { label, info: [], edits }) });
+  };
+
   /** A photo's file name, as the list has it. */
   const nameOf = (path: string) => get().items.find((i) => i.path === path)?.fileName ?? baseName(path);
 
@@ -774,6 +833,8 @@ export const useGallery = create<GalleryState>()((set, get) => {
     saving: false,
     savingPaths: [],
     settingsOpen: false,
+    showOriginal: false,
+    shortcutsOpen: false,
     tagging: null,
     meaning: null,
 
@@ -1026,6 +1087,83 @@ export const useGallery = create<GalleryState>()((set, get) => {
       settleSelection(before);
     },
 
+    selectAll() {
+      const s = get();
+      const paths = selectablePaths(s);
+      if (!paths.length) return;
+      const focus = s.selected !== null && paths.includes(s.selected) ? s.selected : paths[0];
+      set({ selection: paths, selected: focus, anchor: focus, ...(focus === s.editing ? {} : withEditUndo(s, endEditAsDone(s))) });
+    },
+
+    selectNone() {
+      get().select(null);
+    },
+
+    async trashSelected(paths) {
+      const trash = host?.trashPhotos;
+      if (!trash) return;
+      const targets = paths ?? selectedShown(get());
+      if (!targets.length) return;
+      // Said before anything is asked or moved: the desktop app would refuse it too.
+      if (targets.length > MAX_TRASH_PHOTOS) {
+        get().toast('error', `Delete takes at most ${MAX_TRASH_PHOTOS.toLocaleString('en')} photos at a time. Nothing was moved.`);
+        return;
+      }
+      try {
+        const r = await trash(targets);
+        if (r.cancelled) return;
+        if (r.trashed.length) get().removeItems(r.trashed);
+        // Not moved: a failure in the bin, or a photo that was no longer a file of the folder.
+        const notMoved = targets.length - r.trashed.length;
+        if (notMoved > 0 && r.trashed.length > 0) {
+          const first = r.failed[0];
+          get().toast('error', `Moved ${r.trashed.length} of ${plural(targets.length, 'photo')} to the ${BIN}. ${notMoved} ${notMoved === 1 ? 'was' : 'were'} not moved${first ? `: ${nameOf(first.path)}: ${first.message}` : '.'}`);
+        } else if (r.failed.length) {
+          const first = r.failed[0];
+          get().toast('error', `Couldn't move ${r.failed.length === 1 ? nameOf(first.path) : plural(r.failed.length, 'photo')} to the ${BIN}: ${first.message}`);
+        }
+      } catch (e) {
+        get().toast('error', `Couldn't delete: ${message(e)}`);
+      }
+    },
+
+    async copySelected() {
+      const paths = selectedShown(get());
+      if (!paths.length) return;
+      const { toast } = get();
+      try {
+        if (paths.length === 1) {
+          if (!host?.copyImage) return;
+          const r = await host.copyImage(paths[0]);
+          if (r.ok) toast('success', 'Copied');
+          else toast('error', r.error ?? "Couldn't copy the photo.");
+          return;
+        }
+        if (!host?.copyFiles) return;
+        const sent = paths.slice(0, MAX_COPY_FILES);
+        const r = await host.copyFiles(sent);
+        if (!r.ok) {
+          toast('error', r.error ?? "Couldn't copy the photos.");
+          return;
+        }
+        // What went on the clipboard, as the desktop app says: the files, or (not on Windows) their paths as text.
+        const some = sent.length < paths.length || r.dropped > 0;
+        const what = some ? `the first ${r.copied} of ${paths.length} photos` : plural(r.copied, 'photo');
+        if (r.as === 'paths') toast('success', `Copied the paths of ${what} as text (copying the files themselves works on Windows only)`);
+        else toast('success', `Copied ${what}`);
+      } catch (e) {
+        toast('error', `Couldn't copy: ${message(e)}`);
+      }
+    },
+
+    turnSelected(dir) {
+      changeSelectedEdits('rotate', dir === 'left' ? rotateEditLeft : rotateEditRight);
+    },
+
+    flipSelected() {
+      changeSelectedEdits('flip', flipEdit);
+    },
+
     close() {
       cancelScan();
       // Tagging this folder stops too. A failed call is harmless: the next folder opened replaces it.
@@ -1067,6 +1205,14 @@ export const useGallery = create<GalleryState>()((set, get) => {
 
     setSettingsOpen(settingsOpen) {
       set({ settingsOpen });
+    },
+
+    setShowOriginal(on) {
+      if (get().showOriginal !== on) set({ showOriginal: on });
+    },
+
+    toggleShortcuts(open) {
+      set((s) => ({ shortcutsOpen: open ?? !s.shortcutsOpen }));
     },
 
     setGridCols(cols) {
@@ -1499,6 +1645,8 @@ export function connectDesktop(d: Partial<DesktopApi> | undefined): () => void {
   // A folder from outside asks first, as Open folder does, while there are unsaved edits.
   const stopFolders = d?.onOpenFolder?.((folder) => void useGallery.getState().requestOpen(folder, useGallery.getState().recursive));
   const stopDrags = d?.onDragFailed?.((message) => useGallery.getState().toast('error', message));
+  // Help > Keyboard shortcuts.
+  const stopShortcuts = d?.onShowShortcuts?.(() => useGallery.getState().toggleShortcuts(true));
   // The desktop app asks before the window closes while this count is above 0.
   const report = () => d?.setUnsavedEdits?.(unsavedCount(useGallery.getState()));
   report();
@@ -1508,6 +1656,7 @@ export function connectDesktop(d: Partial<DesktopApi> | undefined): () => void {
   return () => {
     stopFolders?.();
     stopDrags?.();
+    stopShortcuts?.();
     stopCount?.();
     win?.removeEventListener('beforeunload', guardUnload);
     if (host === d) host = undefined;

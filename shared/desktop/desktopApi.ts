@@ -30,10 +30,17 @@ export interface DesktopApi {
    * (a folder given on the command line at start, or from a second launch). Returns a function that stops listening.
    */
   onOpenFolder?(cb: (folder: string) => void): () => void;
+  /** Gallery window: Help > Keyboard shortcuts was chosen; show the list. Returns a function that stops listening. */
+  onShowShortcuts?(cb: () => void): () => void;
   /** Gallery window: put text (Copy path) on the clipboard; the page's own clipboard is not allowed in the app. */
   copyText?(text: string): Promise<{ ok: boolean; error?: string }>;
   /** Gallery window: put this photo on the clipboard as a picture, at full size. */
   copyImage?(path: string): Promise<{ ok: boolean; error?: string }>;
+  /**
+   * Gallery window: put these photos (at most 500) on the clipboard as files, so they paste into a file
+   * manager or a chat app. Only photos of the open folder; `copied` says how many went, `dropped` how many were left over.
+   */
+  copyFiles?(paths: string[]): Promise<{ ok: boolean; copied: number; dropped: number; error?: string; /** 'files' (Windows), or 'paths': their paths as text, where copying files was never tried. */ as?: 'files' | 'paths' }>;
   /**
    * Gallery window: open the photo's folder in the file manager with the photo selected. (Named apart
    * from `showInFolder`, which shows an editor export by its file name.)

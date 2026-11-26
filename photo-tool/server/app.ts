@@ -5,7 +5,8 @@ import { basename, dirname, join, resolve } from 'node:path';
 import sharp from 'sharp';
 import { folderStamp, forgetPhotos, infoFor, PhotoInfoWriteError, readFolderInfo, updatePhotoInfo, type FolderInfo, type PhotoInfo, type PhotoInfoOptions } from '../../shared/photoinfo';
 import { AlbumTagsStore, type AlbumTagsOptions } from '../../shared/phototags';
-import { isIdentityEdit, parseEdit } from '../../shared/core/photoEdit';
+import { isIdentityEdit, parseEdit, storedEdit } from '../../shared/core/photoEdit';
+import { autoAdjust } from '../../shared/core/colorAdjust';
 import { hashFile, workingFile } from '../../shared/server/media';
 import { checkSvgGuardOnce } from '../../shared/server/mediaHandlers/svg';
 import { mediaSelfCheck } from '../../shared/server/mediaSelfCheck';
@@ -433,6 +434,19 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     res.type('image/jpeg').send(jpeg);
   }));
 
+  // Edit mode's Auto: the light and colour sliders worked out from a photo of the open folder (its 1600 px
+  // picture, else the photo itself made small), the whole photo, as core/colorAdjust.ts's autoAdjust says.
+  app.get('/api/gallery/auto-adjust', wrap(async (req, res) => {
+    const path = q(req, 'path');
+    if (!path) throw new HttpError(400, 'Expected ?path=');
+    const photo = openPhoto(path);
+    const thumb = catalog.thumbPath(photo.key, 'm');
+    const img = existsSync(thumb) ? sharp(thumb) : sharp(await workPathOf(photo), { failOn: 'none' }).rotate().resize(800, 800, { fit: 'inside' });
+    const { channels } = await img.toColourspace('srgb').stats();
+    const ch = (i: number) => channels[Math.min(i, channels.length - 1)];
+    res.json(autoAdjust({ mean: [ch(0).mean, ch(1).mean, ch(2).mean], stdev: [ch(0).stdev, ch(1).stdev, ch(2).stdev] }));
+  }));
+
   // With `job`, the reply also has that folder's stamp just before and after this write (`stamp`),
   // so the page can tell its own write from another program's change it has not seen yet.
   app.patch('/api/gallery/info', wrap((req, res) => {
@@ -445,7 +459,7 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     if ('edit' in patch && patch.edit !== null) {
       const edit = parseEdit(patch.edit);
       if (!edit) throw new HttpError(400, 'That edit is not valid.');
-      toWrite = { ...patch, edit: isIdentityEdit(edit) ? null : edit };
+      toWrite = { ...patch, edit: isIdentityEdit(edit) ? null : storedEdit(edit) };
     }
     // The score nudges (Up/Down): a whole number; 0 is stored as no field.
     if ('scoreAdjust' in patch && patch.scoreAdjust !== null) {

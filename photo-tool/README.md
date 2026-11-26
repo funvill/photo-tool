@@ -14,7 +14,7 @@ How to build, run, test and package it, and where its data lives: see the [READM
 
 **Zooming the preview.** Turn the mouse wheel over the preview to zoom in, from 1 to 8 times, toward the pointer. Drag to move the photo around. While zoomed, a small map in the top right corner shows where you are; click or drag it to move the view. Double-click to go back to the whole photo. (Double-click at the whole photo still opens it full screen.) The sharper full-size picture is loaded once you zoom far enough to need it.
 
-**Keys.** They work in the grid and the preview, and are ignored while you type in a field. The full-screen viewer has its own (last line).
+**Keys.** Press **?** (or choose **Help → Keyboard shortcuts**) to see the keys for where you are: the grid and preview, the full-screen viewer, or edit mode. **?** again, **Esc** or a click outside closes the list. The keys work in the grid and the preview, and are ignored while you type in a field. The full-screen viewer has its own (see below).
 
 - **F**: favourite (star) the photo, or unfavourite it. With several photos selected, they all take the opposite of the state of the photo shown in the preview (the focused one). **H** works the same way.
 - **H**: hide the photo, or show it again. Hidden photos are left out of the grid until you change the **Hidden** filter. After H, the selection moves on to the next photo, so you can press H down a run of bad shots.
@@ -23,8 +23,16 @@ How to build, run, test and package it, and where its data lives: see the [READM
 - **Home** and **End**: the first or last photo.
 - **Ctrl+Z**: undo the last change: a favourite, a hide, a score nudge, Done in edit mode, Revert to original, a saved edit in the info file, or a field typed in the details. The last 100 changes are kept until you open another folder. It doesn't undo moving photos to the Recycle Bin or saving into the photo file; get those back from the Recycle Bin. In a text field, Ctrl+Z undoes your typing as usual.
 - **E**: edit the photo (see Editing photos below).
+- **[** and **]**: turn the selected photos a quarter anticlockwise or clockwise. This is an unsaved edit, as **Done** in edit mode makes, and one press is one undo step for all of them.
+- **\\** (backslash), held: see the photo as it was, with no edit at all; the caption says "Original". Let go to see the edit again. The **Before** button under the preview does the same while you hold it down. It changes nothing.
+- **Delete**: move the selected photos to the Recycle Bin, as right-click → Delete does (it asks first). The selection moves on to the next photo.
+- **Ctrl+A** selects every shown photo (filters and folded stacks respected), and **Ctrl+D** selects none. In a text field, Ctrl+A selects its text as usual.
+- **Ctrl+C**: copy. One photo goes on the clipboard as the picture, to paste into a chat or a document. Several go as files, up to 500, to paste into Explorer or a chat app that takes files; a message says how many were copied. In a text field, or with text selected, Ctrl+C copies the text as usual.
 - **Enter** (or **Space**): view the photo full screen. **Esc** closes the viewer.
-- In the full-screen viewer, **Left** and **Right** step through the photos, **F** (or **S**) favourites the photo, **H** hides it, and **I** shows or hides its details.
+- **F1** shows About, and **F2** opens the feedback page on GitHub (desktop program).
+- In the full-screen viewer, **Left** and **Right** step through the photos, **F** (or **S**) favourites the photo, **H** hides it, **I** shows or hides its details, and **?** shows its keys. The viewer always shows the photo without its edit.
+
+Delete, Ctrl+C, F1 and F2 need the desktop program.
 
 **Photo score.** Every photo gets a score, shown at the top of the details and in the bottom-right corner of its thumbnail ("–" until the photo has been read). Hover the score in the details to see what made it. It is made of:
 
@@ -43,8 +51,13 @@ There is no top or bottom; a plain photo lands roughly between 30 and 90. Choose
 
 - **Aspect presets**: Free, Original, Square, 4:5, 3:2 and 16:9, and a button to swap portrait and landscape.
 - **Rotate 90°** (or **R**): turns the photo anticlockwise.
+- **Flip**: mirrors the photo left to right. (A vertical flip is a flip and two turns.)
 - **Straighten**: a slider from -45° to +45° in half-degree steps. Double-click it to reset it.
-- **Reset**, **Cancel** (**Esc**) and **Done** (**Enter**). While editing, only Esc, Enter and R act as keys.
+- **Light and colour**: **Brightness**, **Contrast**, **Saturation** and **Warmth**, each from −100 to +100 (0 leaves it as it is). Double-click a slider to reset it. **Auto** sets all four from the photo's own levels, and you can adjust the result. What you see is what gets saved: the page and the saved photo use the same numbers.
+- **Before** (or hold **\\**): shows the original while held.
+- **Reset** (crop, rotation, flip and colour), **Cancel** (**Esc**) and **Done** (**Enter**). While editing, only Esc, Enter, R, \\ and ? act as keys.
+
+Rotate left, Rotate right and Flip horizontally are also on the right-click menu, and **[** and **]** turn photos without opening edit mode. An older Photobook Editor ignores flip and light and colour. For a photo that is only cropped or turned it still gets the edit right, but a flipped photo that is also turned or cropped comes in turned the wrong way or cropped from the other side, so update both programs together.
 
 **Done** keeps the edit as *unsaved*: the photo's tile gets a marker, and the preview caption says "Edited · not saved". Clicking another photo while editing does the same. Edit is unavailable for a photo while it is being saved. Nothing is written until you save:
 
@@ -77,10 +90,11 @@ Run from source in a plain browser (`npm run dev:photo-tool`), Photo Tool can ed
 **Right-click menu.** Right-click a photo, or the preview, for:
 
 - **Edit** (**E**), and, for a photo with an unsaved edit, **Save**, **Save as…**, **Save all** and **Revert to original** as above.
-- **Copy to clipboard**: the photo itself, to paste into a chat, a document or an image editor.
+- **Rotate left** (**[**), **Rotate right** (**]**) and **Flip horizontally**: an unsaved edit of every selected photo.
+- **Copy to clipboard** (**Ctrl+C**): the photo itself, to paste into a chat, a document or an image editor.
 - **Copy path to clipboard**: the file's full path (every selected path, one per line).
 - **Show in file explorer**: opens the folder with the photo selected.
-- **Delete**: asks first, then moves the photo to the Recycle Bin (the Trash on Linux), so it can be restored. If the bin is not available, the delete fails instead of erasing the file.
+- **Delete** (**Delete**): asks first, then moves every selected photo to the Recycle Bin (the Trash on Linux), so it can be restored. If the bin is not available, the delete fails instead of erasing the file.
 - **Favourite** and **Hide**, with their keys shown.
 
 **Map tab.** The **Grid | Map** switch above the thumbnails shows the photos that have a location (from the camera's GPS or a place you typed) as small round pictures on an OpenStreetMap map. Photos close together merge into a bubble with a count; click it to zoom in. Click a photo to select it. The first time you open the Map tab it asks whether to load maps from the internet. **Load maps** downloads map tiles from OpenStreetMap, and nothing else leaves your computer: the requests carry no cookies, no referrer and no personal details. **Not now** keeps the markers on a plain background and makes no request. You can change your answer with the **Map: online** link on the map. With no connection, the markers still show, with "Map unavailable offline" over them.

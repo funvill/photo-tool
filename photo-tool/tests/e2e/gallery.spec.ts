@@ -1,11 +1,13 @@
 // The gallery program: open a folder, review its photos (grid, preview pane, keys, stacks, hidden
 // photos) and star one — the star lands in the folder's photoinfo.json, where the editor will find it.
-import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
 import { isSupported } from '../../../shared/server/media';
+import { applyMatrix, colorMatrix } from '../../../shared/core/colorAdjust';
+import sharp from 'sharp';
 
 const FIXTURES = join(process.cwd(), 'fixtures', 'generated', 'trip');
 
@@ -297,8 +299,8 @@ test('right-click opens the menu with icons; Copy path puts the path on the clip
     const menu = page.getByRole('menu');
     await expect(menu).toBeVisible();
     const items = menu.getByRole('menuitem');
-    await expect(items).toHaveText([/Edit/, /Copy to clipboard/, /Copy path to clipboard/, /Show in file explorer/, /Favourite/, /Hide/, /Delete/]);
-    for (let i = 0; i < 7; i++) await expect(items.nth(i).locator('svg.icon')).toHaveCount(1);
+    await expect(items).toHaveText([/Edit/, /Rotate left/, /Rotate right/, /Flip horizontally/, /Copy to clipboard/, /Copy path to clipboard/, /Show in file explorer/, /Favourite/, /Hide/, /Delete/]);
+    for (let i = 0; i < 10; i++) await expect(items.nth(i).locator('svg.icon')).toHaveCount(1);
     await expect(menu.locator('.ctx-sep')).toHaveCount(3);
 
     await menu.getByRole('menuitem', { name: /Copy path to clipboard/ }).click();
@@ -1668,6 +1670,405 @@ test.describe('album tags sidecar: generated tags live in the album folder', () 
     }
   });
 });
+
+test.describe('#9 keys, rotate and flip, light and colour, copy, shortcuts', () => {
+  /**
+   * A stand-in for the desktop app's Delete: `window.desktop.trashPhotos` moves the files into a trash folder
+   * of the test's own (through Node) and tells the server they are gone, as the desktop app does.
+   */
+  async function fakeTrash(page: Page, request: APIRequestContext): Promise<{ bin: string; asked: string[][] }> {
+    const bin = mkdtempSync(join(tmpdir(), 'photobook-bin-'));
+    const asked: string[][] = [];
+    await page.exposeFunction('__trashFiles', async (paths: string[]) => {
+      asked.push(paths);
+      for (const p of paths) renameSync(p, join(bin, basename(p)));
+      await request.post('/api/gallery/removed', { data: { paths } });
+      return paths;
+    });
+    await page.addInitScript(() => {
+      const w = window as unknown as { desktop: unknown; __trashFiles(paths: string[]): Promise<string[]> };
+      w.desktop = { trashPhotos: async (paths: string[]) => ({ trashed: await w.__trashFiles(paths), failed: [], cancelled: false }) };
+    });
+    return { bin, asked };
+  }
+
+  test('Ctrl+A selects every shown photo, Ctrl+D none; in the search field Ctrl+A selects its text', async ({ page, request }) => {
+    const dir = await openTrip(page, request);
+    try {
+      await page.getByLabel('Stack similar').uncheck();
+      const tiles = page.locator('.gallery-tile');
+      const count = await tiles.count();
+      await tiles.nth(1).click();
+      await page.keyboard.press('Control+a');
+      await expect(page.locator('.gallery-tile.picked')).toHaveCount(count);
+      // The focused photo stays in the preview.
+      await expect(page.locator('.gallery-tile.selected')).toHaveCount(1);
+      await expect(page.locator('.gallery-tile.selected')).toHaveAttribute('data-path', (await tiles.nth(1).getAttribute('data-path'))!);
+
+      await page.keyboard.press('Control+d');
+      await expect(page.locator('.gallery-tile.picked')).toHaveCount(0);
+      await expect(page.locator('.gallery-tile.selected')).toHaveCount(0);
+      await expect(page.getByRole('region', { name: 'Preview' }).locator('img')).toHaveCount(0);
+
+      const search = page.getByLabel('Search photos');
+      await search.fill('lake');
+      await search.press('Control+a');
+      await expect(page.locator('.gallery-tile.picked')).toHaveCount(0);
+      expect(await search.evaluate((el: HTMLInputElement) => [el.selectionStart, el.selectionEnd])).toEqual([0, 4]);
+    } finally {
+      removeTrip(dir);
+    }
+  });
+
+  test('Delete sends the selected photo to the Recycle Bin and selects the next; Delete in the search field deletes a letter', async ({ page, request }) => {
+    const { bin, asked } = await fakeTrash(page, request);
+    const dir = await openTrip(page, request);
+    try {
+      await page.getByLabel('Stack similar').uncheck();
+      const tiles = page.locator('.gallery-tile');
+      const count = await tiles.count();
+      const name = (await altOf(page, 1))!;
+      const next = (await altOf(page, 2))!;
+      await tiles.nth(1).click();
+      await page.keyboard.press('Delete');
+      await expect(tiles).toHaveCount(count - 1);
+      await expect(page.locator(`.gallery-tile img[alt="${name}"]`)).toHaveCount(0);
+      await expect(selectedImg(page)).toHaveAttribute('alt', next);
+      expect(asked).toHaveLength(1);
+      expect(existsSync(join(bin, name))).toBe(true);
+      expect(existsSync(join(dir, name))).toBe(false);
+
+      // Typing in the search field: Delete is the field's own.
+      const search = page.getByLabel('Search photos');
+      await search.fill('ab');
+      await search.press('Home');
+      await search.press('Delete');
+      await expect(search).toHaveValue('b');
+      expect(asked).toHaveLength(1);
+    } finally {
+      removeTrip(dir);
+      rmSync(bin, { recursive: true, force: true });
+    }
+  });
+
+  test('the menu Delete takes every selected photo, through the same action', async ({ page, request }) => {
+    const { asked } = await fakeTrash(page, request);
+    const dir = await openTrip(page, request);
+    try {
+      await page.getByLabel('Stack similar').uncheck();
+      const tiles = page.locator('.gallery-tile');
+      const count = await tiles.count();
+      await tiles.nth(0).click();
+      await tiles.nth(1).click({ modifiers: ['Shift'] });
+      await tiles.nth(1).click({ button: 'right' });
+      await page.getByRole('menuitem', { name: /Delete/ }).click();
+      await expect(tiles).toHaveCount(count - 2);
+      expect(asked).toEqual([[expect.any(String), expect.any(String)]]);
+    } finally {
+      removeTrip(dir);
+    }
+  });
+
+  test('Ctrl+C copies one photo as the picture, several as files; in the search field it is the field\'s own', async ({ page, request }) => {
+    await page.addInitScript(() => {
+      const w = window as unknown as { desktop: unknown; __copied: unknown[] };
+      w.__copied = [];
+      w.desktop = {
+        copyImage: async (path: string) => (w.__copied.push(['image', path]), { ok: true }),
+        copyFiles: async (paths: string[]) => (w.__copied.push(['files', paths]), { ok: true, copied: paths.length, dropped: 0 }),
+      };
+    });
+    const copied = () => page.evaluate(() => (window as unknown as { __copied: unknown[] }).__copied);
+    const dir = await openTrip(page, request);
+    try {
+      await page.getByLabel('Stack similar').uncheck();
+      const tiles = page.locator('.gallery-tile');
+      const first = (await tiles.nth(0).getAttribute('data-path'))!;
+      const second = (await tiles.nth(1).getAttribute('data-path'))!;
+      await tiles.nth(0).click();
+      await page.keyboard.press('Control+c');
+      await expect(page.locator('.toast', { hasText: 'Copied' }).first()).toBeVisible();
+      expect(await copied()).toEqual([['image', first]]);
+
+      await tiles.nth(1).click({ modifiers: ['Shift'] });
+      await page.keyboard.press('Control+c');
+      await expect(page.locator('.toast', { hasText: 'Copied 2 photos' })).toBeVisible();
+      expect(await copied()).toEqual([['image', first], ['files', [first, second]]]);
+
+      const search = page.getByLabel('Search photos');
+      await search.fill('lake');
+      await search.press('Control+a');
+      await search.press('Control+c');
+      expect(await copied()).toHaveLength(2);
+    } finally {
+      removeTrip(dir);
+    }
+  });
+
+  test('] and [ turn the selected photos as an unsaved edit, one undo step; the menu rotates and flips too', async ({ page, request }) => {
+    const dir = await openTrip(page, request);
+    try {
+      await page.getByLabel('Stack similar').uncheck();
+      const tiles = page.locator('.gallery-tile');
+      const preview = page.getByRole('region', { name: 'Preview' });
+      await tiles.nth(0).click();
+      await page.keyboard.press(']');
+      await expect(page.locator('.gallery-tile.selected .gallery-tile-unsaved')).toHaveCount(1);
+      await expect(preview).toContainText('Edited · not saved');
+      await expect(preview.locator('.gallery-preview-img.gallery-edited img')).toBeVisible();
+      await page.keyboard.press('Control+z');
+      await expect(page.locator('.gallery-tile-unsaved')).toHaveCount(0);
+
+      // Two selected: one press turns both, and one Ctrl+Z takes both back.
+      await tiles.nth(1).click({ modifiers: ['Shift'] });
+      await page.keyboard.press('[');
+      await expect(page.locator('.gallery-tile-unsaved')).toHaveCount(2);
+      await page.keyboard.press('Control+z');
+      await expect(page.locator('.gallery-tile-unsaved')).toHaveCount(0);
+
+      // The menu: Flip horizontally on the photo right-clicked (now the only one selected).
+      await tiles.nth(3).click();
+      await tiles.nth(3).click({ button: 'right' });
+      await page.getByRole('menuitem', { name: /Flip horizontally/ }).click();
+      await expect(page.locator('.gallery-tile-unsaved')).toHaveCount(1);
+      await expect(preview.locator('.gallery-preview-img.gallery-edited img')).toHaveAttribute('style', /scaleX\(-1\)/);
+      // [ while the menu is open closes it and turns the photo.
+      await tiles.nth(3).click({ button: 'right' });
+      await page.keyboard.press('[');
+      await expect(page.getByRole('menu')).toHaveCount(0);
+      // Save writes it, flip and turn (anticlockwise: 270), into photoinfo.json.
+      await preview.getByRole('button', { name: 'Save', exact: true }).click();
+      const name = (await altOf(page, 3))!;
+      await expect.poll(() => photoInfo(dir)[name]?.edit).toEqual({ rotate: 270, straighten: 0, crop: { x: 0, y: 0, w: 1, h: 1 }, flip: true });
+    } finally {
+      removeTrip(dir);
+    }
+  });
+
+  test('Light & colour: a slider and Done leave an unsaved edit, Save writes adjust; Auto moves a slider; Reset clears colour', async ({ page, request }) => {
+    const dir = await openTrip(page, request);
+    try {
+      const first = (await altOf(page, 0))!;
+      const preview = page.getByRole('region', { name: 'Preview' });
+      await page.keyboard.press('e');
+      const colour = preview.getByRole('group', { name: 'Light and colour' });
+      await expect(colour).toBeVisible();
+      await colour.getByLabel('Brightness').fill('40');
+      await expect(colour.getByLabel('Brightness')).toHaveValue('40');
+      // The picture in edit mode is drawn through the colour filter.
+      await expect(page.locator('.gallery-edit-frame .gallery-edited img')).toHaveAttribute('style', /filter: url\("?#pt-color-/);
+      await preview.getByRole('button', { name: 'Done' }).click();
+      await expect(page.locator('.gallery-tile.selected .gallery-tile-unsaved')).toHaveCount(1);
+      await expect(preview).toContainText('Edited · not saved');
+      await expect(page.locator('.gallery-tile.selected .gallery-edited img')).toHaveAttribute('style', /filter/);
+      await preview.getByRole('button', { name: 'Save', exact: true }).click();
+      await expect.poll(() => photoInfo(dir)[first]?.edit).toEqual({ rotate: 0, straighten: 0, crop: { x: 0, y: 0, w: 1, h: 1 }, adjust: { brightness: 40, contrast: 0, saturation: 0, warmth: 0 } });
+
+      // Auto changes at least one slider; Reset puts them all back to 0. (Edit mode waits for the save to land.)
+      await expect(preview).not.toContainText('Edited · not saved');
+      await page.keyboard.press('e');
+      const values = () => Promise.all(['Brightness', 'Contrast', 'Saturation', 'Warmth'].map((l) => colour.getByLabel(l).inputValue()));
+      await colour.getByLabel('Brightness').fill('0');
+      const before = await values();
+      await colour.getByRole('button', { name: 'Auto' }).click();
+      await expect.poll(async () => JSON.stringify(await values())).not.toBe(JSON.stringify(before));
+      await preview.getByRole('button', { name: 'Reset' }).click();
+      expect(await values()).toEqual(['0', '0', '0', '0']);
+      await preview.getByRole('button', { name: 'Cancel' }).click();
+    } finally {
+      removeTrip(dir);
+    }
+  });
+
+  test("the page's colour filter draws the colour the saved file will have", async ({ page, request }) => {
+    // One flat colour, so the thumbnail's JPEG and the screen add no noise worth the name.
+    const dir = join(mkdtempSync(join(tmpdir(), 'photobook-flat-')), 'flat');
+    mkdirSync(dir, { recursive: true });
+    await sharp({ create: { width: 400, height: 300, channels: 3, background: { r: 170, g: 100, b: 60 } } }).jpeg({ quality: 100 }).toFile(join(dir, 'flat.jpg'));
+    const a = { brightness: 30, contrast: -20, saturation: 40, warmth: -50 };
+    expect((await request.post('/api/gallery/open', { data: { folder: dir, recursive: false } })).status()).toBe(202);
+    await page.goto('/');
+    await page.getByRole('button', { name: dir }).click();
+    await expect(page.locator('.gallery-tile')).toHaveCount(1, { timeout: 60_000 });
+    await expect(page.getByRole('progressbar')).toHaveCount(0, { timeout: 60_000 });
+    try {
+      const preview = page.getByRole('region', { name: 'Preview' });
+      const centre = async () => {
+        const img = preview.locator('.gallery-preview-img').first();
+        await expect(img).toBeVisible();
+        const b = (await img.boundingBox())!;
+        const shot = await page.screenshot({ clip: { x: b.x + b.width / 2 - 2, y: b.y + b.height / 2 - 2, width: 4, height: 4 } });
+        const { data } = await sharp(shot).raw().toBuffer({ resolveWithObject: true });
+        return [data[0], data[1], data[2]];
+      };
+      await page.waitForTimeout(300);
+      const plain = await centre();
+      await page.keyboard.press('e');
+      const colour = preview.getByRole('group', { name: 'Light and colour' });
+      for (const [k, v] of Object.entries(a)) await colour.getByLabel(k[0].toUpperCase() + k.slice(1)).fill(String(v));
+      await preview.getByRole('button', { name: 'Done' }).click();
+      await expect(preview.locator('.gallery-preview-img.gallery-edited img')).toBeVisible();
+      await page.waitForTimeout(300);
+      const shown = await centre();
+      const expected = applyMatrix(plain, colorMatrix(a));
+      for (let i = 0; i < 3; i++) expect(Math.abs(shown[i] - expected[i]), `channel ${i}: ${shown} vs ${expected}`).toBeLessThanOrEqual(4);
+    } finally {
+      rmSync(join(dir, '..'), { recursive: true, force: true });
+    }
+  });
+
+  test('holding \\ shows the original, in the preview and in edit mode; letting go (or leaving the window) shows the edit again', async ({ page, request }) => {
+    const dir = await openTrip(page, request);
+    try {
+      const preview = page.getByRole('region', { name: 'Preview' });
+      const caption = preview.locator('.gallery-preview-caption');
+      // An unsaved brightness edit.
+      await page.keyboard.press('e');
+      const colour = preview.getByRole('group', { name: 'Light and colour' });
+      await colour.getByLabel('Brightness').fill('40');
+      await preview.getByRole('button', { name: 'Done' }).click();
+      const edited = preview.locator('.gallery-preview-img.gallery-edited img');
+      await expect(edited).toHaveAttribute('style', /filter/);
+
+      await page.keyboard.down('Backslash');
+      await expect(caption.getByText('Original', { exact: true })).toBeVisible();
+      await expect(edited).toHaveCount(0);
+      await expect(preview.locator('img[style*="filter"]')).toHaveCount(0);
+      await page.keyboard.up('Backslash');
+      await expect(caption.getByText('Original', { exact: true })).toHaveCount(0);
+      await expect(edited).toHaveAttribute('style', /filter/);
+      await expect(preview).toContainText('Edited · not saved');
+
+      // Zoomed in, holding \ keeps the zoom (a colour edit keeps the photo's shape): the same detail, before and after.
+      const stage = preview.locator('.gallery-preview-stage');
+      const box = (await stage.boundingBox())!;
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.wheel(0, -300);
+      await expect(stage).toHaveClass(/zoomed/);
+      await page.keyboard.down('Backslash');
+      await expect(caption.getByText('Original', { exact: true })).toBeVisible();
+      await expect(stage).toHaveClass(/zoomed/);
+      await page.keyboard.up('Backslash');
+      await expect(edited).toHaveAttribute('style', /filter/);
+      await expect(stage).toHaveClass(/zoomed/);
+      await stage.dblclick();
+      await expect(stage).not.toHaveClass(/zoomed/);
+
+      // The Before button, held.
+      const before = preview.getByRole('button', { name: 'Before' });
+      await before.hover();
+      await page.mouse.down();
+      await expect(caption.getByText('Original', { exact: true })).toBeVisible();
+      await page.mouse.up();
+      await expect(caption.getByText('Original', { exact: true })).toHaveCount(0);
+
+      // Leaving the window while it is held shows the edit again.
+      await page.keyboard.down('Backslash');
+      await expect(caption.getByText('Original', { exact: true })).toBeVisible();
+      await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+      await expect(caption.getByText('Original', { exact: true })).toHaveCount(0);
+      await page.keyboard.up('Backslash');
+
+      // Edit mode: straight after a slider moved with the keyboard, \ still works, and the draft survives it.
+      await page.keyboard.press('e');
+      const slider = colour.getByLabel('Contrast');
+      await slider.focus();
+      await page.keyboard.press('ArrowRight');
+      const value = await slider.inputValue();
+      expect(value).not.toBe('0');
+      const frameImg = page.locator('.gallery-edit-frame .gallery-edited img');
+      await expect(frameImg).toHaveAttribute('style', /filter/);
+      await page.keyboard.down('Backslash');
+      await expect(caption.getByText('Original', { exact: true })).toBeVisible();
+      await expect(page.locator('.gallery-edit-frame img[style*="filter"]')).toHaveCount(0);
+      await page.keyboard.up('Backslash');
+      await expect(frameImg).toHaveAttribute('style', /filter/);
+      await expect(slider).toHaveValue(value);
+      await expect(colour.getByLabel('Brightness')).toHaveValue('40');
+      await preview.getByRole('button', { name: 'Cancel' }).click();
+    } finally {
+      removeTrip(dir);
+    }
+  });
+
+  test('? shows the keys for where you are; ? again, Esc or a click outside closes it; in a field ? is typed', async ({ page, request }) => {
+    const dir = await openTrip(page, request);
+    try {
+      const list = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
+      await page.locator('.gallery-tile').first().click();
+      await page.keyboard.press('?');
+      await expect(list).toBeVisible();
+      const favourite = list.locator('.shortcut-row', { hasText: 'Favourite or unfavourite' });
+      await expect(favourite.locator('kbd')).toHaveText('F');
+      // The keys under it do nothing while it is open.
+      await page.keyboard.press('f');
+      await page.waitForTimeout(200);
+      await expect(page.locator('.gallery-tile.selected .gallery-star-badge')).toHaveCount(0);
+      await page.keyboard.press('Escape');
+      await expect(list).toHaveCount(0);
+      await page.keyboard.press('?');
+      await expect(list).toBeVisible();
+      await page.keyboard.press('?');
+      await expect(list).toHaveCount(0);
+      await page.keyboard.press('?');
+      await page.mouse.click(5, 5);
+      await expect(list).toHaveCount(0);
+
+      const search = page.getByLabel('Search photos');
+      await search.fill('');
+      await search.press('?');
+      await expect(search).toHaveValue('?');
+      await expect(list).toHaveCount(0);
+      await search.fill('');
+      await search.blur();
+
+      // In the viewer: the viewer's keys; Esc closes the list, not the viewer.
+      await page.locator('.gallery-tile').first().dblclick();
+      const viewer = page.getByRole('dialog', { name: 'Photo viewer' });
+      await expect(viewer).toBeVisible();
+      await page.keyboard.press('?');
+      await expect(list.locator('.shortcut-row', { hasText: 'Show or hide details' }).locator('kbd')).toHaveText('I');
+      await page.keyboard.press('Escape');
+      await expect(list).toHaveCount(0);
+      await expect(viewer).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(viewer).toHaveCount(0);
+
+      // In edit mode: edit mode's keys; Esc closes the list and keeps the edit going.
+      const preview = page.getByRole('region', { name: 'Preview' });
+      await page.keyboard.press('e');
+      await preview.getByRole('group', { name: 'Light and colour' }).getByLabel('Warmth').fill('30');
+      await page.keyboard.press('?');
+      await expect(list.locator('.shortcut-row', { hasText: 'Cancel the edit' })).toBeVisible();
+      await expect(list.locator('.shortcut-row', { hasText: 'Favourite' })).toHaveCount(0);
+      await page.keyboard.press('Escape');
+      await expect(list).toHaveCount(0);
+      await expect(preview.getByRole('group', { name: 'Light and colour' }).getByLabel('Warmth')).toHaveValue('30');
+      await preview.getByRole('button', { name: 'Cancel' }).click();
+    } finally {
+      removeTrip(dir);
+    }
+  });
+
+  test('Help > Keyboard shortcuts opens the list (the desktop app tells the page)', async ({ page, request }) => {
+    await page.addInitScript(() => {
+      const w = window as unknown as { desktop: unknown; __showShortcuts?: () => void };
+      w.desktop = { onShowShortcuts: (cb: () => void) => ((w.__showShortcuts = cb), () => (w.__showShortcuts = undefined)) };
+    });
+    const dir = await openTrip(page, request);
+    try {
+      await page.evaluate(() => (window as unknown as { __showShortcuts: () => void }).__showShortcuts());
+      const list = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
+      await expect(list).toBeVisible();
+      // The desktop app's own keys are listed there.
+      await expect(list.locator('.shortcut-row', { hasText: 'About Photo Tool' }).locator('kbd')).toHaveText('F1');
+      await expect(list.locator('.shortcut-row', { hasText: 'Send feedback on GitHub' }).locator('kbd')).toHaveText('F2');
+    } finally {
+      removeTrip(dir);
+    }
+  });
+});
+
 
 test.describe('#6 phase 2: AVIF, TIFF, GIF, SVG, BMP and ICO', () => {
   const FORMATS = join(process.cwd(), 'fixtures', 'generated', 'formats');

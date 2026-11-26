@@ -330,3 +330,30 @@ describe("Photo Tool's page", () => {
     assets.forEach(visit);
   });
 });
+
+describe('#9 Ctrl+C with several photos', () => {
+  it('the preload exposes copyFiles on its own channel, and the handler checks the page and the open folder', () => {
+    expect(read('photo-tool/electron/preload.ts')).toContain("'gallery:copy-files'");
+    const gallery = read('photo-tool/electron/gallery.ts');
+    const at = gallery.indexOf("ipcMain.handle('gallery:copy-files'");
+    expect(at).toBeGreaterThan(0);
+    const handler = gallery.slice(at, gallery.indexOf('ipcMain.handle(', at + 10));
+    expect(handler).toContain('if (!allowed(e))');
+    expect(handler).toContain('inOpenFolder');
+    expect(handler).toContain('copyFilesRequest');
+    // The files on Windows only (copyFilesClipboard in fileActions.ts), the paths as text elsewhere, and the reply says which.
+    expect(handler).toContain('copyFilesClipboard(request.paths, process.platform)');
+    expect(handler).toContain('clipboard.writeText(put.text)');
+    expect(handler).toContain('as: put.as');
+  });
+});
+
+describe('#9 Help > Keyboard shortcuts', () => {
+  it('Photo Tool adds the item to the Help menu, and it tells the page to show the list', () => {
+    const main = read('photo-tool/electron/main.ts');
+    expect(main).toMatch(/helpMenu: \(ctx\) => \[\{ label: '&Keyboard shortcuts', click: \(\) => showShortcuts\(ctx\) \}\]/);
+    expect(main).toMatch(/webContents\.send\('gallery:show-shortcuts'\)/);
+    const preload = read('photo-tool/electron/preload.ts');
+    expect(preload).toMatch(/onShowShortcuts: \(cb\) => \{[\s\S]{0,200}ipcRenderer\.on\('gallery:show-shortcuts', listener\)/);
+  });
+});

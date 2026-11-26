@@ -3,6 +3,7 @@ import type { ModelChoice, TagPart } from '../core/tagModels';
 import type { DownloadProgress } from '../server/models/download';
 import type { InstalledModel, TaggingSettings } from '../server/models/store';
 import type { TaggingStatus } from '../server/tagging/queue';
+import type { Adjust } from '../../shared/core/colorAdjust';
 
 // Thin client for the gallery's local server (same origin, 127.0.0.1). Errors carry the server's message.
 
@@ -91,6 +92,8 @@ export const galleryApi = {
   /** A new description of the photo from the chosen descriptions model; replies with the photo's tags. */
   regenerateDescription: (job: string, path: string) => call<PhotoTags>('POST', '/api/gallery/tagging/regenerate', { job, path }),
   search: (job: string, q: string) => call<{ paths: string[] }>('GET', `/api/gallery/search?job=${encodeURIComponent(job)}&q=${encodeURIComponent(q)}`),
+  /** Edit mode's Auto: the light and colour sliders for a photo of the open folder. */
+  autoAdjust: (path: string) => call<Adjust>('GET', `/api/gallery/auto-adjust?${qs({ path })}`),
 };
 
 /** 's' is 400 px (the grid), 'm' is 1600 px (the hover preview). */

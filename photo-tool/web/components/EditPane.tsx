@@ -1,21 +1,25 @@
-import { useEffect, useRef, useState, type PointerEvent } from 'react';
+import { useEffect, useRef, useState, type MouseEvent, type PointerEvent } from 'react';
 import { Icon } from '../../../shared/web/components/Icon';
 import {
   ASPECTS,
   IDENTITY_EDIT,
+  NO_ADJUST,
   editCss,
   fitCropToAspect,
+  flipEdit,
   isIdentityEdit,
   resizeCrop,
   rotateEditLeft,
   turnedSize,
   type CropHandle,
+  type Adjust,
   type CropRect,
   type PhotoEdit,
 } from '../../../shared/core/photoEdit';
 import type { Size } from '../../core/previewZoom';
-import { thumbUrl, type GalleryItem } from '../api';
+import { galleryApi, thumbUrl, type GalleryItem } from '../api';
 import { shownEdit, useGallery } from '../store';
+import { matchShortcut } from '../shortcuts';
 import { EditedImage } from './EditedImage';
 
 // Edit mode in the preview pane, as Google Photos does it: the whole photo, turned and straightened, with a
@@ -31,6 +35,17 @@ const HANDLE_NAMES: Record<Exclude<CropHandle, 'move'>, string> = {
   nw: 'top left', n: 'top', ne: 'top right', e: 'right', se: 'bottom right', s: 'bottom', sw: 'bottom left', w: 'left',
 };
 const FIXED: Partial<Record<AspectId, number>> = { square: 1, '4:5': 4 / 5, '3:2': 3 / 2, '16:9': 16 / 9 };
+const COLOUR_SLIDERS: { key: keyof Adjust; label: string }[] = [
+  { key: 'brightness', label: 'Brightness' },
+  { key: 'contrast', label: 'Contrast' },
+  { key: 'saturation', label: 'Saturation' },
+  { key: 'warmth', label: 'Warmth' },
+];
+
+/** A mouse click (detail > 0; a key press gives 0) leaves no focus on the toolbar button it pressed. */
+const blurClicked = (e: MouseEvent) => {
+  if (e.detail > 0) (e.target as HTMLElement).closest('button')?.blur();
+};
 
 /**
  * Keys typed into a field (the description, say) are the field's own. The straighten slider keeps its arrows,
@@ -71,6 +86,9 @@ export function EditPane({ item }: { item: GalleryItem }) {
   const frameBox = pic && room.w > 0 && room.h > 0 ? editCss(whole, pic.w, pic.h, room.w, room.h).box : null;
   // The frame's shape is the turned photo's (straightening keeps it), known before the picture has loaded too.
   const turned = pic ? turnedSize(pic.w, pic.h, draft.rotate) : { w: 1, h: 1 };
+  // \ or Before held: the photo with no edit at all, fitted in the same room.
+  const original = useGallery((st) => st.showOriginal);
+  const originalBox = pic && room.w > 0 && room.h > 0 ? editCss(IDENTITY_EDIT, pic.w, pic.h, room.w, room.h).box : null;
 
   // Kept current for the key and pointer handlers.
   const live = useRef({ draft, aspect, flipped, turned, frameBox });
@@ -93,10 +111,26 @@ export function EditPane({ item }: { item: GalleryItem }) {
     const r = aspectRatio(a, f, live.current.turned);
     if (r !== null) setDraft((d) => ({ ...d, crop: fitCropToAspect(d.crop, r, live.current.turned) }));
   };
+  const flip = () => setDraft((d) => flipEdit(d));
   const reset = () => {
+    // Everything: the crop, the turns, the flip, and light and colour.
     setDraft(IDENTITY_EDIT);
     setAspect('free');
     setFlipped(false);
+  };
+  const setAdjust = (k: keyof Adjust, v: number) => setDraft((d) => ({ ...d, adjust: { ...(d.adjust ?? NO_ADJUST), [k]: v } }));
+  // Auto: the sliders from the photo's own statistics (they can be moved after). A reply for a photo no longer edited is dropped.
+  const [autoBusy, setAutoBusy] = useState(false);
+  const auto = async () => {
+    setAutoBusy(true);
+    try {
+      const a = await galleryApi.autoAdjust(item.path);
+      if (useGallery.getState().editing === item.path) setDraft((d) => ({ ...d, adjust: a }));
+    } catch (e) {
+      useGallery.getState().toast('error', `Couldn't work out Auto: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setAutoBusy(false);
+    }
   };
 
   // The store keeps the edit in progress: selecting another photo now is Done with it.
@@ -106,19 +140,25 @@ export function EditPane({ item }: { item: GalleryItem }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey || inside(e, TYPING)) return;
-      if (e.key === 'Escape') {
+      // The keyboard shortcuts list takes the keys while it is open (Esc there closes it, not the edit).
+      if (e.defaultPrevented || useGallery.getState().shortcutsOpen || inside(e, TYPING)) return;
+      // Edit mode's keys are the table's (shortcuts.ts); \ is useOriginalKey's.
+      const id = matchShortcut('edit', e);
+      if (id === 'edit-cancel') {
         e.preventDefault();
         cancel();
-      } else if (e.key === 'Enter') {
+      } else if (id === 'edit-done') {
         // Enter on a toolbar button reached with the keyboard presses that button (one clicked with the
         // mouse lets go of the focus, below, so Enter is Done after it).
         if (inside(e, 'button')) return;
         e.preventDefault();
         if (!e.repeat) done();
-      } else if (e.key === 'r' || e.key === 'R') {
+      } else if (id === 'edit-rotate') {
         e.preventDefault();
         if (!e.repeat) rotate();
+      } else if (id === 'shortcuts') {
+        e.preventDefault();
+        if (!e.repeat) useGallery.getState().toggleShortcuts();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -154,30 +194,46 @@ export function EditPane({ item }: { item: GalleryItem }) {
   return (
     <div className="gallery-editpane" role="group" aria-label="Edit photo">
       <div className="gallery-edit-stage" ref={stageRef} onContextMenu={(e) => e.preventDefault()}>
-        <div
-          className="gallery-edit-frame"
-          style={frameBox ? { width: frameBox.w, height: frameBox.h, left: (stage.w - frameBox.w) / 2, top: (stage.h - frameBox.h) / 2 } : { visibility: 'hidden' }}
-        >
-          <EditedImage src={thumbUrl(item.key, 'm')} alt={item.fileName} edit={whole} box={frameBox ?? { w: 0, h: 0 }} onPicture={(s) => setPic((p) => p ?? s)} />
-          <div
-            className="gallery-crop-box"
-            aria-label="Crop"
-            style={{ left: `${c.x * 100}%`, top: `${c.y * 100}%`, width: `${c.w * 100}%`, height: `${c.h * 100}%` }}
-            {...dragProps('move')}
-          >
-            {HANDLES.map((h) => (
-              <div key={h} className={`gallery-crop-handle ${h}`} aria-label={`Resize from the ${HANDLE_NAMES[h]}`} {...dragProps(h)} />
-            ))}
+        {/* While \ or Before is held, the original (no edit at all) takes the frame's place; the draft stays as it is. */}
+        {original && originalBox ? (
+          <div className="gallery-edit-frame gallery-edit-original" style={{ width: originalBox.w, height: originalBox.h, left: (stage.w - originalBox.w) / 2, top: (stage.h - originalBox.h) / 2 }}>
+            <EditedImage src={thumbUrl(item.key, 'm')} alt={item.fileName} edit={IDENTITY_EDIT} box={originalBox} />
           </div>
-        </div>
+        ) : (
+          <div
+            className="gallery-edit-frame"
+            style={frameBox ? { width: frameBox.w, height: frameBox.h, left: (stage.w - frameBox.w) / 2, top: (stage.h - frameBox.h) / 2 } : { visibility: 'hidden' }}
+          >
+            <EditedImage src={thumbUrl(item.key, 'm')} alt={item.fileName} edit={whole} box={frameBox ?? { w: 0, h: 0 }} onPicture={(s) => setPic((p) => p ?? s)} />
+            <div
+              className="gallery-crop-box"
+              aria-label="Crop"
+              style={{ left: `${c.x * 100}%`, top: `${c.y * 100}%`, width: `${c.w * 100}%`, height: `${c.h * 100}%` }}
+              {...dragProps('move')}
+            >
+              {HANDLES.map((h) => (
+                <div key={h} className={`gallery-crop-handle ${h}`} aria-label={`Resize from the ${HANDLE_NAMES[h]}`} {...dragProps(h)} />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
-      <div
-        className="gallery-edit-tools"
-        onClick={(e) => {
-          // A mouse click (detail > 0; a key press gives 0) leaves no focus on the button it pressed.
-          if (e.detail > 0) (e.target as HTMLElement).closest('button')?.blur();
-        }}
-      >
+      <div className="gallery-edit-tools gallery-edit-colour" role="group" aria-label="Light and colour" onClick={blurClicked}>
+        {COLOUR_SLIDERS.map(({ key, label }) => {
+          const v = (draft.adjust ?? NO_ADJUST)[key];
+          return (
+            <label key={key} className="gallery-straighten row" title="Double-click to reset">
+              <span>{label}</span>
+              <input type="range" min={-100} max={100} step={1} value={v} aria-label={label} onChange={(e) => setAdjust(key, Number(e.currentTarget.value))} onDoubleClick={() => setAdjust(key, 0)} />
+              <output className="gallery-straighten-value">{`${v > 0 ? '+' : ''}${v}`}</output>
+            </label>
+          );
+        })}
+        <button type="button" className="btn btn-small" onClick={() => void auto()} disabled={autoBusy} title="Set light and colour from the photo itself">
+          Auto
+        </button>
+      </div>
+      <div className="gallery-edit-tools" onClick={blurClicked}>
         {/* The shapes need the photo's own shape: they wait for the picture. */}
         <div className="seg seg-compact" role="group" aria-label="Aspect ratio">
           {ASPECTS.map((a) => (
@@ -201,6 +257,10 @@ export function EditPane({ item }: { item: GalleryItem }) {
             <Icon name="rotate" size={14} />
           </span>
           Rotate 90°
+        </button>
+        <button type="button" className="btn btn-small" onClick={flip} title="Flip horizontally (mirror left to right)">
+          <Icon name="swap" size={14} />
+          Flip
         </button>
         <label className="gallery-straighten row" title="Double-click to reset">
           <span>Straighten</span>

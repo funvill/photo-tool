@@ -25,6 +25,7 @@ const api: PhotoToolDesktopApi = {
   },
   copyText: (text) => ipcRenderer.invoke('gallery:copy-text', String(text)),
   copyImage: (path) => ipcRenderer.invoke('gallery:copy-image', String(path)),
+  copyFiles: (paths) => ipcRenderer.invoke('gallery:copy-files', Array.isArray(paths) ? paths.map(String) : []),
   showPhotoInFolder: (path) => ipcRenderer.invoke('gallery:show-in-folder', String(path)),
   trashPhotos: (paths) => ipcRenderer.invoke('gallery:trash', Array.isArray(paths) ? paths.map(String) : []),
   getMapConsent: () => ipcRenderer.invoke('gallery:get-map-consent'),
@@ -33,6 +34,11 @@ const api: PhotoToolDesktopApi = {
   setEditTarget: (target) => ipcRenderer.invoke('gallery:set-edit-target', target === 'file' ? 'file' : 'info'),
   saveEditToFile: (path, edit) => ipcRenderer.invoke('gallery:save-edit-file', String(path), edit),
   saveEditAs: (path, edit, info) => ipcRenderer.invoke('gallery:save-edit-as', String(path), edit, info),
+  onShowShortcuts: (cb) => {
+    const listener = () => cb();
+    ipcRenderer.on('gallery:show-shortcuts', listener);
+    return () => void ipcRenderer.removeListener('gallery:show-shortcuts', listener);
+  },
   setUnsavedEdits: (count) => ipcRenderer.send('gallery:unsaved-edits', Number(count) || 0),
   onOpenFolder: (cb) => {
     const listener = (_e: Electron.IpcRendererEvent, folder: unknown) => {

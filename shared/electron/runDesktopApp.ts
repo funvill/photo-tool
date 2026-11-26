@@ -47,6 +47,8 @@ export interface DesktopProgram {
   sendHeaders?(session: Electron.Session, version: () => string): void;
   /** The program's own File menu items, before "Open the data folder" and Quit. */
   fileMenu(ctx: ProgramContext): MenuItemConstructorOptions[];
+  /** The program's own Help menu items, after About (a group of their own). */
+  helpMenu?(ctx: ProgramContext): MenuItemConstructorOptions[];
   /** The program's own IPC handlers (the shared desktop:pick-folder is registered already). */
   registerIpc(ctx: ProgramContext): void;
   /** More (or different) fields for the server's start message. */
@@ -513,6 +515,8 @@ export function runDesktopApp(program: DesktopProgram): void {
 
   /** The program's own File menu items, kept for building the menu again (the update items change). */
   let fileItems: MenuItemConstructorOptions[] = [];
+  /** The program's own Help menu items, kept the same way. */
+  let helpItems: MenuItemConstructorOptions[] = [];
   /** `fileItems` (the program's own) come first in the File menu. */
   function buildMenu() {
     const about = () => void showAbout();
@@ -524,8 +528,8 @@ export function runDesktopApp(program: DesktopProgram): void {
       : [];
     // F1 works whenever the window has focus (neither page uses it; if one ever does, the menu wins).
     const aboutItem: MenuItemConstructorOptions = { label: `&About ${NAME}`, accelerator: 'F1', click: about };
-    // Help: the update items, then feedback, then About, each group apart. Later Help items go after these.
-    const help = [updateItems, feedback, [aboutItem]].filter((g) => g.length > 0).flatMap((g, i) => (i === 0 ? g : [{ type: 'separator' }, ...g])) as MenuItemConstructorOptions[];
+    // Help: the update items, then feedback, then About, then the program's own items, each group apart.
+    const help = [updateItems, feedback, [aboutItem], helpItems].filter((g) => g.length > 0).flatMap((g, i) => (i === 0 ? g : [{ type: 'separator' }, ...g])) as MenuItemConstructorOptions[];
     const template: MenuItemConstructorOptions[] = [
       // macOS expects the app menu and the standard Edit menu; Windows and Linux need neither
       // (the page handles its own shortcuts, and text fields work without a menu).
@@ -798,6 +802,7 @@ export function runDesktopApp(program: DesktopProgram): void {
     hardenSession();
     startUpdates();
     fileItems = program.fileMenu(ctx);
+    helpItems = program.helpMenu?.(ctx) ?? [];
     buildMenu();
     registerDesktopApi();
     try {

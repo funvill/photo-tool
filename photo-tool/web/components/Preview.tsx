@@ -1,5 +1,5 @@
 import { useEffect, useState, type MouseEvent } from 'react';
-import { editKey, editPlan, isIdentityEdit, type PhotoEdit } from '../../../shared/core/photoEdit';
+import { editKey, editPlan, isIdentityEdit, NO_ADJUST, type PhotoEdit } from '../../../shared/core/photoEdit';
 import { fullUrl, thumbUrl, type GalleryItem } from '../api';
 import { useShallow } from 'zustand/react/shallow';
 import { pathIndex } from '../../core/preloadWindow';
@@ -41,6 +41,9 @@ export function Preview({ onOpen, onContextMenu }: PreviewProps) {
   const unsaved = useGallery((s) => item !== undefined && item.path in s.pendingEdits);
   const shown = useGallery((s) => (item ? shownEdit(s, item) : null));
   const edit = shown && !isIdentityEdit(shown) ? shown : null;
+  // \ or Before held: the photo with no edit at all (edit mode shows it in its own stage).
+  const original = useGallery((s) => s.showOriginal);
+  const before = (on: boolean) => () => useGallery.getState().setShowOriginal(on);
 
   return (
     <section className="gallery-preview" aria-label="Preview">
@@ -49,10 +52,35 @@ export function Preview({ onOpen, onContextMenu }: PreviewProps) {
           {editing ? (
             <EditPane key={item.key} item={item} />
           ) : (
-            <PreviewPicture item={item} edit={edit} onOpen={onOpen} onContextMenu={onContextMenu} />
+            <PreviewPicture item={item} edit={edit} original={original} onOpen={onOpen} onContextMenu={onContextMenu} />
           )}
           <div className="gallery-preview-caption">
             <strong className="ellipsis" title={item.path}>{item.relDir ? `${item.relDir}/${item.fileName}` : item.fileName}</strong>
+            {(edit || editing) && (
+              <button
+                type="button"
+                className={`btn btn-small gallery-preview-before${original ? ' on' : ''}`}
+                title="Hold to see the original (or hold \)"
+                aria-pressed={original}
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return;
+                  // Held wherever the pointer goes, until it is let go.
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  before(true)();
+                }}
+                onPointerUp={before(false)}
+                onPointerCancel={before(false)}
+                onLostPointerCapture={before(false)}
+                onKeyDown={(e) => (e.key === ' ' || e.key === 'Enter') && !e.repeat && before(true)()}
+                onKeyUp={before(false)}
+                onBlur={before(false)}
+                // Let go of the focus after a click, so Enter is Done again in edit mode.
+                onClick={(e) => e.detail > 0 && e.currentTarget.blur()}
+              >
+                Before
+              </button>
+            )}
+            {original && (edit || editing) && <span className="badge gallery-badge-original">Original</span>}
             {item.info.star === true && <span className="badge gallery-badge-fav">Favourite</span>}
             {item.info.hidden === true && <span className="badge">Hidden</span>}
             {stack && <span className="badge">{stack}</span>}
@@ -113,11 +141,16 @@ function SaveButtons({ item }: { item: GalleryItem }) {
  * 1600 px picture at once when it is decoded there, else the photo's own 400 px picture until it is (or
  * when it is missing). Never the photo before: the caption and its buttons always match the picture.
  */
-function PreviewPicture({ item, edit, onOpen, onContextMenu }: { item: GalleryItem; edit: PhotoEdit | null } & PreviewProps) {
+function PreviewPicture({ item, edit, original, onOpen, onContextMenu }: { item: GalleryItem; edit: PhotoEdit | null; original: boolean } & PreviewProps) {
   const large = thumbUrl(item.key, 'm');
   const picture = usePicture(large, thumbUrl(item.key, 's'));
+  // An edit that keeps the photo's shape (flip, light and colour) draws the original in the same stage, so
+  // holding \ keeps the zoom; one that crops or turns it shows a differently shaped picture, a new stage.
+  const sameShape = !!edit && isIdentityEdit({ ...edit, flip: false, adjust: NO_ADJUST });
+  const shown = original ? null : edit;
+  const stage = original && sameShape ? edit : shown;
   // A new photo, or a new edit, is a new stage: it starts fitted.
-  return <PreviewStage key={`${item.key}:${edit ? editKey(edit) : ''}`} item={item} edit={edit} picture={picture} large={picture === large} onOpen={onOpen} onContextMenu={onContextMenu} />;
+  return <PreviewStage key={`${item.key}:${stage ? editKey(stage) : ''}`} item={item} edit={shown} picture={picture} large={picture === large} onOpen={onOpen} onContextMenu={onContextMenu} />;
 }
 
 /** A decoded picture's size, or null. */

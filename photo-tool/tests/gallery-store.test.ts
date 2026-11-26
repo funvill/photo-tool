@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GalleryItem } from '../server/app';
 
-const { useGallery, connectDesktop, guardUnload, selectVisible, selectStackInfo, selectFiltered, selectFacts, selectStackPlace, menuTargets, shownEdit, selectMeaningStart } = await import('../web/store');
+const { useGallery, connectDesktop, canCopyPhotos, MAX_TRASH_PHOTOS, BIN, guardUnload, selectVisible, selectStackInfo, selectFiltered, selectFacts, selectStackPlace, menuTargets, shownEdit, selectMeaningStart } = await import('../web/store');
 const { IDENTITY_EDIT } = await import('../../shared/core/photoEdit');
 
 function item(over: Partial<GalleryItem> = {}): GalleryItem {
@@ -724,7 +724,7 @@ describe('gallery store: edits', () => {
     g().startEdit(A);
     g().finishEdit({ ...cropped, crop: { ...cropped.crop } });
     expect(g().pendingEdits).toEqual({});
-    expect(shownEdit(g(), g().items[0])).toEqual(cropped);
+    expect(shownEdit(g(), g().items[0])).toEqual({ ...IDENTITY_EDIT, ...cropped });
   });
 
   it('Done with no edit, where none is saved, clears the unsaved edit; where one is saved, keeps "no edit" unsaved', () => {
@@ -877,7 +877,7 @@ describe('gallery store: saving edits', () => {
     expect(patches()).toEqual([{ path: A, patch: { edit: cropped }, job: 'j1' }]);
     expect(g().pendingEdits).toEqual({ [B]: turned });
     expect(g().items[0].info.edit).toEqual(cropped);
-    expect(shownEdit(g(), g().items[0])).toEqual(cropped);
+    expect(shownEdit(g(), g().items[0])).toEqual({ ...IDENTITY_EDIT, ...cropped });
   });
 
   it('info-file mode: saving "no edit" removes the field', async () => {
@@ -1750,5 +1750,307 @@ describe('#2 gallery store: regenerate a description', () => {
     answer({ json: { ...tags, description: 'Too late.' } });
     expect(await done).toBe(false);
     expect(useGallery.getState().items[0].tags.description).toBe('A picture of lake.');
+  });
+});
+
+describe('#9 gallery store: select all, select none, Delete', () => {
+  const g = () => useGallery.getState();
+  const photos = (...names: string[]) => names.map((n) => item({ path: n, fileName: `${n}.jpg`, key: n }));
+  const setup = (items: GalleryItem[], selected: string | null, extra: Record<string, unknown> = {}) =>
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items, sort: 'name', filter: {}, stacked: false, openStacks: [], view: 'grid', selected, selection: selected ? [selected] : [], anchor: selected, ...extra });
+  let disconnect: (() => void) | null = null;
+  afterEach(() => {
+    disconnect?.();
+    disconnect = null;
+  });
+
+  it('selectAll selects every shown photo in one store update, keeping the focused one', () => {
+    setup([...photos('a', 'b', 'c'), item({ path: 'h', key: 'h', info: { hidden: true } })], 'b');
+    let updates = 0;
+    const stop = useGallery.subscribe(() => updates++);
+    g().selectAll();
+    stop();
+    expect(updates).toBe(1);
+    expect(g().selection).toEqual(['a', 'b', 'c']);
+    expect(g().selected).toBe('b');
+    expect(g().anchor).toBe('b');
+  });
+
+  it('selectAll with nothing shown selected focuses the first shown photo', () => {
+    setup(photos('a', 'b'), null);
+    g().selectAll();
+    expect(g().selection).toEqual(['a', 'b']);
+    expect(g().selected).toBe('a');
+  });
+
+  it('selectAll on 10,000 photos is one update', () => {
+    const many = Array.from({ length: 10_000 }, (_, n) => item({ path: `p${String(n).padStart(5, '0')}`, fileName: `p${n}.jpg`, key: `k${n}` }));
+    setup(many, 'p00005');
+    let updates = 0;
+    const stop = useGallery.subscribe(() => updates++);
+    g().selectAll();
+    stop();
+    expect(updates).toBe(1);
+    expect(g().selection).toHaveLength(10_000);
+  });
+
+  it('selectNone clears the selection and the preview', () => {
+    setup(photos('a', 'b'), 'a', { selection: ['a', 'b'] });
+    g().selectNone();
+    expect(g().selected).toBeNull();
+    expect(g().selection).toEqual([]);
+    expect(g().anchor).toBeNull();
+  });
+
+  // #9 fix round 1: every selected photo goes in one call (one confirm for the real count).
+  it('trashSelected sends all 2,000 selected photos at once, and says when some were not moved', async () => {
+    const many = Array.from({ length: 2000 }, (_, n) => item({ path: `p${String(n).padStart(4, '0')}`, fileName: `p${n}.jpg`, key: `k${n}` }));
+    setup(many, 'p0000', { selection: many.map((i) => i.path) });
+    const asked: string[][] = [];
+    disconnect = connectDesktop({
+      trashPhotos: async (paths: string[]) => {
+        asked.push(paths);
+        // One could not be moved, one was no longer a photo of the folder.
+        return { trashed: paths.slice(2), failed: [{ path: paths[0], message: 'No bin on this drive' }], cancelled: false };
+      },
+    });
+    await g().trashSelected();
+    expect(asked.map((a) => a.length)).toEqual([2000]);
+    expect(g().items).toHaveLength(2);
+    expect(g().toasts).toEqual([expect.objectContaining({ kind: 'error', text: `Moved 1998 of 2000 photos to the ${BIN}. 2 were not moved: p0.jpg: No bin on this drive` })]);
+  });
+
+  it(`trashSelected refuses more than ${MAX_TRASH_PHOTOS} photos before asking the desktop app`, async () => {
+    const many = Array.from({ length: MAX_TRASH_PHOTOS + 1 }, (_, n) => item({ path: `p${String(n).padStart(5, '0')}`, fileName: `p${n}.jpg`, key: `k${n}` }));
+    setup(many, 'p00000', { selection: many.map((i) => i.path) });
+    let called = false;
+    disconnect = connectDesktop({ trashPhotos: async () => ((called = true), { trashed: [], failed: [], cancelled: true }) });
+    await g().trashSelected();
+    expect(called).toBe(false);
+    expect(g().items).toHaveLength(MAX_TRASH_PHOTOS + 1);
+    expect(g().toasts).toEqual([expect.objectContaining({ kind: 'error', text: `Delete takes at most ${MAX_TRASH_PHOTOS.toLocaleString('en')} photos at a time. Nothing was moved.` })]);
+  });
+
+  it('trashSelected sends only the shown selected photos, removes them, and selects the next photo', async () => {
+    // 'b' is selected but hidden, so not shown: it is left out.
+    setup([...photos('a'), item({ path: 'b', key: 'b', fileName: 'b.jpg', info: { hidden: true } }), ...photos('c', 'd', 'e')], 'c', { selection: ['b', 'c', 'd'] });
+    const asked: string[][] = [];
+    disconnect = connectDesktop({ trashPhotos: async (paths: string[]) => (asked.push(paths), { trashed: paths, failed: [], cancelled: false }) });
+    await g().trashSelected();
+    expect(asked).toEqual([['c', 'd']]);
+    expect(g().items.map((i) => i.path)).toEqual(['a', 'b', 'e']);
+    expect(g().selected).toBe('e');
+    expect(g().selection).toEqual(['e']);
+  });
+
+  it('trashSelected at the end of the list selects the photo before', async () => {
+    setup(photos('a', 'b', 'c'), 'c');
+    disconnect = connectDesktop({ trashPhotos: async (paths: string[]) => ({ trashed: paths, failed: [], cancelled: false }) });
+    await g().trashSelected();
+    expect(g().selected).toBe('b');
+  });
+
+  it('trashSelected: cancelled moves nothing; a failure is toasted and only what was trashed goes', async () => {
+    setup(photos('a', 'b', 'c'), 'a', { selection: ['a', 'b'] });
+    disconnect = connectDesktop({ trashPhotos: async () => ({ trashed: [], failed: [], cancelled: true }) });
+    await g().trashSelected();
+    expect(g().items).toHaveLength(3);
+    expect(g().toasts).toEqual([]);
+    disconnect();
+    disconnect = connectDesktop({ trashPhotos: async () => ({ trashed: ['a'], failed: [{ path: 'b', message: 'no bin' }], cancelled: false }) });
+    await g().trashSelected();
+    expect(g().items.map((i) => i.path)).toEqual(['b', 'c']);
+    expect(g().toasts).toEqual([expect.objectContaining({ kind: 'error', text: expect.stringMatching(/b\.jpg.*no bin/) })]);
+  });
+
+  it('trashSelected with given paths (the photo menu) sends those; without the desktop app it does nothing', async () => {
+    setup(photos('a', 'b', 'c'), 'a');
+    await g().trashSelected();
+    expect(g().items).toHaveLength(3);
+    const asked: string[][] = [];
+    disconnect = connectDesktop({ trashPhotos: async (paths: string[]) => (asked.push(paths), { trashed: [], failed: [], cancelled: true }) });
+    await g().trashSelected(['b', 'c']);
+    expect(asked).toEqual([['b', 'c']]);
+  });
+
+  it('trashSelected with nothing selected does not ask', async () => {
+    setup(photos('a'), null);
+    const asked: string[][] = [];
+    disconnect = connectDesktop({ trashPhotos: async (paths: string[]) => (asked.push(paths), { trashed: [], failed: [], cancelled: true }) });
+    await g().trashSelected();
+    expect(asked).toEqual([]);
+  });
+});
+
+describe('#9 gallery store: rotate and flip without edit mode', () => {
+  const g = () => useGallery.getState();
+  const photos = (...names: string[]) => names.map((n) => item({ path: n, fileName: `${n}.jpg`, key: n }));
+  const setup = (items: GalleryItem[], selected: string | null, extra: Record<string, unknown> = {}) =>
+    useGallery.setState({ job: 'j1', root: 'D:\\Trip', items, sort: 'name', filter: {}, stacked: false, openStacks: [], view: 'grid', selected, selection: selected ? [selected] : [], anchor: selected, editTarget: 'info', ...extra });
+
+  it("turnSelected('left') gives every selected photo an unsaved quarter turn, as one undo step", async () => {
+    setup(photos('a', 'b', 'c'), 'a', { selection: ['a', 'b', 'c'] });
+    g().turnSelected('left');
+    for (const p of ['a', 'b', 'c']) expect(g().pendingEdits[p]).toMatchObject({ rotate: 270 });
+    expect(g().undoStack).toHaveLength(1);
+    await g().undo();
+    expect(g().pendingEdits).toEqual({});
+  });
+
+  it("turnSelected('right') on the focused photo alone; four turns leave nothing unsaved", () => {
+    setup(photos('a', 'b'), 'b');
+    g().turnSelected('right');
+    expect(Object.keys(g().pendingEdits)).toEqual(['b']);
+    expect(g().pendingEdits.b.rotate).toBe(90);
+    g().turnSelected('right');
+    g().turnSelected('right');
+    g().turnSelected('right');
+    expect(g().pendingEdits).toEqual({});
+  });
+
+  it('rotate keeps the crop: an unsaved crop turns with the photo', () => {
+    const cropped = { ...IDENTITY_EDIT, crop: { x: 0, y: 0, w: 0.5, h: 1 } };
+    setup(photos('a'), 'a', { pendingEdits: { a: cropped } });
+    g().turnSelected('left');
+    expect(g().pendingEdits.a.rotate).toBe(270);
+    expect(g().pendingEdits.a.crop).toEqual({ x: 0, y: 0.5, w: 1, h: 0.5 });
+  });
+
+  it('builds on the saved edit; turning back to it leaves nothing unsaved', () => {
+    setup([item({ path: 'a', key: 'a', info: { edit: { rotate: 90, straighten: 0, crop: { x: 0, y: 0, w: 1, h: 1 } } } })], 'a');
+    g().turnSelected('right');
+    expect(g().pendingEdits.a.rotate).toBe(180);
+    g().turnSelected('left');
+    expect(g().pendingEdits).toEqual({});
+  });
+
+  it('flipSelected mirrors every selected photo; twice leaves nothing unsaved; the colour stays', () => {
+    const coloured = { ...IDENTITY_EDIT, adjust: { brightness: 20, contrast: 0, saturation: 0, warmth: 0 } };
+    setup(photos('a', 'b'), 'a', { selection: ['a', 'b'], pendingEdits: { b: coloured } });
+    g().flipSelected();
+    expect(g().pendingEdits.a.flip).toBe(true);
+    expect(g().pendingEdits.b).toMatchObject({ flip: true, adjust: { brightness: 20 } });
+    g().flipSelected();
+    expect(g().pendingEdits.a).toBeUndefined();
+    expect(g().pendingEdits.b).toMatchObject({ flip: false, adjust: { brightness: 20 } });
+  });
+
+  it('a flip alone counts as a change: Done with only a flip leaves an unsaved edit', () => {
+    setup(photos('a'), 'a');
+    g().startEdit('a');
+    g().finishEdit({ ...IDENTITY_EDIT, flip: true });
+    expect(g().pendingEdits.a?.flip).toBe(true);
+    g().startEdit('a');
+    g().finishEdit({ ...IDENTITY_EDIT, adjust: { brightness: 0, contrast: 5, saturation: 0, warmth: 0 } });
+    expect(g().pendingEdits.a?.adjust?.contrast).toBe(5);
+  });
+
+  it('not while a photo is being edited, and not on a photo whose save is on its way', () => {
+    setup(photos('a', 'b'), 'a', { selection: ['a', 'b'], editing: 'a' });
+    g().turnSelected('left');
+    expect(g().pendingEdits).toEqual({});
+    useGallery.setState({ editing: null, savingPaths: ['a'] });
+    g().flipSelected();
+    expect(Object.keys(g().pendingEdits)).toEqual(['b']);
+    useGallery.setState({ savingPaths: [] });
+  });
+});
+
+describe('#9 gallery store: Ctrl+C', () => {
+  const g = () => useGallery.getState();
+  const photos = (...names: string[]) => names.map((n) => item({ path: n, fileName: `${n}.jpg`, key: n }));
+  const setup = (items: GalleryItem[], selected: string | null, extra: Record<string, unknown> = {}) =>
+    useGallery.setState({ job: 'j1', root: 'D:/Trip', items, sort: 'name', filter: {}, stacked: false, openStacks: [], view: 'grid', selected, selection: selected ? [selected] : [], anchor: selected, ...extra });
+  let disconnect: (() => void) | null = null;
+  afterEach(() => {
+    disconnect?.();
+    disconnect = null;
+  });
+  const fake = () => {
+    const calls: { image: string[]; files: string[][] } = { image: [], files: [] };
+    disconnect = connectDesktop({
+      copyImage: async (p: string) => (calls.image.push(p), { ok: true }),
+      copyFiles: async (ps: string[]) => (calls.files.push(ps), { ok: true, copied: ps.length, dropped: 0 }),
+    });
+    return calls;
+  };
+
+  it('one photo goes as the picture', async () => {
+    setup(photos('a', 'b'), 'b');
+    const calls = fake();
+    expect(canCopyPhotos()).toBe(true);
+    await g().copySelected();
+    expect(calls).toEqual({ image: ['b'], files: [] });
+    expect(g().toasts).toEqual([expect.objectContaining({ kind: 'success', text: 'Copied' })]);
+  });
+
+  it('several go as files, in the order shown, and the toast counts them', async () => {
+    setup(photos('a', 'b', 'c'), 'c', { selection: ['c', 'a'] });
+    const calls = fake();
+    await g().copySelected();
+    expect(calls.files).toEqual([['a', 'c']]);
+    expect(g().toasts).toEqual([expect.objectContaining({ kind: 'success', text: 'Copied 2 photos' })]);
+  });
+
+  it('over 500, the first 500 go and the toast says so', async () => {
+    const many = Array.from({ length: 600 }, (_, n) => item({ path: `p${String(n).padStart(3, '0')}`, fileName: `p${n}.jpg`, key: `k${n}` }));
+    setup(many, 'p000', { selection: many.map((i) => i.path) });
+    const calls = fake();
+    await g().copySelected();
+    expect(calls.files[0]).toHaveLength(500);
+    expect(g().toasts[0].text).toBe('Copied the first 500 of 600 photos');
+  });
+
+  it('a refusal is shown as an error; without the desktop app nothing can be copied', async () => {
+    setup(photos('a', 'b'), 'a', { selection: ['a', 'b'] });
+    disconnect = connectDesktop({ copyImage: async () => ({ ok: true }), copyFiles: async () => ({ ok: false, copied: 0, dropped: 0, error: 'no' }) });
+    await g().copySelected();
+    expect(g().toasts).toEqual([expect.objectContaining({ kind: 'error', text: 'no' })]);
+    disconnect();
+    disconnect = null;
+    expect(canCopyPhotos()).toBe(false);
+  });
+
+  it('where the desktop app copies the paths as text (not Windows), the toast says so', async () => {
+    setup(photos('a', 'b', 'c'), 'a', { selection: ['a', 'b', 'c'] });
+    disconnect = connectDesktop({ copyImage: async () => ({ ok: true }), copyFiles: async (ps: string[]) => ({ ok: true, copied: ps.length, dropped: 0, as: 'paths' as const }) });
+    await g().copySelected();
+    expect(g().toasts).toEqual([expect.objectContaining({ kind: 'success', text: 'Copied the paths of 3 photos as text (copying the files themselves works on Windows only)' })]);
+  });
+});
+
+describe('#9 gallery store: before/after and the shortcut list', () => {
+  const g = () => useGallery.getState();
+  let disconnect: (() => void) | null = null;
+  afterEach(() => {
+    disconnect?.();
+    disconnect = null;
+    useGallery.setState({ showOriginal: false, shortcutsOpen: false });
+  });
+
+  it('showing the original changes nothing else: no edit, no undo step', () => {
+    useGallery.setState({ pendingEdits: { a: { ...IDENTITY_EDIT, rotate: 90 } }, undoStack: [] });
+    g().setShowOriginal(true);
+    expect(g().showOriginal).toBe(true);
+    g().setShowOriginal(false);
+    expect(g().showOriginal).toBe(false);
+    expect(g().pendingEdits).toEqual({ a: { ...IDENTITY_EDIT, rotate: 90 } });
+    expect(g().undoStack).toEqual([]);
+  });
+
+  it('? toggles the list; Help > Keyboard shortcuts opens it', () => {
+    g().toggleShortcuts();
+    expect(g().shortcutsOpen).toBe(true);
+    g().toggleShortcuts();
+    expect(g().shortcutsOpen).toBe(false);
+    let show: (() => void) | null = null;
+    disconnect = connectDesktop({ onShowShortcuts: (cb: () => void) => ((show = cb), () => (show = null)) });
+    show!();
+    expect(g().shortcutsOpen).toBe(true);
+    show!();
+    expect(g().shortcutsOpen).toBe(true);
+    disconnect();
+    disconnect = null;
+    expect(show).toBeNull();
   });
 });

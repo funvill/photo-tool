@@ -8,6 +8,12 @@ import product from '../product.json';
 import { galleryDrag, galleryEditActions, galleryFileActions, galleryFolders, galleryMapConsent, type LaunchData } from './gallery';
 import { OSM_TILE_ORIGIN, galleryRequestAllowed, isMapTileRequest, mapHostResolverRules, mapTileRequestHeaders } from './mapTiles';
 
+/** Tell the page to show its keyboard shortcuts (nothing happens while no page is there to listen). */
+function showShortcuts(ctx: ProgramContext) {
+  const w = ctx.window();
+  if (w && !w.isDestroyed()) w.webContents.send('gallery:show-shortcuts');
+}
+
 function photoTool(): DesktopProgram {
   const selfTest = parseSelfTest(process.argv);
   // The self-test opens a copy of the photos given, made in prepareSelfTest.
@@ -43,6 +49,8 @@ function photoTool(): DesktopProgram {
       });
     },
     fileMenu: (ctx) => foldersFor(ctx).fileMenu(),
+    // Help > Keyboard shortcuts shows the page's own list (the ? key's), after About.
+    helpMenu: (ctx) => [{ label: '&Keyboard shortcuts', click: () => showShortcuts(ctx) }],
     registerIpc: (ctx) => {
       foldersFor(ctx);
       const o = { window: ctx.window, fromApp: ctx.fromApp, serverPort: ctx.serverPort, log: ctx.log };

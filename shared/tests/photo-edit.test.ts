@@ -7,10 +7,14 @@ import {
   editKey,
   editPlan,
   fitCropToAspect,
+  flipEdit,
   isIdentityEdit,
+  NO_ADJUST,
   parseEdit,
   resizeCrop,
   rotateEditLeft,
+  rotateEditRight,
+  storedEdit,
   straightenScale,
   turnedSize,
   type CropRect,
@@ -89,6 +93,8 @@ describe('parseEdit', () => {
       rotate: 90,
       straighten: 45,
       crop: { x: 0, y: 0, w: 1, h: 1 },
+      flip: false,
+      adjust: NO_ADJUST,
     });
   });
 
@@ -265,5 +271,74 @@ describe('editCss', () => {
     expect(c.img.width).toBeCloseTo(200 / s, 2);
     expect(c.img.height).toBeCloseTo(150 / s, 2);
     expect(c.img.transform).toContain('rotate(10deg)');
+  });
+});
+
+describe('#9 flip and light and colour in the edit model', () => {
+  const e: PhotoEdit = { rotate: 90, straighten: 3, crop: { x: 0.1, y: 0.2, w: 0.3, h: 0.4 } };
+
+  it('parseEdit: no flip and no adjust when missing; a flip that is not true or false is invalid', () => {
+    expect(parseEdit({ rotate: 0 })).toEqual({ ...IDENTITY_EDIT, flip: false, adjust: NO_ADJUST });
+    expect(parseEdit({ rotate: 0, flip: 'yes' })).toBeNull();
+    expect(parseEdit({ rotate: 0, flip: true })!.flip).toBe(true);
+  });
+
+  it('parseEdit: adjust values are clamped to -100..100; a field that is not a number is 0', () => {
+    expect(parseEdit({ rotate: 0, adjust: { brightness: 500 } })!.adjust).toEqual({ brightness: 100, contrast: 0, saturation: 0, warmth: 0 });
+    expect(parseEdit({ rotate: 0, adjust: { brightness: 'x', contrast: -300, saturation: 20, warmth: Number.NaN } })!.adjust).toEqual({ brightness: 0, contrast: -100, saturation: 20, warmth: 0 });
+    expect(parseEdit({ rotate: 0, adjust: 'bright' })!.adjust).toEqual(NO_ADJUST);
+  });
+
+  it('isIdentityEdit is false with a flip or any colour change; editKey tells them apart', () => {
+    expect(isIdentityEdit({ ...IDENTITY_EDIT, flip: true })).toBe(false);
+    expect(isIdentityEdit({ ...IDENTITY_EDIT, adjust: { ...NO_ADJUST, warmth: 5 } })).toBe(false);
+    expect(isIdentityEdit({ ...IDENTITY_EDIT, flip: false, adjust: NO_ADJUST })).toBe(true);
+    expect(editKey({ ...e, flip: true })).not.toBe(editKey({ ...e, flip: false }));
+    expect(editKey({ ...e, adjust: { ...NO_ADJUST, brightness: 10 } })).not.toBe(editKey(e));
+    // An edit stored before flip and colour existed keeps its key (the editor's rendered copies stay valid).
+    expect(editKey({ ...e, flip: false, adjust: NO_ADJUST })).toBe(editKey(e));
+  });
+
+  it('storedEdit leaves out a flip that is off and colour that changes nothing', () => {
+    expect(storedEdit({ ...e, flip: false, adjust: NO_ADJUST })).toEqual({ rotate: 90, straighten: 3, crop: e.crop });
+    expect(storedEdit({ ...e, flip: true, adjust: { ...NO_ADJUST, contrast: 20 } })).toEqual({ ...e, flip: true, adjust: { ...NO_ADJUST, contrast: 20 } });
+  });
+
+  it('flipEdit twice is the edit again; it mirrors the crop and the straighten, and swaps a quarter turn', () => {
+    const f = flipEdit(e);
+    expect(f.flip).toBe(true);
+    expect(f.rotate).toBe(270);
+    expect(f.straighten).toBe(-3);
+    expect(f.crop.x).toBeCloseTo(0.6, 9);
+    expect(f.crop.y).toBe(0.2);
+    const back = flipEdit(f);
+    expect(back.flip).toBe(false);
+    expect(back.rotate).toBe(90);
+    expect(back.straighten).toBe(3);
+    expect(back.crop.x).toBeCloseTo(0.1, 9);
+    expect(Object.is(flipEdit(IDENTITY_EDIT).straighten, 0)).toBe(true);
+  });
+
+  it('rotateEditRight four times is the edit again, and undoes rotateEditLeft', () => {
+    let r: PhotoEdit = { ...e, flip: true, adjust: { ...NO_ADJUST, brightness: 30 } };
+    for (let i = 0; i < 4; i++) r = rotateEditRight(r);
+    expect(r.rotate).toBe(90);
+    expect(r.crop.x).toBeCloseTo(0.1, 9);
+    expect(r.crop.y).toBeCloseTo(0.2, 9);
+    expect(r.flip).toBe(true);
+    expect(r.adjust).toEqual({ ...NO_ADJUST, brightness: 30 });
+    const l = rotateEditRight(rotateEditLeft(e));
+    expect(l.rotate).toBe(e.rotate);
+    expect(l.crop.x).toBeCloseTo(e.crop.x, 9);
+    expect(l.crop.w).toBeCloseTo(e.crop.w, 9);
+    // rotateEditLeft keeps flip and colour too.
+    expect(rotateEditLeft({ ...e, flip: true, adjust: { ...NO_ADJUST, warmth: 9 } })).toMatchObject({ flip: true, adjust: { warmth: 9 } });
+  });
+
+  it('editCss mirrors a flipped picture before it is turned; editPlan says to flip', () => {
+    expect(editCss({ ...IDENTITY_EDIT, flip: true }, 400, 300, 400, 300).img.transform).toMatch(/rotate\(0deg\) scaleX\(-1\) translate/);
+    expect(editCss(IDENTITY_EDIT, 400, 300, 400, 300).img.transform).not.toContain('scaleX');
+    expect(editPlan(400, 300, { ...IDENTITY_EDIT, flip: true }).flip).toBe(true);
+    expect(editPlan(400, 300, e).flip).toBe(false);
   });
 });

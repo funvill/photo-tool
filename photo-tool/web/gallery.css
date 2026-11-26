@@ -115,6 +115,10 @@
 .gallery-preview-caption .badge { font-size: 11px; padding: 2px 7px; white-space: nowrap; background: rgba(255, 255, 255, 0.12); }
 .gallery-preview-caption .gallery-badge-fav { background: var(--accent); color: var(--accent-ink); }
 .gallery-preview-caption .gallery-badge-unsaved { background: #d98b2b; color: #111; }
+/* Before (hold to see the original) and the caption while it shows. */
+.gallery-preview-caption .gallery-badge-original { background: #3a7bd5; color: #fff; }
+.gallery-preview-caption .gallery-preview-before { flex: none; user-select: none; touch-action: none; }
+.gallery-preview-caption .gallery-preview-before.on { background: #3a7bd5; color: #fff; }
 .gallery-preview-caption .gallery-preview-edit { flex: none; gap: 5px; }
 /* Save, Save as…, Save all, Revert to original and Edit, at the caption's right end. */
 .gallery-preview-actions { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; }
@@ -167,6 +171,11 @@
 .gallery-straighten input { width: 140px; accent-color: var(--accent); }
 .gallery-straighten-value { min-width: 44px; font-variant-numeric: tabular-nums; }
 .gallery-edit-spacer { flex: 1; }
+/* Light & colour: a row of four sliders and Auto, above the crop and rotate tools. */
+.gallery-edit-colour { border-top: 1px solid rgba(255, 255, 255, 0.08); }
+.gallery-edit-colour .gallery-straighten input { width: 110px; }
+.gallery-edit-colour .gallery-straighten-value { min-width: 34px; }
+.gallery-color-filter { position: absolute; width: 0; height: 0; overflow: hidden; pointer-events: none; }
 .gallery-details-col { flex: none; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--panel); }
 .gallery-details { flex: 1; width: 100%; display: flex; flex-direction: column; min-height: 0; background: var(--panel); border-left: 1px solid var(--line-soft); }
 .gallery-details-head { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line-soft); }

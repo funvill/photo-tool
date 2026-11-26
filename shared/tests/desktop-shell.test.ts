@@ -262,8 +262,10 @@ describe('F1: About', () => {
     expect(code).toMatch(/const repo = githubRepo\(program\.repository\);\s*const feedback: MenuItemConstructorOptions\[\] = repo\s*\? \[\{ label: 'Send &feedback on GitHub…', accelerator: 'F2', click: \(\) => void shell\.openExternal\(feedbackUrl\(repo, \{ productName: NAME, version: app\.getVersion\(\), runtime: runtime\(\) \}\)\) \}\]\s*: \[\];/);
   });
 
-  it('Help: the update items, then feedback (F2), then About (F1), each group apart', () => {
-    expect(code).toMatch(/const help = \[updateItems, feedback, \[aboutItem\]\]\.filter\(\(g\) => g\.length > 0\)\.flatMap\(\(g, i\) => \(i === 0 \? g : \[\{ type: 'separator' \}, \.\.\.g\]\)\)/);
+  it("Help: the update items, then feedback (F2), then About (F1), then the program's own items, each group apart", () => {
+    // The program's items are kept like the File menu's: the menu is built again when the update items change.
+    expect(code).toMatch(/helpItems = program\.helpMenu\?\.\(ctx\) \?\? \[\];\s*buildMenu\(\);/);
+    expect(code).toMatch(/const help = \[updateItems, feedback, \[aboutItem\], helpItems\]\.filter\(\(g\) => g\.length > 0\)\.flatMap\(\(g, i\) => \(i === 0 \? g : \[\{ type: 'separator' \}, \.\.\.g\]\)\)/);
     expect(code).toMatch(/\{ label: '&Help', submenu: help \}/);
   });
 

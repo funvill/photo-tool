@@ -2,12 +2,20 @@
 // and the page uses `editCss`; both go through `straightenScale`, so what you see is what gets saved.
 //
 // Order of steps, on the upright photo (EXIF orientation already applied):
+//   0. mirror left to right when `flip` is set;
 //   1. turn clockwise by `rotate`;
 //   2. turn by `straighten` about the centre, then keep the largest centred rectangle of the step 1
 //      aspect ratio that lies wholly inside the turned picture (the "frame");
-//   3. cut out `crop`, given as fractions of the frame.
+//   3. cut out `crop`, given as fractions of the frame;
+//   4. change light and colour by `adjust` (core/colorAdjust.ts: one matrix for the page and sharp).
+//
+// `flip` and `adjust` came later: an edit stored without them has neither (parseEdit fills them in), and
+// an older reader that ignores them still shows the crop and the turn.
 
+import { isNoAdjust, NO_ADJUST, parseAdjust, ADJUST_KEYS, type Adjust } from './colorAdjust';
 import { formatOf, type SaveFormat } from './mediaFormats';
+
+export { NO_ADJUST, type Adjust };
 
 export type QuarterTurn = 0 | 90 | 180 | 270;
 
@@ -25,9 +33,13 @@ export interface PhotoEdit {
   /** Extra turn in degrees, clockwise, -45 to 45. */
   straighten: number;
   crop: CropRect;
+  /** Mirrored left to right, on the upright photo before the turn. Missing: not mirrored. */
+  flip?: boolean;
+  /** Light and colour. Missing: unchanged. */
+  adjust?: Adjust;
 }
 
-export const IDENTITY_EDIT: PhotoEdit = { rotate: 0, straighten: 0, crop: { x: 0, y: 0, w: 1, h: 1 } };
+export const IDENTITY_EDIT: PhotoEdit = { rotate: 0, straighten: 0, crop: { x: 0, y: 0, w: 1, h: 1 }, flip: false, adjust: NO_ADJUST };
 
 const MAX_STRAIGHTEN = 45;
 /** Smallest crop `parseEdit` accepts, as a fraction. */
@@ -58,7 +70,16 @@ export function parseEdit(raw: unknown): PhotoEdit | null {
     const h = clamp(c.h, MIN_PARSED, 1);
     crop = { x: clamp(c.x, 0, 1 - w), y: clamp(c.y, 0, 1 - h), w, h };
   }
-  return { rotate: r.rotate, straighten, crop };
+  if (r.flip !== undefined && typeof r.flip !== 'boolean') return null;
+  return { rotate: r.rotate, straighten, crop, flip: r.flip === true, adjust: parseAdjust(r.adjust) };
+}
+
+/** The edit as it is written to photoinfo.json: a flip that is off and colour that changes nothing are left out. */
+export function storedEdit(e: PhotoEdit): PhotoEdit {
+  const out: PhotoEdit = { rotate: e.rotate, straighten: e.straighten, crop: e.crop };
+  if (e.flip) out.flip = true;
+  if (!isNoAdjust(e.adjust)) out.adjust = e.adjust;
+  return out;
 }
 
 /** True when the edit changes nothing (it is the same as having no edit at all). */
@@ -66,6 +87,8 @@ export function isIdentityEdit(e: PhotoEdit): boolean {
   return (
     e.rotate === 0 &&
     e.straighten === 0 &&
+    !e.flip &&
+    isNoAdjust(e.adjust) &&
     Math.abs(e.crop.x) <= SAME &&
     Math.abs(e.crop.y) <= SAME &&
     Math.abs(e.crop.w - 1) <= SAME &&
@@ -73,10 +96,27 @@ export function isIdentityEdit(e: PhotoEdit): boolean {
   );
 }
 
+/** True when two edits are the same to 1e-4 (a missing edit counts as none). */
+export function sameEdit(a: PhotoEdit | null, b: PhotoEdit | null): boolean {
+  const x = a ?? IDENTITY_EDIT;
+  const y = b ?? IDENTITY_EDIT;
+  const near = (p: number, q: number) => Math.abs(p - q) <= SAME;
+  const ax = x.adjust ?? NO_ADJUST;
+  const ay = y.adjust ?? NO_ADJUST;
+  return (
+    x.rotate === y.rotate && near(x.straighten, y.straighten) && !x.flip === !y.flip &&
+    near(x.crop.x, y.crop.x) && near(x.crop.y, y.crop.y) && near(x.crop.w, y.crop.w) && near(x.crop.h, y.crop.h) &&
+    ADJUST_KEYS.every((k) => near(ax[k], ay[k]))
+  );
+}
+
 /** A short stable string for an edit, so equal edits share a cache key. Numbers are rounded to 1e-4. */
 export function editKey(e: PhotoEdit): string {
   const n = (v: number): number => Math.round(v * 1e4);
-  const text = [e.rotate, n(e.straighten), n(e.crop.x), n(e.crop.y), n(e.crop.w), n(e.crop.h)].join(',');
+  // Without a flip or colour the text is what it was before they existed, so older keys stay the same.
+  let text = [e.rotate, n(e.straighten), n(e.crop.x), n(e.crop.y), n(e.crop.w), n(e.crop.h)].join(',');
+  if (e.flip) text += ',flip';
+  if (!isNoAdjust(e.adjust)) text += `,adjust:${ADJUST_KEYS.map((k) => n(e.adjust![k])).join(',')}`;
   // FNV-1a, 32 bit.
   let h = 0x811c9dc5;
   for (let i = 0; i < text.length; i++) {
@@ -104,14 +144,15 @@ export function turnedSize(w: number, h: number, rotate: QuarterTurn): { w: numb
 }
 
 /**
- * The steps in pixels, for an upright picture of w x h: turn by `rotate`, turn by `straighten` and shrink to
- * `frame`, cut `extract` out of the frame. `out` is the size of the result.
+ * The steps in pixels, for an upright picture of w x h: mirror when `flip`, turn by `rotate`, turn by
+ * `straighten` and shrink to `frame`, cut `extract` out of the frame. `out` is the size of the result.
  */
 export function editPlan(
   w: number,
   h: number,
   e: PhotoEdit,
 ): {
+  flip: boolean;
   rotate: QuarterTurn;
   straighten: number;
   frame: { w: number; h: number };
@@ -127,6 +168,7 @@ export function editPlan(
   const width = clamp(Math.round(e.crop.w * fw), 1, fw - left);
   const height = clamp(Math.round(e.crop.h * fh), 1, fh - top);
   return {
+    flip: e.flip === true,
     rotate: e.rotate,
     straighten: e.straighten,
     frame: { w: fw, h: fh },
@@ -139,10 +181,32 @@ export function editPlan(
 export function rotateEditLeft(e: PhotoEdit): PhotoEdit {
   const { x, y, w, h } = e.crop;
   return {
+    ...e,
     rotate: ((e.rotate + 270) % 360) as QuarterTurn,
     straighten: e.straighten,
     // A point (px, py) of the frame lands at (py, 1 - px) after the turn.
     crop: { x: y, y: 1 - x - w, w: h, h: w },
+  };
+}
+
+/** Turns the edit 90 degrees clockwise, keeping the same part of the picture cropped. */
+export function rotateEditRight(e: PhotoEdit): PhotoEdit {
+  return rotateEditLeft(rotateEditLeft(rotateEditLeft(e)));
+}
+
+/**
+ * Mirrors the edited result left to right. The flip itself sits before the turn (step 0), so mirroring
+ * what is shown also turns the other way (90 and 270 swap), straightens the other way, and mirrors the crop.
+ * A vertical flip is this plus 180 degrees.
+ */
+export function flipEdit(e: PhotoEdit): PhotoEdit {
+  const { x, y, w, h } = e.crop;
+  return {
+    ...e,
+    flip: !e.flip,
+    rotate: ((360 - e.rotate) % 360) as QuarterTurn,
+    straighten: e.straighten === 0 ? 0 : -e.straighten,
+    crop: { x: 1 - x - w, y, w, h },
   };
 }
 
@@ -278,12 +342,14 @@ export function editCss(
   const tx = (fw / 2 - e.crop.x * fw) * f;
   const ty = (fh / 2 - e.crop.y * fh) * f;
   const deg = e.rotate + e.straighten;
+  // The mirror comes first on the upright picture: about its centre, before it is turned.
+  const mirror = e.flip ? ' scaleX(-1)' : '';
   return {
     box: { w: round4(outW * f), h: round4(outH * f) },
     img: {
       width: round4(width),
       height: round4(height),
-      transform: `translate(${round4(tx)}px, ${round4(ty)}px) rotate(${round4(deg)}deg) translate(${round4(-width / 2)}px, ${round4(-height / 2)}px)`,
+      transform: `translate(${round4(tx)}px, ${round4(ty)}px) rotate(${round4(deg)}deg)${mirror} translate(${round4(-width / 2)}px, ${round4(-height / 2)}px)`,
     },
   };
 }

@@ -3,6 +3,7 @@ import { Icon } from '../../../shared/web/components/Icon';
 import { desktop } from '../../../shared/web/desktop';
 import { useShallow } from 'zustand/react/shallow';
 import { editActions, menuTargets, useGallery } from '../store';
+import { keyHint } from '../shortcuts';
 
 // Right-click menu on a photo (a tile or the preview), in the editor's .ctx-menu style. Copy to
 // clipboard and Show in file explorer act on the photo clicked; Copy path, Favourite, Hide and Delete
@@ -21,14 +22,9 @@ export interface PhotoMenuProps {
 const SETTLE_MS = 200;
 
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
-const fileName = (path: string) => path.split(/[\\/]/).pop() ?? path;
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-/** The review keys (move, favourite, hide, edit): they act on the photos, so the menu goes away. */
-const REVIEW_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'f', 'F', 'h', 'H', 'e', 'E']);
-
-/** Where a deleted photo goes, named as the desktop app's confirm names it. */
-const BIN = typeof navigator !== 'undefined' && /Windows/i.test(navigator.userAgent) ? 'Recycle Bin' : 'Trash';
+/** The review keys (move, favourite, hide, edit, delete): they act on the photos, so the menu goes away. */
+const REVIEW_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'f', 'F', 'h', 'H', 'e', 'E', 'Delete', '[', ']']);
 
 /**
  * Text onto the clipboard. In the desktop app the main process does it (the app turns every web
@@ -88,20 +84,8 @@ async function showInFolder(path: string) {
   }
 }
 
-async function trash(path: string) {
-  const { toast } = useGallery.getState();
-  try {
-    const r = await desktop!.trashPhotos!(menuTargets(path));
-    if (r.cancelled) return;
-    if (r.trashed.length) useGallery.getState().removeItems(r.trashed);
-    if (r.failed.length) {
-      const first = r.failed[0];
-      toast('error', `Couldn't move ${r.failed.length === 1 ? fileName(first.path) : plural(r.failed.length, 'photo')} to the ${BIN}: ${first.message}`);
-    }
-  } catch (e) {
-    toast('error', `Couldn't delete: ${message(e)}`);
-  }
-}
+/** Delete, as the Delete key does it, on the photos the menu acts on. */
+const trash = (path: string) => useGallery.getState().trashSelected(menuTargets(path));
 
 /** Edit mode on the photo right-clicked (it is the selected one: a right-click selects it). */
 function edit(path: string) {
@@ -119,6 +103,8 @@ export function PhotoMenu({ x, y, path, onClose }: PhotoMenuProps) {
   const hidden = selectedItem?.info.hidden === true;
   // Being edited, or its save is on its way (an edit started now would be lost when it lands).
   const editing = useGallery((s) => s.editing === path || s.savingPaths.includes(path));
+  // Rotate and flip wait while a photo is in edit mode (Done or Cancel first).
+  const anyEditing = useGallery((s) => s.editing !== null);
   // Save, Save as…, Save all and Revert to original, as the preview caption offers them for this photo.
   const actions = useGallery(useShallow((s) => {
     const item = s.items.find((i) => i.path === path);
@@ -171,7 +157,10 @@ export function PhotoMenu({ x, y, path, onClose }: PhotoMenuProps) {
 
   return (
     <div className="ctx-menu" ref={ref} style={pos} role="menu" aria-label="Photo" onContextMenu={(e) => e.preventDefault()}>
-      <MenuItem icon="crop" label="Edit" hint="E" disabled={editing} onClick={go(() => edit(path))} />
+      <MenuItem icon="crop" label="Edit" hint={keyHint('edit')} disabled={editing} onClick={go(() => edit(path))} />
+      <MenuItem icon="rotate-left" label="Rotate left" hint={keyHint('rotate-left')} disabled={anyEditing} onClick={go(() => useGallery.getState().turnSelected('left'))} />
+      <MenuItem icon="rotate" label="Rotate right" hint={keyHint('rotate-right')} disabled={anyEditing} onClick={go(() => useGallery.getState().turnSelected('right'))} />
+      <MenuItem icon="swap" label="Flip horizontally" disabled={anyEditing} onClick={go(() => useGallery.getState().flipSelected())} />
       {actions?.save && (
         <>
           <MenuItem icon="check" label="Save" disabled={saving || !!actions.saveBlocked} title={actions.saveBlocked ?? actions.saveTitle} onClick={go(() => useGallery.getState().saveEdit(path))} />
@@ -181,14 +170,14 @@ export function PhotoMenu({ x, y, path, onClose }: PhotoMenuProps) {
       {!!actions?.saveAll && <MenuItem icon="check" label={`Save all (${actions.saveAll})`} disabled={saving} onClick={go(() => useGallery.getState().saveAllEdits())} />}
       {actions?.revert && <MenuItem icon="undo" label="Revert to original" disabled={saving} onClick={go(() => useGallery.getState().revertEdit(path))} />}
       <div className="ctx-sep" />
-      <MenuItem icon="image" label="Copy to clipboard" disabled={!desktop?.copyImage} onClick={go(() => copyImage(path))} />
+      <MenuItem icon="image" label="Copy to clipboard" hint={keyHint('copy')} disabled={!desktop?.copyImage} onClick={go(() => copyImage(path))} />
       <MenuItem icon="copy" label="Copy path to clipboard" onClick={go(() => copyPaths(path))} />
       <MenuItem icon="folder" label="Show in file explorer" disabled={!desktop?.showPhotoInFolder} onClick={go(() => showInFolder(path))} />
       <div className="ctx-sep" />
-      <MenuItem icon="star" label={starred ? 'Unfavourite' : 'Favourite'} hint="F" onClick={go(() => toggleFlag('star'))} />
-      <MenuItem icon={hidden ? 'eye' : 'eye-off'} label={hidden ? 'Unhide' : 'Hide'} hint="H" onClick={go(() => toggleFlag('hidden'))} />
+      <MenuItem icon="star" label={starred ? 'Unfavourite' : 'Favourite'} hint={keyHint('favourite')} onClick={go(() => toggleFlag('star'))} />
+      <MenuItem icon={hidden ? 'eye' : 'eye-off'} label={hidden ? 'Unhide' : 'Hide'} hint={keyHint('hide')} onClick={go(() => toggleFlag('hidden'))} />
       <div className="ctx-sep" />
-      <MenuItem icon="trash" label="Delete" danger disabled={!desktop?.trashPhotos} onClick={go(() => trash(path))} />
+      <MenuItem icon="trash" label="Delete" hint={keyHint('delete')} danger disabled={!desktop?.trashPhotos} onClick={go(() => trash(path))} />
     </div>
   );
 }

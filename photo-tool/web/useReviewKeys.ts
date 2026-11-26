@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { gridStep } from '../core/galleryViewer';
-import { selectablePaths, selectFiltered, selectVisible, useGallery } from './store';
+import { canCopyPhotos, selectablePaths, selectFiltered, selectVisible, useGallery } from './store';
+import { matchShortcut } from './shortcuts';
 
 /** Where keys belong to what has focus (typing, a menu, a dialog), not to the review. */
 const TYPING = 'input, textarea, select, [contenteditable="true"], [role="dialog"]';
@@ -29,29 +30,49 @@ function stepFrom(list: { path: string }[], unfolded: { path: string }[], select
 }
 
 /**
- * The review keys, one window listener for the whole screen (it works whichever view shows the photos):
- * Left/Right, Home and End move the selection through the shown list; Up and Down nudge the photo score
- * of the selected photo (every selected one when several are) by +1 / −1; F favourites (stars) and H
- * hides the same photos; Enter or Space opens the selected photo in the viewer; E opens edit mode on it;
- * Ctrl+Z undoes the last change. Not while typing (Ctrl+Z there is the field's own), while the viewer or a
- * dialog is open, or while a photo is being edited (edit mode has its own keys); no other key with Ctrl,
- * Alt or Meta held.
+ * The review keys, one window listener for the whole screen (it works whichever view shows the photos).
+ * Which key does what is the shortcut table's (shortcuts.ts, place 'grid'), the same table the ? list
+ * shows: Left/Right, Home and End move the selection through the shown list; Up and Down nudge the photo
+ * score of the selected photo (every selected one when several are) by +1 / −1; F favourites (stars) and
+ * H hides the same photos; Enter or Space opens the selected photo in the viewer; E opens edit mode on it;
+ * [ and ] turn the selected photos a quarter anticlockwise or clockwise (an unsaved edit, as Done in edit
+ * mode leaves one); Delete sends the selected photos to the Recycle Bin (after the desktop app's confirm);
+ * Ctrl+A selects every shown photo and Ctrl+D none; Ctrl+C copies the selected photos (desktop app);
+ * Ctrl+Z undoes the last change; ? shows the list of keys. Not while typing (Ctrl+Z there is the field's
+ * own), while the viewer, the list of keys or a dialog is open, or while a photo is being edited (edit
+ * mode has its own keys).
  */
 export function useReviewKeys(onOpen: (path: string) => void) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
       const s = useGallery.getState();
-      if (s.viewing !== null || s.tidyOpen || s.settingsOpen || s.leaving !== null || s.editing !== null) return;
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+      if (s.viewing !== null || s.tidyOpen || s.settingsOpen || s.shortcutsOpen || s.leaving !== null || s.editing !== null) return;
+      const id = matchShortcut('grid', e);
+      if (id === null) return;
+      if (id === 'undo') {
         if (inside(e, TYPING)) return;
         e.preventDefault();
         void s.undo();
         return;
       }
-      if (e.ctrlKey || e.altKey || e.metaKey) return;
+      // Ctrl+A selects every shown photo, Ctrl+D none. In a field they stay the field's own.
+      if (id === 'select-all' || id === 'select-none') {
+        if (inside(e, TYPING)) return;
+        e.preventDefault();
+        if (id === 'select-all') s.selectAll();
+        else s.selectNone();
+        return;
+      }
+      // Ctrl+C copies the selected photos (desktop app only). Selected text, or a field, keeps its own copy.
+      if (id === 'copy') {
+        if (inside(e, TYPING) || !canCopyPhotos() || (window.getSelection()?.toString() ?? '') !== '') return;
+        e.preventDefault();
+        if (!e.repeat) void s.copySelected();
+        return;
+      }
 
-      if (e.key === 'Enter' || e.key === ' ') {
+      if (id === 'open') {
         if (e.repeat || !s.selected || inside(e, PRESSABLE)) return;
         // On the map the selected photo may be folded into a stack: the viewer unfolds it.
         if (!selectablePaths(s).includes(s.selected)) return;
@@ -61,28 +82,46 @@ export function useReviewKeys(onOpen: (path: string) => void) {
       }
       if (inside(e, TYPING)) return;
 
-      if (e.key === 'e' || e.key === 'E') {
-        // Only a photo the preview shows (one the scan has read, not filtered out).
-        const path = s.selected;
-        if (path === null || !selectFiltered(s).some((i) => i.path === path)) return;
-        e.preventDefault();
-        if (!e.repeat) s.startEdit(path);
-        return;
-      }
-
-      const flag = e.key === 'f' || e.key === 'F' ? 'star' : e.key === 'h' || e.key === 'H' ? 'hidden' : null;
-      if (flag) {
-        e.preventDefault();
-        if (!e.repeat) void s.toggleFlag(flag);
-        return;
-      }
-
-      if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
-        if (s.selected === null && s.selection.length === 0) return;
-        e.preventDefault();
-        // One press, one point: a held key does not repeat (each tap is its own write and undo step).
-        if (!e.repeat) s.nudgeScore(e.key === 'ArrowUp' ? 1 : -1);
-        return;
+      switch (id) {
+        case 'shortcuts':
+          e.preventDefault();
+          if (!e.repeat) s.toggleShortcuts();
+          return;
+        case 'edit': {
+          // Only a photo the preview shows (one the scan has read, not filtered out).
+          const path = s.selected;
+          if (path === null || !selectFiltered(s).some((i) => i.path === path)) return;
+          e.preventDefault();
+          if (!e.repeat) s.startEdit(path);
+          return;
+        }
+        // [ and ] turn the selected photos anticlockwise and clockwise, as an unsaved edit. One press, one turn.
+        case 'rotate-left':
+        case 'rotate-right':
+          e.preventDefault();
+          if (!e.repeat) s.turnSelected(id === 'rotate-left' ? 'left' : 'right');
+          return;
+        case 'delete':
+          e.preventDefault();
+          if (!e.repeat) void s.trashSelected();
+          return;
+        case 'favourite':
+        case 'hide':
+          e.preventDefault();
+          if (!e.repeat) void s.toggleFlag(id === 'favourite' ? 'star' : 'hidden');
+          return;
+        case 'score':
+          if (s.selected === null && s.selection.length === 0) return;
+          e.preventDefault();
+          // One press, one point: a held key does not repeat (each tap is its own write and undo step).
+          if (!e.repeat) s.nudgeScore(e.key === 'ArrowUp' ? 1 : -1);
+          return;
+        case 'move':
+        case 'first-last':
+          break;
+        default:
+          // \ (hold to see the original) is useOriginalKey's.
+          return;
       }
 
       const list = selectVisible(s);
@@ -103,4 +142,46 @@ export function useReviewKeys(onOpen: (path: string) => void) {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [onOpen]);
+}
+
+/** As TYPING, but a slider keeps no keys for itself: \ and ? work straight after moving one from the keyboard. */
+const TYPING_TEXT = 'input:not([type="range"]), textarea, select, [contenteditable="true"], [role="dialog"]';
+
+/**
+ * Hold \ (backslash) to see the photo with no edit at all, in the preview and in edit mode (the store's
+ * showOriginal). Let go, or leave the window, and the edit shows again; nothing changes. Not while typing,
+ * nor in the viewer (it always shows the photo unedited) or a dialog. The key let go is matched by its
+ * code, so pressing Shift while holding it cannot leave the original showing.
+ */
+export function useOriginalKey() {
+  useEffect(() => {
+    let held: string | null = null;
+    const down = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      const s = useGallery.getState();
+      if (s.viewing !== null || s.tidyOpen || s.settingsOpen || s.shortcutsOpen || s.leaving !== null) return;
+      if (matchShortcut(s.editing !== null ? 'edit' : 'grid', e) !== 'original' || inside(e, TYPING_TEXT)) return;
+      e.preventDefault();
+      held = e.code;
+      s.setShowOriginal(true);
+    };
+    const up = (e: KeyboardEvent) => {
+      if (held === null || (e.code !== held && e.key !== '\\')) return;
+      held = null;
+      useGallery.getState().setShowOriginal(false);
+    };
+    const leave = () => {
+      held = null;
+      useGallery.getState().setShowOriginal(false);
+    };
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    window.addEventListener('blur', leave);
+    return () => {
+      window.removeEventListener('keydown', down);
+      window.removeEventListener('keyup', up);
+      window.removeEventListener('blur', leave);
+      leave();
+    };
+  }, []);
 }
