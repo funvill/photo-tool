@@ -30,11 +30,6 @@ export function viewerStep(index: number, count: number, key: string): ViewerSte
   }
 }
 
-/** The photos to load ahead of time: the next two, then the previous two, those that exist. */
-export function viewerNeighbours(index: number, count: number): number[] {
-  return [index + 1, index + 2, index - 1, index - 2].filter((i) => i >= 0 && i < count);
-}
-
 export interface GallerySelection {
   /** The photo the details panel shows. */
   selected: string | null;

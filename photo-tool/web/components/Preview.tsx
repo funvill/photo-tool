@@ -2,6 +2,8 @@ import { useEffect, useState, type MouseEvent } from 'react';
 import { editKey, editPlan, isIdentityEdit, type PhotoEdit } from '../../../shared/core/photoEdit';
 import { fullUrl, thumbUrl, type GalleryItem } from '../api';
 import { useShallow } from 'zustand/react/shallow';
+import { pathIndex } from '../../core/preloadWindow';
+import { imageCache, usePicture } from '../imageCache';
 import { editActions, selectStackPlace, shownEdit, useFilteredItems, useGallery } from '../store';
 import { Icon } from '../../../shared/web/components/Icon';
 import { EditPane } from './EditPane';
@@ -26,7 +28,8 @@ export function Preview({ onOpen, onContextMenu }: PreviewProps) {
   // A photo folded into a stack can be selected too (a marker on the map): it is looked for among every shown photo.
   const filtered = useFilteredItems();
   const selected = useGallery((s) => s.selected);
-  const item = selected === null ? undefined : filtered.find((i) => i.path === selected);
+  const at = selected === null ? undefined : pathIndex(filtered).get(selected);
+  const item = at === undefined ? undefined : filtered[at];
   // Its place in the stack, folded or not: the face is first, the other members follow it in the shown order.
   const stack = useGallery((s) => {
     const p = item ? selectStackPlace(s, item.path) : null;
@@ -46,8 +49,7 @@ export function Preview({ onOpen, onContextMenu }: PreviewProps) {
           {editing ? (
             <EditPane key={item.key} item={item} />
           ) : (
-            // A new photo, or a new edit, is a new stage: it starts fitted.
-            <PreviewStage key={`${item.key}:${edit ? editKey(edit) : ''}`} item={item} edit={edit} onOpen={onOpen} onContextMenu={onContextMenu} />
+            <PreviewPicture item={item} edit={edit} onOpen={onOpen} onContextMenu={onContextMenu} />
           )}
           <div className="gallery-preview-caption">
             <strong className="ellipsis" title={item.path}>{item.relDir ? `${item.relDir}/${item.fileName}` : item.fileName}</strong>
@@ -107,14 +109,31 @@ function SaveButtons({ item }: { item: GalleryItem }) {
 }
 
 /**
+ * The photo's stage, fed from the image cache (which the grid keeps warm around the selected photo): the
+ * 1600 px picture at once when it is decoded there, else the photo's own 400 px picture until it is (or
+ * when it is missing). Never the photo before: the caption and its buttons always match the picture.
+ */
+function PreviewPicture({ item, edit, onOpen, onContextMenu }: { item: GalleryItem; edit: PhotoEdit | null } & PreviewProps) {
+  const large = thumbUrl(item.key, 'm');
+  const picture = usePicture(large, thumbUrl(item.key, 's'));
+  // A new photo, or a new edit, is a new stage: it starts fitted.
+  return <PreviewStage key={`${item.key}:${edit ? editKey(edit) : ''}`} item={item} edit={edit} picture={picture} large={picture === large} onOpen={onOpen} onContextMenu={onContextMenu} />;
+}
+
+/** A decoded picture's size, or null. */
+function sizeOf(img: { naturalWidth: number; naturalHeight: number } | undefined): { w: number; h: number } | null {
+  return img && img.naturalWidth > 0 ? { w: img.naturalWidth, h: img.naturalHeight } : null;
+}
+
+/**
  * The picture in its stage. The stage is measured and the picture placed by a transform, so it always fits
  * (a grid row that grew to the picture's height used to crop it). Zoomed in, the full-size picture is swapped
  * in once it is needed, and a mini map shows where the view is. An edited photo is zoomed the same way: the
  * edited result is what fits, zooms and pans.
  */
-function PreviewStage({ item, edit, onOpen, onContextMenu }: { item: GalleryItem; edit: PhotoEdit | null } & PreviewProps) {
-  const [small, setSmall] = useState(false);
-  const [natural, setNatural] = useState<{ w: number; h: number } | null>(null);
+function PreviewStage({ item, edit, picture, large, onOpen, onContextMenu }: { item: GalleryItem; edit: PhotoEdit | null; picture: string; large: boolean } & PreviewProps) {
+  // Known at once when the picture is in the cache: the stage is placed on its first frame, not hidden until a load event.
+  const [natural, setNatural] = useState<{ w: number; h: number } | null>(() => sizeOf(imageCache.get(picture)));
   const [full, setFull] = useState(false);
   // What is shown: the 1600 px picture, or the edited result cut from it (in its pixels).
   const shape = natural && edit ? editPlan(natural.w, natural.h, edit).out : natural;
@@ -122,7 +141,8 @@ function PreviewStage({ item, edit, onOpen, onContextMenu }: { item: GalleryItem
 
   // Past the 1600 px picture's own detail: load the full picture, and swap it in when it has arrived.
   // The picture is always drawn at its fitted size and scaled, so the swap does not move the view.
-  const needFull = z.view !== null && z.fit !== null && shape !== null && z.fit.w * z.view.zoom > shape.w;
+  // Not for the 400 px stand-in shown while the 1600 px picture loads, unless zoomed in.
+  const needFull = z.view !== null && z.fit !== null && shape !== null && (large || z.view.zoom > 1) && z.fit.w * z.view.zoom > shape.w;
   useEffect(() => {
     if (!needFull || full) return;
     const probe = new Image();
@@ -133,7 +153,7 @@ function PreviewStage({ item, edit, onOpen, onContextMenu }: { item: GalleryItem
     };
   }, [needFull, full, item.path, item.key]);
 
-  const src = full ? fullUrl(item.path, item.key) : thumbUrl(item.key, small ? 's' : 'm');
+  const src = full ? fullUrl(item.path, item.key) : picture;
   const v = z.view;
   const zoomedIn = v !== null && v.zoom > 1;
   const placed = v && z.fit ? { width: z.fit.w, height: z.fit.h, transform: `translate(${v.x}px, ${v.y}px) scale(${v.zoom})` } : { visibility: 'hidden' as const };
@@ -155,7 +175,6 @@ function PreviewStage({ item, edit, onOpen, onContextMenu }: { item: GalleryItem
           style={placed}
           // The shape comes from the 1600 px picture only: the full one is the same shape.
           onPicture={(s) => !full && setNatural(s)}
-          onError={() => !full && setSmall(true)}
         />
       ) : (
         <img
@@ -167,7 +186,6 @@ function PreviewStage({ item, edit, onOpen, onContextMenu }: { item: GalleryItem
             // The shape comes from the 1600 px picture only: the full one is the same shape.
             if (!full) setNatural({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight });
           }}
-          onError={() => !full && setSmall(true)}
           style={placed}
         />
       )}

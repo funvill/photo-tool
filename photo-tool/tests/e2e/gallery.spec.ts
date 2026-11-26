@@ -1397,3 +1397,162 @@ test.describe('#3 Filters panel, chips, query words and Showing X of Y', () => {
     }
   });
 });
+
+test.describe('#5 fast navigation', () => {
+  // Tall enough that every tile of the album below is drawn, so the grid's order can be read from the page.
+  test.use({ viewport: { width: 1440, height: 1300 } });
+
+  /** A folder of `n` small, different photos (soft colour blobs), named in order. */
+  async function makeAlbum(n: number): Promise<string> {
+    // Imported here, not at the top: this block keeps to its own lines of the file.
+    const { default: sharp } = await import('sharp');
+    const { mkdirSync } = await import('node:fs');
+    const dir = join(mkdtempSync(join(tmpdir(), 'photobook-gallery-')), 'album');
+    mkdirSync(dir);
+    for (let i = 0; i < n; i++) {
+      const blobs = await sharp({ create: { width: 8, height: 6, channels: 3, background: '#000', noise: { type: 'gaussian', mean: 40 + ((i * 53) % 170), sigma: 70 } } }).png().toBuffer();
+      await sharp(blobs).resize(640, 480).jpeg({ quality: 80 }).toFile(join(dir, `n${String(i).padStart(2, '0')}.jpg`));
+    }
+    return dir;
+  }
+
+  test('the next 20 and the previous 5 large pictures are loaded ahead, the next one first; a step asks for nothing again', async ({ page, request }) => {
+    const N = 60;
+    const dir = await makeAlbum(N);
+    // Every large-picture (1600 px) request the page makes, by photo key, and how many have finished.
+    const asked: string[] = [];
+    let settled = 0;
+    const large = (url: string) => {
+      const u = new URL(url);
+      return u.pathname === '/api/gallery/thumb' && u.searchParams.get('size') === 'm' ? u.searchParams.get('key') : null;
+    };
+    page.on('request', (r) => {
+      const key = large(r.url());
+      if (key) asked.push(key);
+    });
+    const done = (r: { url(): string }) => {
+      if (large(r.url())) settled++;
+    };
+    page.on('requestfinished', done);
+    page.on('requestfailed', done);
+    try {
+      expect((await request.post('/api/gallery/open', { data: { folder: dir, recursive: false } })).status()).toBe(202);
+      await page.addInitScript(() => {
+        localStorage.setItem('gallery.gridWidth', '900');
+        localStorage.setItem('gallery.thumbSize', '96');
+      });
+      await page.goto('/');
+      await page.getByRole('button', { name: dir }).click();
+      await expect(page.getByRole('progressbar')).toHaveCount(0, { timeout: 60_000 });
+      await page.getByLabel('Stack similar').uncheck();
+      const tiles = page.locator('.gallery-tile');
+      await expect(tiles).toHaveCount(N);
+
+      // The grid's order: tile i's photo key (its 400 px picture's address) and file name.
+      const order = await tiles.locator('img').evaluateAll((imgs) => imgs.map((i) => ({ key: new URL((i as HTMLImageElement).src).searchParams.get('key')!, name: (i as HTMLImageElement).alt })));
+      const key = (i: number) => order[i].key;
+      const between = (from: number, to: number) => Array.from({ length: Math.abs(to - from) + 1 }, (_, k) => key(from + Math.sign(to - from) * k));
+      const preview = page.getByRole('region', { name: 'Preview' });
+      /** Waits until every large picture asked for has arrived (or been cancelled). */
+      const quiet = () => expect.poll(() => settled === asked.length && asked.length > 0, { timeout: 20_000 }).toBe(true);
+
+      // The first photo is selected on open: it and the next 20 are loaded for the preview pane.
+      await expect.poll(() => between(0, 20).every((k) => asked.includes(k)), { timeout: 20_000 }).toBe(true);
+      await quiet();
+      const opened = asked.length;
+
+      // Photo 30 selected, far from that window: it, then the next one, then the rest in preloadOrder's order.
+      await tiles.nth(30).click();
+      const want = [...between(30, 50), ...between(29, 25)];
+      await expect.poll(() => want.every((k) => asked.includes(k)), { timeout: 20_000 }).toBe(true);
+      await quiet();
+      const window30 = asked.slice(opened);
+      expect([...window30].sort()).toEqual([...want].sort());
+      expect(window30.slice(0, 2)).toEqual([key(30), key(31)]);
+      // The previous one comes in the first handful, before the far end of the photos ahead.
+      expect(window30.indexOf(key(29))).toBeLessThan(window30.indexOf(key(40)));
+      await expect(preview.locator('img')).toHaveAttribute('alt', order[30].name);
+
+      // A step right: photo 31 is shown from memory, and only the photo that came into the window (51) is asked for.
+      const before = asked.length;
+      await page.keyboard.press('ArrowRight');
+      await expect(preview.locator('img')).toHaveAttribute('alt', order[31].name);
+      await expect(preview.locator('img')).toHaveAttribute('src', new RegExp(`key=${key(31)}.*size=m|size=m.*key=${key(31)}`));
+      await expect.poll(() => asked.length, { timeout: 10_000 }).toBe(before + 1);
+      await quiet();
+      expect(asked.slice(before)).toEqual([key(51)]);
+
+      // The viewer opens on the same photo and steps on, from memory too.
+      await page.keyboard.press('Enter');
+      const viewer = page.getByRole('dialog', { name: 'Photo viewer' });
+      await expect(viewer.locator('img')).toHaveAttribute('alt', order[31].name);
+      await page.keyboard.press('ArrowRight');
+      await expect(viewer.locator('img')).toHaveAttribute('alt', order[32].name);
+      await expect(viewer).toContainText(`33 / ${N}`);
+      await expect.poll(() => asked.length, { timeout: 10_000 }).toBe(before + 2);
+      await quiet();
+      expect(asked.slice(before + 1)).toEqual([key(52)]);
+
+      // Since the folder was read, no large picture was asked for twice.
+      const since = asked.slice(opened);
+      expect(since.length).toBe(new Set(since).size);
+      await page.keyboard.press('Escape');
+    } finally {
+      rmSync(join(dir, '..'), { recursive: true, force: true });
+    }
+  });
+  test("stepping past the photos loaded ahead never shows one photo's picture under another's name", async ({ page, request }) => {
+    const N = 40;
+    const dir = await makeAlbum(N);
+    // Large pictures held back on their way (a slow disk or a busy server), by photo key.
+    const slow = new Set<string>();
+    await page.route('**/api/gallery/thumb?**', async (route) => {
+      const u = new URL(route.request().url());
+      if (u.searchParams.get('size') === 'm' && slow.has(u.searchParams.get('key')!)) await new Promise((r) => setTimeout(r, 4000));
+      await route.continue();
+    });
+    try {
+      expect((await request.post('/api/gallery/open', { data: { folder: dir, recursive: false } })).status()).toBe(202);
+      await page.addInitScript(() => {
+        localStorage.setItem('gallery.gridWidth', '900');
+        localStorage.setItem('gallery.thumbSize', '96');
+      });
+      await page.goto('/');
+      await page.getByRole('button', { name: dir }).click();
+      await expect(page.getByRole('progressbar')).toHaveCount(0, { timeout: 60_000 });
+      await page.getByLabel('Stack similar').uncheck();
+      const tiles = page.locator('.gallery-tile');
+      await expect(tiles).toHaveCount(N);
+      const order = await tiles.locator('img').evaluateAll((imgs) => imgs.map((i) => ({ key: new URL((i as HTMLImageElement).src).searchParams.get('key')!, name: (i as HTMLImageElement).alt })));
+      /** The picture on screen is photo `i`'s own (its 400 px or 1600 px one), named as it is. */
+      const showsOwn = async (img: ReturnType<Page['locator']>, i: number) => {
+        await expect(img).toHaveAttribute('alt', order[i].name, { timeout: 1500 });
+        expect(new URL(await img.evaluate((e) => (e as HTMLImageElement).src)).searchParams.get('key')).toBe(order[i].key);
+      };
+
+      // The preview: End jumps far past the photos loaded ahead, to one whose large picture is slow.
+      await tiles.first().click();
+      slow.add(order[N - 1].key);
+      const preview = page.getByRole('region', { name: 'Preview' });
+      await page.keyboard.press('End');
+      await expect(preview).toContainText(order[N - 1].name);
+      await showsOwn(preview.locator('img'), N - 1);
+      // Its large picture comes in once it arrives.
+      await expect(preview.locator('img')).toHaveAttribute('src', /size=m/, { timeout: 10_000 });
+
+      // The viewer: stepping fast onto a photo whose large picture is still on its way.
+      await page.keyboard.press('Home');
+      slow.add(order[25].key);
+      await page.keyboard.press('Enter');
+      const viewer = page.getByRole('dialog', { name: 'Photo viewer' });
+      await expect(viewer).toContainText(`1 / ${N}`);
+      for (let i = 0; i < 25; i++) await page.keyboard.press('ArrowRight');
+      await expect(viewer).toContainText(`26 / ${N}`);
+      await showsOwn(viewer.locator('img'), 25);
+      await page.keyboard.press('Escape');
+    } finally {
+      await page.unrouteAll({ behavior: 'ignoreErrors' });
+      rmSync(join(dir, '..'), { recursive: true, force: true });
+    }
+  });
+});

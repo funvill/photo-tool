@@ -1,6 +1,6 @@
 // The gallery viewer's keys, and how clicks build the grid's selection (which a drag then takes along).
 import { describe, expect, it } from 'vitest';
-import { clickSelect, dragPaths, flagTargets, gridStep, nextAfterRemoval, viewerNeighbours, viewerStep } from '../core/galleryViewer';
+import { clickSelect, dragPaths, flagTargets, gridStep, nextAfterRemoval, viewerStep } from '../core/galleryViewer';
 
 describe('viewerStep', () => {
   it('moves with the arrow keys and stops at the ends', () => {
@@ -24,12 +24,6 @@ describe('viewerStep', () => {
     expect(viewerStep(1, 3, 'F')).toEqual({ index: 1, action: 'star' });
     expect(viewerStep(1, 3, 'h')).toEqual({ index: 1, action: 'hide' });
     expect(viewerStep(1, 3, 'H')).toEqual({ index: 1, action: 'hide' });
-  });
-
-  it('preloads the next two and the previous two that exist', () => {
-    expect(viewerNeighbours(2, 10)).toEqual([3, 4, 1, 0]);
-    expect(viewerNeighbours(0, 2)).toEqual([1]);
-    expect(viewerNeighbours(0, 1)).toEqual([]);
   });
 });
 

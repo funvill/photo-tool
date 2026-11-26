@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from 'react';
 import { centreOn, clampPan, fitSize, fitView, visibleRect, zoomAt, type Size, type View } from '../../core/previewZoom';
 
 /** One wheel notch zooms by this much. */
@@ -19,8 +19,8 @@ export function usePreviewZoom(img: Size | null) {
   const view: View | null = !ready ? null : zoomed && zoomed.zoom > 1 ? zoomed : fitView(img, pane);
   live.current = { pane, img, view };
 
-  // Measure the stage; a new size resets to fit.
-  useEffect(() => {
+  // Measure the stage; a new size resets to fit. Before the first paint, so a new photo's stage is never drawn hidden for a frame.
+  useLayoutEffect(() => {
     const el = stageRef.current;
     if (!el) return;
     const measure = () => {
