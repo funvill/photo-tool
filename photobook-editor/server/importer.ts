@@ -4,7 +4,7 @@ import { basename, dirname, extname, join, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { editKey, isIdentityEdit, parseEdit, type PhotoEdit } from '../core';
 import { infoFor, readFolderInfo, type FolderInfo, type PhotoInfoOptions } from '../../shared/photoinfo';
-import { formatOf } from '../../shared/core/mediaFormats';
+import { formatOf, isSidecar, pairRawTwins } from '../../shared/core/mediaFormats';
 import type { Store } from './db';
 import { expandHome } from './folders';
 import { renderEdited } from '../../shared/server/photoEditRender';
@@ -44,6 +44,10 @@ export interface ImportJob {
 
 const CONCURRENCY = 4;
 
+/**
+ * The photos in a folder (and its subfolders when `recursive`), in numeric name order. A RAW and a JPEG
+ * of the same name are one photo, listed as the JPEG; sidecars (.xmp) are not photos.
+ */
 export async function scanFolder(folder: string, recursive: boolean): Promise<string[]> {
   const out: string[] = [];
   const walk = async (dir: string) => {
@@ -56,7 +60,7 @@ export async function scanFolder(folder: string, recursive: boolean): Promise<st
     }
   };
   await walk(folder);
-  return out.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  return pairRawTwins(out.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))).shown;
 }
 
 export const resolveFolder = (input: string) => resolve(expandHome(input));
@@ -230,7 +234,10 @@ export class Importer {
             continue;
           }
           try {
-            if (!isSupported(file)) job.errors.push({ file: basename(file), error: `${basename(file)}: not a photo this app can read` });
+            // A sidecar dropped with its photo is skipped quietly; it is not a photo, nor a failure.
+            if (isSidecar(file)) {
+              // nothing to import
+            } else if (!isSupported(file)) job.errors.push({ file: basename(file), error: `${basename(file)}: not a photo this app can read` });
             else job.assetIds[at] = await this.importOne(job, file);
           } catch (e) {
             job.failed++;

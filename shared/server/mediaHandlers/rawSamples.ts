@@ -277,7 +277,7 @@ export const EXIF_IN_PREVIEW: ReadonlySet<RawSampleLayout> = new Set(['raf', 'cr
 export interface RawSampleOptions {
   /** The picture (any format sharp reads from a buffer), turned into the preview and the thumbnail. */
   picture: Buffer;
-  /** The preview's long side (the thumbnail is 160 px). */
+  /** The preview's long side (the thumbnail is 160 px, or half that side when smaller). */
   previewSide?: number;
   make?: string;
   model?: string;
@@ -307,7 +307,9 @@ export async function makeRawSample(formatId: string, o: RawSampleOptions): Prom
   }
   const orientation = EXIF_IN_PREVIEW.has(layout) ? o.orientation : o.previewOrientation;
   if (orientation) preview = preview.withMetadata({ orientation });
-  const thumb = await sharp(o.picture).resize(160, 160, { fit: 'inside' }).jpeg({ quality: 70 }).toBuffer();
+  // The thumbnail is always the smaller picture: 160 px, or half the preview when that is smaller.
+  const thumbSide = Math.max(1, Math.min(160, Math.floor(side / 2)));
+  const thumb = await sharp(o.picture).resize(thumbSide, thumbSide, { fit: 'inside' }).jpeg({ quality: 70 }).toBuffer();
   return rawSample(layout, {
     preview: await preview.toBuffer(), thumb, make: o.make, model: o.model, date: o.date, gps: o.gps, noDecoy: o.noDecoy,
     orientation: EXIF_IN_PREVIEW.has(layout) ? undefined : o.orientation,

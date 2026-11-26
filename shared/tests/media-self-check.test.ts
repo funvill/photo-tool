@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { mediaSelfCheck } from '../server/mediaSelfCheck';
 
 describe('mediaSelfCheck', () => {
-  it('decodes a tiny AVIF, TIFF, GIF, SVG and BMP, and finds SVG refused by path and by content', async () => {
+  it('decodes a tiny AVIF, TIFF, GIF, SVG, BMP and DNG, and finds SVG refused by path and by content', async () => {
     const r = await mediaSelfCheck();
     expect(r.formats).toEqual({
       avif: { ok: true, width: 8, height: 6 },
@@ -13,6 +13,8 @@ describe('mediaSelfCheck', () => {
       gif: { ok: true, width: 8, height: 6 },
       svg: { ok: true, width: 2048, height: 1536 },
       bmp: { ok: true, width: 8, height: 6 },
+      // A tiny DNG made on the spot: its embedded JPEG preview, found by our own parser (#6 phase 3).
+      dng: { ok: true, width: 8, height: 6 },
     });
     expect(r.svgGuard).toEqual({ blockApplied: true, pathRefused: true, disguisedRefused: true });
     expect(r.ok).toBe(true);

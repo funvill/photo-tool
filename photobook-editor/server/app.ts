@@ -11,7 +11,7 @@ import { textOutline } from './textOutline';
 import { listPlaces, placeOutline, suggestPlaces } from '../../shared/server/places';
 import { exportFlipbook, type FlipbookSize } from './flipbook';
 import { exportPosterImage } from './imageExport';
-import { formatById } from '../../shared/core/mediaFormats';
+import { formatById, formatOf } from '../../shared/core/mediaFormats';
 import { checkSvgGuardOnce } from '../../shared/server/mediaHandlers/svg';
 import { colorFeatures, existingThumb, hashFile, hasTransparency, isSupported, makeThumbnails, THUMB_SIZES, workingFile, type ThumbSize } from '../../shared/server/media';
 import { exportCoverPdf, exportPdf, exportPosterPdf, type ExportAsset, type ExportOptions } from './pdf';
@@ -401,8 +401,10 @@ export function createApp(dataDir: string, opts: AppOptions) {
       if (copy) assets.set(r.id, { asset: toPhotoAsset(r, missing), workPath: copy });
       else if (!missing) {
         // One that can't be decoded now is handed over as it is, as before: the export says what failed.
-        const workPath = await workingFile(r.original_path, dataDir, r.content_hash).then((w) => w.path, () => r.original_path);
-        assets.set(r.id, { asset: toPhotoAsset(r, missing), workPath });
+        // Never a camera RAW, though: sharp must not read one by its path (see mediaHandlers/raw.ts).
+        const fallback = formatOf(r.original_path)?.kind === 'raw' ? null : r.original_path;
+        const workPath = await workingFile(r.original_path, dataDir, r.content_hash).then((w) => w.path, () => fallback);
+        if (workPath) assets.set(r.id, { asset: toPhotoAsset(r, missing), workPath });
       }
     }
     return assets;

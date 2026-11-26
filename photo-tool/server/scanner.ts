@@ -1,11 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { statSync } from 'node:fs';
-import { stat } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, relative, resolve } from 'node:path';
-import { formatOf } from '../../shared/core/mediaFormats';
+import { readdir, stat } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { formatOf, pairRawTwins } from '../../shared/core/mediaFormats';
 import type { PhotoAnalysis } from '../../shared/core/photoAnalysis';
 import { analyze as defaultAnalyze, fileStat, hashFile, isSupported, orientedSize, readMetadata, THUMB_SIZES, workingFile, writeJpegThumb, type ThumbSize } from '../../shared/server/media';
+import { NoPreviewError, noPreviewPicture } from '../../shared/server/mediaHandlers/raw';
 import { photoKey, type Catalog, type GalleryPhoto } from './catalog';
 import { GalleryFolderError, listPhotos, type ReadDir } from './walk';
 
@@ -27,6 +28,8 @@ export interface ScanJob {
   errors: { path: string; message: string }[];
   /** In completion order, only ever appended to. */
   photos: GalleryPhoto[];
+  /** The RAW of each RAW+JPEG pair in the folder, by the JPEG (or HEIC) shown for both. */
+  twins: Map<string, string>;
 }
 
 interface ScannerOptions {
@@ -83,7 +86,7 @@ export class Scanner {
     }
     if (!isDir) throw new GalleryFolderError(`Not a readable folder: ${root}`);
     for (const earlier of this.running) earlier.cancelled = true;
-    const job: ScanJob = { id: randomUUID(), root: folder, recursive, total: 0, processed: 0, startedAt: Date.now(), done: false, cancelled: false, errors: [], photos: [] };
+    const job: ScanJob = { id: randomUUID(), root: folder, recursive, total: 0, processed: 0, startedAt: Date.now(), done: false, cancelled: false, errors: [], photos: [], twins: new Map() };
     this.jobs.set(job.id, job);
     this.running.add(job);
     this.catalog.touchRecent(folder, recursive);
@@ -120,7 +123,8 @@ export class Scanner {
 
   private async run(job: ScanJob) {
     try {
-      const { files, errors } = await listPhotos(job.root, job.recursive, this.readdir);
+      const { files, twins, errors } = await listPhotos(job.root, job.recursive, this.readdir);
+      job.twins = twins;
       job.errors.push(...errors);
       job.total = files.length;
       let next = 0;
@@ -171,6 +175,10 @@ export class Scanner {
    * added. The job's entry for the path is replaced, or added at the end for a new file. A path outside
    * the job's folder (or its subfolders, when the scan is recursive), one that is not a supported photo,
    * and one that is not there are skipped (null).
+   *
+   * RAW+JPEG pairs are worked out again from the folder as it is now: a RAW whose JPEG is there reads
+   * that JPEG again (the photo shown for both), a JPEG that now has a RAW beside it takes that RAW out of
+   * the list, and a RAW whose JPEG is gone becomes a photo of its own.
    */
   async refresh(jobId: string, path: string): Promise<GalleryPhoto | null> {
     const job = this.jobs.get(jobId);
@@ -185,7 +193,14 @@ export class Scanner {
     } catch {
       return null;
     }
-    const photo = await this.scanOne(job, file, true);
+    const { shown, twin } = await this.pairOnDisk(file);
+    for (const [picture, raw] of job.twins) if (picture === shown || raw === file || raw === twin) job.twins.delete(picture);
+    if (twin) {
+      job.twins.set(shown, twin);
+      const was = job.photos.findIndex((p) => p.path === twin);
+      if (was >= 0) job.photos.splice(was, 1);
+    }
+    const photo = await this.scanOne(job, shown, true);
     this.onPhoto?.(photo);
     const at = job.photos.findIndex((p) => p.path === photo.path);
     if (at >= 0) job.photos[at] = photo;
@@ -193,17 +208,40 @@ export class Scanner {
     return photo;
   }
 
+  /** The photo shown for `file` (itself, or the JPEG of its pair) and that photo's RAW twin, by the folder as it is now. */
+  private async pairOnDisk(file: string): Promise<{ shown: string; twin?: string }> {
+    let names: string[];
+    try {
+      names = await readdir(dirname(file));
+    } catch {
+      return { shown: file };
+    }
+    const listed = names.filter((n) => !n.startsWith('.') && isSupported(n)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const { twinOf } = pairRawTwins(listed.map((n) => join(dirname(file), n)));
+    for (const [picture, raw] of twinOf) {
+      if (raw === file) return { shown: picture, twin: raw };
+      if (picture === file) return { shown: file, twin: raw };
+    }
+    return { shown: file };
+  }
+
   private async scanOne(job: ScanJob, path: string, fresh = false): Promise<GalleryPhoto> {
     const st = await fileStat(path);
     const relDir = relDirOf(job.root, path);
     const hit = fresh ? null : this.catalog.lookup(path, st.size, st.mtimeMs);
+    // The RAW of a RAW+JPEG pair, by this scan's listing: named on the JPEG.
+    const twin = job.twins.get(path);
+    const rawTwin = twin ? basename(twin) : undefined;
     // A cached row is reused as long as its thumbnails are still on disk.
     if (hit && (await this.thumbsExist(hit.key))) {
-      const photo = { ...hit, folder: job.root, relDir };
+      const photo: GalleryPhoto = { ...hit, folder: job.root, relDir };
+      if (rawTwin) photo.rawTwin = rawTwin;
+      else delete photo.rawTwin;
       // A row cached before exif was read: read just that, leaving thumbnails and analysis alone. A file
       // that can't be read just now keeps its row as it was (exif still missing: tried again next time).
-      let upgraded = false;
-      if (!photo.contentKey) {
+      let upgraded = photo.rawTwin !== hit.rawTwin;
+      // A RAW with no preview has a placeholder thumbnail, which is no content key.
+      if (!photo.contentKey && !photo.noPreview) {
         try {
           photo.contentKey = await contentKeyOf(this.catalog.thumbPath(hit.key, 'm'));
           upgraded = true;
@@ -223,17 +261,28 @@ export class Scanner {
       return photo;
     }
     // The content hash is only worked out when the format's handler needs it (to name a decoded copy).
-    const work = await workingFile(path, this.dataDir, () => hashFile(path));
-    const [dims, meta, analysis] = await Promise.all([orientedSize(work.path), readMetadata(path), this.analyze(work.path)]);
+    // A RAW with no preview gets the placeholder picture: catalogued once, not analysed or tagged.
+    let workPath: string;
+    let noPreview = false;
+    try {
+      workPath = (await workingFile(path, this.dataDir, () => hashFile(path))).path;
+    } catch (e) {
+      if (!(e instanceof NoPreviewError)) throw e;
+      noPreview = true;
+      workPath = await noPreviewPicture(join(this.dataDir, 'derived'));
+    }
+    const [dims, meta, analysis] = await Promise.all([orientedSize(workPath), readMetadata(path), noPreview ? null : this.analyze(workPath)]);
     // The format is the registry's, by the original's name: a decoded copy (a HEIC's JPEG) would
     // report 'jpeg', and sharp calls AVIF 'heif'.
     const key = photoKey(path, st.size, st.mtimeMs);
-    await Promise.all((Object.keys(THUMB_SIZES) as ThumbSize[]).map((s) => writeJpegThumb(work.path, s, this.catalog.thumbPath(key, s))));
+    await Promise.all((Object.keys(THUMB_SIZES) as ThumbSize[]).map((s) => writeJpegThumb(workPath, s, this.catalog.thumbPath(key, s))));
     const photo: GalleryPhoto = {
       path, folder: job.root, fileName: basename(path), relDir, size: st.size, mtimeMs: st.mtimeMs,
       width: dims.width, height: dims.height, format: formatOf(path)?.id ?? dims.format, capturedAt: meta.capturedAt, gpsLat: meta.gpsLat,
       gpsLon: meta.gpsLon, camera: meta.camera, exif: meta.exif, analysis, key,
-      contentKey: await contentKeyOf(this.catalog.thumbPath(key, 'm')),
+      contentKey: noPreview ? null : await contentKeyOf(this.catalog.thumbPath(key, 'm')),
+      ...(rawTwin ? { rawTwin } : {}),
+      ...(noPreview ? { noPreview: true as const } : {}),
     };
     this.catalog.put(photo);
     return photo;

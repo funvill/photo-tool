@@ -99,3 +99,35 @@ describe('stackItems', () => {
     expect(stackOf.size).toBe(0);
   });
 });
+
+describe('stackItems with RAW+JPEG pairs (#6 phase 3)', () => {
+  // A pair is folded into its JPEG before the page sees it (photo-tool/server/walk.ts): one item that
+  // names its RAW. So in a burst it is one member, the ×N counts it once, and its RAW mark stays its own.
+  const paired = (name: string, star = false) => ({ ...photo(name, star), rawTwin: name.replace('.JPG', '.CR3') });
+
+  it('counts a paired JPEG in a burst once, and keeps its RAW on it', () => {
+    const sorted = [paired('IMG_1.JPG'), photo('IMG_2.JPG'), paired('IMG_3.JPG')];
+    const facts = new Map([
+      ['IMG_1.JPG', fact('g', false)],
+      ['IMG_2.JPG', fact('g', true)],
+      ['IMG_3.JPG', fact('g', false)],
+    ]);
+    const folded = stackItems(sorted, facts, new Set());
+    expect(names(folded.items)).toEqual(['IMG_2.JPG']);
+    expect(folded.stackOf.get('IMG_2.JPG')).toEqual({ id: 'g', size: 3, open: false, top: true });
+    const open = stackItems(sorted, facts, new Set(['g']));
+    expect(names(open.items)).toEqual(['IMG_2.JPG', 'IMG_1.JPG', 'IMG_3.JPG']);
+    expect((open.items[1] as ReturnType<typeof paired>).rawTwin).toBe('IMG_1.CR3');
+  });
+
+  it('a starred pair (the star is the JPEG\'s, so the pair\'s) becomes the stack\'s top', () => {
+    const sorted = [photo('IMG_1.JPG'), paired('IMG_2.JPG', true)];
+    const facts = new Map([
+      ['IMG_1.JPG', fact('g', true)],
+      ['IMG_2.JPG', fact('g', false)],
+    ]);
+    const { items } = stackItems(sorted, facts, new Set());
+    expect(items).toEqual([sorted[1]]);
+    expect((items[0] as ReturnType<typeof paired>).rawTwin).toBe('IMG_2.CR3');
+  });
+});

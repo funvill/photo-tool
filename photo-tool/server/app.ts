@@ -7,6 +7,7 @@ import { folderStamp, forgetPhotos, infoFor, PhotoInfoWriteError, readFolderInfo
 import { AlbumTagsStore, type AlbumTagsOptions } from '../../shared/phototags';
 import { isIdentityEdit, parseEdit } from '../../shared/core/photoEdit';
 import { hashFile, workingFile } from '../../shared/server/media';
+import { NoPreviewError, noPreviewPicture } from '../../shared/server/mediaHandlers/raw';
 import { checkSvgGuardOnce } from '../../shared/server/mediaHandlers/svg';
 import { mediaSelfCheck } from '../../shared/server/mediaSelfCheck';
 import { editFormatFor, renderEdited } from '../../shared/server/photoEditRender';
@@ -347,7 +348,8 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
   // The desktop app moved these photos to the Recycle Bin: forget each one that really is gone from
   // disk (its cache row and thumbnails, its place in every open scan, its photoinfo.json entry). A path
   // still on disk, or one never catalogued, is skipped: this never deletes a file, only what is known about it.
-  app.post('/api/gallery/removed', wrap((req, res) => {
+  // The JPEG of a RAW+JPEG pair goes alone: its RAW, still on disk, becomes a photo of its own in the open folder.
+  app.post('/api/gallery/removed', wrap(async (req, res) => {
     const paths: unknown = req.body?.paths;
     if (!Array.isArray(paths) || !paths.every((p) => typeof p === 'string')) throw new HttpError(400, 'Expected { paths: string[] }');
     const removed: string[] = [];
@@ -368,6 +370,9 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
         if (!(e instanceof PhotoInfoWriteError)) throw e;
       }
       removed.push(photo.path);
+      const last = jobIds.at(-1);
+      const raw = photo.rawTwin ? join(dirname(photo.path), photo.rawTwin) : null;
+      if (last && raw && existsSync(raw)) await scanner.refresh(last, raw).catch((e) => console.warn(`Could not read ${raw}:`, e));
     }
     res.json({ removed });
   }));
@@ -428,7 +433,12 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
   app.get('/api/gallery/full', wrap(async (req, res) => {
     const photo = openPhoto(q(req, 'path'));
     if (!existsSync(photo.path)) throw new HttpError(404, 'That photo is not in the open folder any more.');
-    const jpeg = await sharp(await workPathOf(photo), { failOn: 'none' }).rotate().flatten({ background: '#ffffff' }).jpeg({ quality: 90 }).toBuffer();
+    // A RAW with no preview shows the placeholder its tile has.
+    const work = await workPathOf(photo).catch(async (e) => {
+      if (e instanceof NoPreviewError) return noPreviewPicture(join(dataDir, 'derived'));
+      throw e;
+    });
+    const jpeg = await sharp(work, { failOn: 'none' }).rotate().flatten({ background: '#ffffff' }).jpeg({ quality: 90 }).toBuffer();
     res.setHeader('Cache-Control', 'private, max-age=3600');
     res.type('image/jpeg').send(jpeg);
   }));
@@ -614,7 +624,8 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
   }
 
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
-    const status = err instanceof HttpError ? err.status : 500;
+    // A RAW with no preview has nothing to copy or edit: said plainly, not a server error.
+    const status = err instanceof HttpError ? err.status : err instanceof NoPreviewError ? 409 : 500;
     const message = err instanceof Error ? err.message : String(err);
     if (status >= 500) console.error(err);
     res.status(status).json({ error: message });

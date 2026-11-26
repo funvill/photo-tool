@@ -3,11 +3,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
 import { orientedSize, workingFile } from './media';
+import { makeRawSample } from './mediaHandlers/rawSamples';
 import { checkSvgGuard } from './mediaHandlers/svg';
 
 // For the desktop self-test: does this sharp build (it differs per platform, and Linux can use a
 // WebAssembly build) decode each format phase 2 of #6 added, and is an SVG refused by its path and
-// under another name? Every file is made here, in a temp folder, from a few bytes.
+// under another name? And does a camera RAW (a tiny DNG) show its embedded preview (phase 3)? Every
+// file is made here, in a temp folder, from a few bytes.
 
 export interface MediaSelfCheck {
   ok: boolean;
@@ -48,8 +50,10 @@ export async function mediaSelfCheck(): Promise<MediaSelfCheck> {
       gif: () => base().gif().toBuffer(),
       svg: async () => Buffer.from(SVG),
       bmp: async () => tinyBmp(),
+      // A DNG with a W × H JPEG preview, a smaller thumbnail and lossless "sensor data" bigger than both.
+      dng: async () => makeRawSample('dng', { picture: await base().png().toBuffer(), previewSide: W, orientation: 1 }),
     };
-    const ext: Record<string, string> = { avif: 'avif', tiff: 'tif', gif: 'gif', svg: 'svg', bmp: 'bmp' };
+    const ext: Record<string, string> = { avif: 'avif', tiff: 'tif', gif: 'gif', svg: 'svg', bmp: 'bmp', dng: 'dng' };
     const formats: MediaSelfCheck['formats'] = {};
     for (const [id, make] of Object.entries(files)) {
       try {

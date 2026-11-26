@@ -59,7 +59,7 @@ export async function runGallerySelfTest(ctx: SelfTestContext & { source: string
   });
 
   // The formats #6 phase 2 added, decoded by this installed sharp build from tiny pictures made on the
-  // spot (AVIF, TIFF, GIF, SVG, BMP), and SVG refused when loaded by path (sharp.block) and when
+  // spot (AVIF, TIFF, GIF, SVG, BMP, and a DNG's embedded preview from #6 phase 3), and SVG refused when loaded by path (sharp.block) and when
   // disguised under a photo's name. Here the block itself must hold too: a build without it (Linux's
   // wasm sharp, say) still refuses SVG by content, but CI should hear about it.
   await step('mediaFormats', async () => {

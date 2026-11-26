@@ -112,7 +112,7 @@ describe('the media check the desktop self-test asks for', () => {
       expect(res.status).toBe(200);
       const body = (await res.json()) as any;
       expect(body.ok).toBe(true);
-      expect(Object.keys(body.formats).sort()).toEqual(['avif', 'bmp', 'gif', 'svg', 'tiff']);
+      expect(Object.keys(body.formats).sort()).toEqual(['avif', 'bmp', 'dng', 'gif', 'svg', 'tiff']);
       expect(body.svgGuard).toEqual({ blockApplied: true, pathRefused: true, disguisedRefused: true });
     } finally {
       await new Promise<void>((r) => (server ? server.close(() => r()) : r()));

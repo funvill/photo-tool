@@ -28,8 +28,12 @@ export interface GalleryPhoto {
   analysis: PhotoAnalysis | null;
   /** sha1(path|size|mtimeMs): names the thumbnails, changes when the file does. */
   key: string;
-  /** sha1 of the decoded pixels of the 1600 px thumbnail: the same for a renamed, moved or re-tagged file. Null only before it was worked out. */
+  /** sha1 of the decoded pixels of the 1600 px thumbnail: the same for a renamed, moved or re-tagged file. Null before it was worked out, and for a RAW with no preview. */
   contentKey: string | null;
+  /** The RAW file (its name, in the same folder) of a RAW+JPEG pair, on the JPEG shown for both; absent otherwise. */
+  rawTwin?: string;
+  /** A RAW with no preview Photo tools can show: its thumbnails are a placeholder, and it is not analysed or tagged. */
+  noPreview?: true;
 }
 
 /** One model's results for one picture (by content key). */
@@ -53,7 +57,7 @@ interface PhotoRow {
   path: string; folder: string; file_name: string; rel_dir: string; size: number; mtime_ms: number;
   width: number; height: number; format: string; captured_at: string | null; gps_lat: number | null;
   gps_lon: number | null; camera: string | null; exif: string | null; analysis: string | null; key: string;
-  content_key: string | null;
+  content_key: string | null; raw_twin: string | null; no_preview: number | null;
 }
 
 interface TagDbRow {
@@ -75,6 +79,8 @@ const toPhoto = (r: PhotoRow): GalleryPhoto => ({
   width: r.width, height: r.height, format: r.format, capturedAt: r.captured_at, gpsLat: r.gps_lat, gpsLon: r.gps_lon,
   camera: r.camera, exif: r.exif ? (JSON.parse(r.exif) as PhotoExif) : null, analysis: r.analysis ? (JSON.parse(r.analysis) as PhotoAnalysis) : null, key: r.key,
   contentKey: r.content_key ?? null,
+  ...(r.raw_twin ? { rawTwin: r.raw_twin } : {}),
+  ...(r.no_preview ? { noPreview: true as const } : {}),
 });
 
 export class Catalog {
@@ -105,6 +111,9 @@ export class Catalog {
     if (!columns.some((c) => c.name === 'exif')) this.db.exec('ALTER TABLE photos ADD COLUMN exif TEXT');
     // Nor one made before tagging: the content key is worked out on the next scan.
     if (!columns.some((c) => c.name === 'content_key')) this.db.exec('ALTER TABLE photos ADD COLUMN content_key TEXT');
+    // Nor one made before camera RAW files (#6 phase 3).
+    if (!columns.some((c) => c.name === 'raw_twin')) this.db.exec('ALTER TABLE photos ADD COLUMN raw_twin TEXT');
+    if (!columns.some((c) => c.name === 'no_preview')) this.db.exec('ALTER TABLE photos ADD COLUMN no_preview INTEGER');
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS tags (
         content_key TEXT NOT NULL, model_id TEXT NOT NULL, status TEXT NOT NULL, description TEXT, keywords TEXT,
@@ -135,10 +144,10 @@ export class Catalog {
   put(p: GalleryPhoto): void {
     this.db
       .prepare(
-        `INSERT OR REPLACE INTO photos (path, folder, file_name, rel_dir, size, mtime_ms, width, height, format, captured_at, gps_lat, gps_lon, camera, exif, analysis, key, content_key)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR REPLACE INTO photos (path, folder, file_name, rel_dir, size, mtime_ms, width, height, format, captured_at, gps_lat, gps_lon, camera, exif, analysis, key, content_key, raw_twin, no_preview)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(p.path, p.folder, p.fileName, p.relDir, p.size, p.mtimeMs, p.width, p.height, p.format, p.capturedAt, p.gpsLat, p.gpsLon, p.camera, p.exif ? JSON.stringify(p.exif) : null, p.analysis ? JSON.stringify(p.analysis) : null, p.key, p.contentKey ?? null);
+      .run(p.path, p.folder, p.fileName, p.relDir, p.size, p.mtimeMs, p.width, p.height, p.format, p.capturedAt, p.gpsLat, p.gpsLon, p.camera, p.exif ? JSON.stringify(p.exif) : null, p.analysis ? JSON.stringify(p.analysis) : null, p.key, p.contentKey ?? null, p.rawTwin ?? null, p.noPreview ? 1 : null);
   }
 
   /**
