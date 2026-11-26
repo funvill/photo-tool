@@ -14,6 +14,7 @@ import { NO_STAGING_ID, createUpdates, type UpdateDeps, type UpdaterLike } from 
 type CheckResult = Awaited<ReturnType<UpdaterLike['checkForUpdates']>>;
 
 const NOW = 1_800_000_000_000;
+const DOWNLOADED = '/home/me/.cache/photo-tool-updater/pending/photo-tool_0.1.40_amd64.deb';
 const DAY = 86_400_000;
 
 /** A deferred promise, for holding a check or a download open. */
@@ -39,6 +40,10 @@ class FakeUpdater implements UpdaterLike {
   checks: (CheckResult | Error | Promise<CheckResult>)[] = [null];
   downloads: (Error | Promise<unknown> | 'ok')[] = ['ok'];
   progress: ((p: { percent: number }) => void)[] = [];
+  errors: ((e: Error) => void)[] = [];
+  /** Set: the install fails with this (electron-updater dispatches an error and resets quitAndInstallCalled). */
+  installFails: string | null = null;
+  quitAndInstallCalled = false;
 
   async checkForUpdates() {
     this.calls.push('check');
@@ -52,13 +57,20 @@ class FakeUpdater implements UpdaterLike {
     if (next instanceof Error) throw next;
     if (next !== 'ok') await next;
     for (const cb of this.progress) cb({ percent: 42 });
-    return [];
+    return [DOWNLOADED];
   }
   quitAndInstall(isSilent?: boolean, isForceRunAfter?: boolean) {
     this.calls.push(`quitAndInstall(${isSilent},${isForceRunAfter})`);
+    this.quitAndInstallCalled = !this.installFails;
+    if (this.installFails) for (const cb of [...this.errors]) cb(new Error(this.installFails));
   }
-  on(event: string, cb: (p: { percent: number }) => void) {
-    if (event === 'download-progress') this.progress.push(cb);
+  on(event: string, cb: (a: never) => void) {
+    if (event === 'download-progress') this.progress.push(cb as (p: { percent: number }) => void);
+    if (event === 'error') this.errors.push(cb as (e: Error) => void);
+    return this;
+  }
+  removeListener(event: string, cb: (a: never) => void) {
+    if (event === 'error') this.errors = this.errors.filter((c) => c !== cb);
     return this;
   }
 }
@@ -95,8 +107,9 @@ function realUpdater(dir: string, install: () => boolean = () => false) {
 const available = (version: string): CheckResult =>({ isUpdateAvailable: true, updateInfo: { version } });
 const same: CheckResult = { isUpdateAvailable: false, updateInfo: { version: '0.1.33' } };
 
-function setup(o: { answers?: string[]; packaged?: boolean; settings?: { auto: boolean; lastCheck: number | null }; prepareInstall?: () => Promise<boolean>; repo?: UpdateDeps['repo'] } = {}) {
+function setup(o: { answers?: string[]; packaged?: boolean; settings?: { auto: boolean; lastCheck: number | null }; prepareInstall?: () => Promise<boolean>; repo?: UpdateDeps['repo']; updater?: UpdaterLike } = {}) {
   const updater = new FakeUpdater();
+  const prepared: { files: string[] }[] = [];
   const settingsFile = join(mkdtempSync(join(tmpdir(), 'updates-')), 'updates.json');
   if (o.settings) writeUpdateSettings(settingsFile, o.settings);
   const asked: { message: string; buttons: string[] }[] = [];
@@ -106,7 +119,7 @@ function setup(o: { answers?: string[]; packaged?: boolean; settings?: { auto: b
   const opened: string[] = [];
   let menus = 0;
   const deps: UpdateDeps = {
-    updater,
+    updater: o.updater ?? updater,
     channel: 'photo-tool',
     productName: 'Photo Tool',
     currentVersion: '0.1.33',
@@ -127,15 +140,17 @@ function setup(o: { answers?: string[]; packaged?: boolean; settings?: { auto: b
     },
     setProgress: (f) => progress.push(f),
     refreshMenu: () => menus++,
-    prepareInstall: async () => {
+    prepareInstall: async (p) => {
       events.push('prepareInstall');
+      prepared.push(p);
       return o.prepareInstall ? o.prepareInstall() : true;
     },
+    installFailed: (reason) => events.push(`installFailed:${reason}`),
     log: () => {},
     now: () => NOW,
   };
   const updates = createUpdates(deps);
-  return { updates, updater, settingsFile, asked, events, progress, opened, menus: () => menus, deps };
+  return { updates, updater, settingsFile, asked, events, progress, opened, prepared, menus: () => menus, deps };
 }
 
 describe('createUpdates', () => {
@@ -198,6 +213,34 @@ describe('checkNow', () => {
     expect(t.progress).toContain(0.42);
     expect(t.progress.indexOf(0.42)).toBeLessThan(t.progress.lastIndexOf(null));
     expect(t.progress.at(-1)).toBeNull();
+  });
+
+  it('prepareInstall gets the downloaded files, to check they are still there before closing anything', async () => {
+    const t = setup({ answers: ['Download', 'Restart now'] });
+    t.updater.checks = [available('0.1.40')];
+    await t.updates.checkNow();
+    expect(t.prepared).toEqual([{ files: [DOWNLOADED] }]);
+    expect(t.events.filter((e) => e.startsWith('installFailed'))).toEqual([]);
+  });
+
+  it('an install that fails after prepareInstall (electron-updater dispatches an error) → installFailed, with the reason', async () => {
+    const t = setup({ answers: ['Download', 'Restart now'] });
+    t.updater.checks = [available('0.1.40')];
+    t.updater.installFails = 'Command pkexec exited with code 126\n    at stack';
+    await t.updates.checkNow();
+    expect(t.events.at(-1)).toBe('installFailed:Command pkexec exited with code 126');
+    expect(t.updater.errors).toEqual([]); // the listener is gone again
+  });
+
+  it("an install that fails in electron-updater's real quitAndInstall (no app.quit queued) → installFailed", async () => {
+    const real = realUpdater(mkdtempSync(join(tmpdir(), 'updater-')));
+    const fake = new FakeUpdater();
+    // Checked and downloaded by the fake; installed by the real class, which has nothing downloaded.
+    Object.assign(real, { checkForUpdates: () => fake.checkForUpdates(), downloadUpdate: () => fake.downloadUpdate() });
+    fake.checks = [available('0.1.40')];
+    const t = setup({ answers: ['Download', 'Restart now'], updater: real });
+    await t.updates.checkNow();
+    expect(t.events.at(-1)).toBe("installFailed:No update filepath provided, can't quit and install");
   });
 
   it('prepareInstall false (Keep editing) → nothing is installed, and the update stays ready to install', async () => {

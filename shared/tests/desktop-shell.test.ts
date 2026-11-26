@@ -160,7 +160,7 @@ describe('updates in the shell', () => {
 
   it("an AppImage updates as an AppImage (APPIMAGE decides, not resources/package-type), without touching autoUpdater", () => {
     // autoUpdater is a getter that picks DebUpdater from package-type; on the AppImage path it is never read.
-    expect(fn('startUpdates')).toMatch(/updaterKind\(\{ platform: process\.platform, appImage: env\.APPIMAGE \}\) === 'appimage' \? new AppImageUpdater\(\) : autoUpdater/);
+    expect(fn('startUpdates')).toMatch(/updateKind = updaterKind\(\{ platform: process\.platform, appImage: env\.APPIMAGE \}\);\s*const updater = updateKind === 'appimage' \? new AppImageUpdater\(\) : autoUpdater;/);
     expect(fn('startUpdates').match(/autoUpdater/g)).toHaveLength(1);
   });
 
@@ -215,11 +215,29 @@ describe('updates in the shell', () => {
     expect(at('await stopServer()')).toBeLessThan(at('return true'));
   });
 
-  it("a .deb with no graphical sudo opens the release page instead of installing", () => {
+  it('before anything is closed: what would make the install fail is checked, and the release page offered', () => {
     const p = fn('prepareInstall');
-    expect(p.indexOf('cannotInstallDeb()')).toBeLessThan(p.indexOf('program.confirmQuit()'));
-    expect(p).toMatch(/if \(cannotInstallDeb\(\)\)[\s\S]{0,400}shell\.openExternal\(latestReleasePage\(/);
-    expect(fn('cannotInstallDeb')).toMatch(/process\.platform !== 'linux' \|\| env\.APPIMAGE/);
+    const before = (s: string) => expect(p.indexOf(s), s).toBeLessThan(p.indexOf('program.confirmQuit()'));
+    expect(p).toMatch(/async function prepareInstall\(\{ files \}: \{ files: string\[\] \}\): Promise<boolean>/);
+    // The downloaded files, the AppImage's folder, a graphical sudo for a .deb (updateRules.installProblem).
+    expect(p).toMatch(/const problem = installProblem\(\{ platform: process\.platform, kind: updateKind, files, appImage: env\.APPIMAGE, sudo, exists: existsSync, writable \}\);\s*if \(problem\) return cannotInstall\(problem\);/);
+    before('installProblem(');
+    // pkexec is run, so a missing polkit agent (or a closed password box) is found here, not after closing.
+    expect(p).toMatch(/sudo === 'pkexec'[\s\S]{0,120}pkexecProbe\(await runForExitCode\('pkexec', \['--disable-internal-agent', 'dpkg', '--version'\]\)\)/);
+    expect(p).toMatch(/if \(probe === 'dismissed'\) return false;\s*if \(probe === 'unusable'\) return cannotInstall\(updateText\.problem\.noAgent\);/);
+    before('pkexecProbe(');
+    expect(fn('cannotInstall')).toMatch(/updateText\.cannotInstall\(NAME, problem\)[\s\S]{0,200}shell\.openExternal\(latestReleasePage\(repo\)\)[\s\S]{0,40}return false;/);
+    expect(code).not.toContain('cannotInstallDeb');
+  });
+
+  it('an install that fails after closing: says so, offers the release page, and starts the app again', () => {
+    const f = fn('installFailed');
+    expect(code).toMatch(/installFailed: \(reason\) => void installFailed\(reason\)/);
+    // The 30 s backstop must not end the app while the message is open.
+    expect(f.indexOf('clearTimeout(backstop)')).toBeLessThan(f.indexOf('await message('));
+    expect(f).toMatch(/updateText\.installFailed\(NAME, reason\)[\s\S]{0,200}shell\.openExternal\(latestReleasePage\(repo\)\)/);
+    expect(f).toMatch(/app\.relaunch\(relaunchOptions\(\{ kind: updateKind, appImage: env\.APPIMAGE \}\)\);\s*app\.exit\(exitCode\);/);
+    expect(fn('prepareInstall')).toMatch(/backstop = setTimeout\(/);
   });
 
   it('the Help menu carries the update items', () => {

@@ -11,7 +11,8 @@
 // is unchanged. Only GitHub's names may be looked up for it (updateRules.UPDATE_HOSTS in each program's
 // host-resolver-rules), and never in a self-test. There is deliberately no crash reporter.
 import { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, screen, session, shell, utilityProcess, type MenuItemConstructorOptions, type UtilityProcess, type WebContents } from 'electron';
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
+import { accessSync, appendFileSync, constants as fsConstants, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 import { AppImageUpdater, autoUpdater } from 'electron-updater';
@@ -20,7 +21,7 @@ import { CarryOverError, carryOverRefusal, prepareProgramFolders } from './dataF
 import { isAppNavigation, requestHost, type GuardOptions } from './netGuard';
 import { SELF_TEST_CONTROL_URLS, type SelfTestContext, type Step } from './selfTest';
 import type { HostMessage, HostReply, StartMessage } from './serverHost';
-import { githubRepo, latestReleasePage, updateText, updaterKind } from './updateRules';
+import { githubRepo, graphicalSudo, installProblem, latestReleasePage, pkexecProbe, relaunchOptions, updateText, updaterKind } from './updateRules';
 import { createUpdates, type Updates } from './updates';
 
 /** What a program gives the shell: everything in which the editor and Photo Tool differ. */
@@ -225,6 +226,10 @@ export function runDesktopApp(program: DesktopProgram): void {
   let quitting = false;
   /** Closing the window to install an update: closing it must not quit the app (see prepareInstall). */
   let installing = false;
+  /** Which updater startUpdates made (updateRules.updaterKind). */
+  let updateKind: 'appimage' | 'default' = 'default';
+  /** Ends the app if it is still here 30 s after prepareInstall closed everything (see prepareInstall). */
+  let backstop: ReturnType<typeof setTimeout> | null = null;
   let exitCode = 0;
   let win: BrowserWindow | null = null;
   /** Checking for updates; null in a self-test. */
@@ -547,29 +552,53 @@ export function runDesktopApp(program: DesktopProgram): void {
     return response;
   }
 
-  /**
-   * The installed .deb updates through dpkg as root: electron-updater asks for the password with a
-   * graphical sudo (pkexec and the like) and falls back to plain sudo, which needs a terminal the app
-   * does not have. With none of those, the release page is opened instead, before anything is closed.
-   */
-  function cannotInstallDeb(): boolean {
-    if (process.platform !== 'linux' || env.APPIMAGE) return false;
-    const dirs = (env.PATH ?? '').split(delimiter).filter(Boolean);
-    return !['gksudo', 'kdesudo', 'pkexec', 'beesu'].some((cmd) => dirs.some((dir) => existsSync(join(dir, cmd))));
+  /** Can this process write to `path`? */
+  function writable(path: string): boolean {
+    try {
+      accessSync(path, fsConstants.W_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Run a program with nothing on its standard streams; resolves to its exit code (null if it did not run). */
+  function runForExitCode(cmd: string, args: string[]): Promise<number | null> {
+    return new Promise((resolve) => {
+      const child = spawn(cmd, args, { stdio: 'ignore', timeout: 5 * 60_000 });
+      child.on('error', () => resolve(null));
+      child.on('exit', (code) => resolve(code));
+    });
+  }
+
+  /** Restart now cannot work (found before anything is closed): say why, and offer the release page instead. */
+  async function cannotInstall(problem: string): Promise<boolean> {
+    const repo = githubRepo(program.repository);
+    log('the update cannot be installed', problem);
+    const choice = await message(updateText.cannotInstall(NAME, problem), repo ? [updateText.openReleasePage, 'Close'] : ['OK']);
+    if (choice === 0 && repo) void shell.openExternal(latestReleasePage(repo));
+    return false;
   }
 
   /**
-   * Restart now, before the installer runs: nothing unsaved may be lost and the server must close its
-   * database. Photo Tool's unsaved-edits question first; then the window is closed while the server
-   * still runs (the editor's page cancels the first close to finish its pending save, so it is tried
-   * again each second for up to 10 s); then the server stops. False calls the install off.
+   * Restart now, before the installer runs. First everything that can be checked while nothing is closed
+   * yet (updateRules.installProblem): the downloaded files are still there; an AppImage's folder can be
+   * written; a .deb has a graphical sudo, and pkexec is run once (dpkg --version) to find out that it
+   * can actually ask for the password: a missing polkit agent fails here, not after closing. That asks
+   * for the password a first time; the install asks again. Then nothing unsaved may be lost and the
+   * server must close its database: Photo Tool's unsaved-edits question; then the window is closed while
+   * the server still runs (the editor's page cancels the first close to finish its pending save, so it
+   * is tried again each second for up to 10 s); then the server stops. False calls the install off.
    */
-  async function prepareInstall(): Promise<boolean> {
-    if (cannotInstallDeb()) {
-      const repo = githubRepo(program.repository);
-      await message(`${NAME} cannot install this update by itself. Download it from the release page and install it from there.`, ['OK']);
-      if (repo) void shell.openExternal(latestReleasePage(repo));
-      return false;
+  async function prepareInstall({ files }: { files: string[] }): Promise<boolean> {
+    const sudo = process.platform === 'linux' ? graphicalSudo((env.PATH ?? '').split(delimiter).filter(Boolean), existsSync) : null;
+    const problem = installProblem({ platform: process.platform, kind: updateKind, files, appImage: env.APPIMAGE, sudo, exists: existsSync, writable });
+    if (problem) return cannotInstall(problem);
+    if (process.platform === 'linux' && updateKind === 'default' && sudo === 'pkexec' && process.getuid?.() !== 0) {
+      const probe = pkexecProbe(await runForExitCode('pkexec', ['--disable-internal-agent', 'dpkg', '--version']));
+      log('pkexec before installing', probe);
+      if (probe === 'dismissed') return false;
+      if (probe === 'unusable') return cannotInstall(updateText.problem.noAgent);
     }
     // Asked once: "Keep editing" calls the install off here, before anything is closed.
     if (program.confirmQuit && !program.confirmQuit()) return false;
@@ -593,13 +622,30 @@ export function runDesktopApp(program: DesktopProgram): void {
     // updater's quit through without asking again or ending the app early.
     quitting = true;
     await stopServer();
-    // The installer normally ends the app at once; if it never starts, the app (with no window and no
-    // server left) must not linger.
-    setTimeout(() => {
-      log('the update installer did not start; quitting');
+    // A started installer ends the app at once (a failed one is installFailed's); if the app is still
+    // here after 30 s, with no window and no server left, it must not linger.
+    backstop = setTimeout(() => {
+      log('the app did not quit for the update installer; quitting');
       app.exit(exitCode);
-    }, 30_000).unref();
+    }, 30_000);
+    backstop.unref();
     return true;
+  }
+
+  /**
+   * The install failed after prepareInstall closed the window and stopped the server (a closed password
+   * box, a wrong password, a file that could not be moved): say so, offer the release page, and start
+   * the old version again, rather than leaving an invisible app that exits by itself.
+   */
+  async function installFailed(reason: string) {
+    if (backstop) clearTimeout(backstop);
+    backstop = null;
+    log('the update did not install; starting again', reason);
+    const repo = githubRepo(program.repository);
+    const choice = await message(updateText.installFailed(NAME, reason), repo ? [updateText.openReleasePage, 'OK'] : ['OK']);
+    if (choice === 0 && repo) await shell.openExternal(latestReleasePage(repo));
+    app.relaunch(relaunchOptions({ kind: updateKind, appImage: env.APPIMAGE }));
+    app.exit(exitCode);
   }
 
   /**
@@ -610,7 +656,8 @@ export function runDesktopApp(program: DesktopProgram): void {
   function startUpdates() {
     if (selfTest) return;
     try {
-      const updater = updaterKind({ platform: process.platform, appImage: env.APPIMAGE }) === 'appimage' ? new AppImageUpdater() : autoUpdater;
+      updateKind = updaterKind({ platform: process.platform, appImage: env.APPIMAGE });
+      const updater = updateKind === 'appimage' ? new AppImageUpdater() : autoUpdater;
       updater.logger = { info: (m: unknown) => log('[updater]', m), warn: (m: unknown) => log('[updater warn]', m), error: (m: unknown) => log('[updater error]', m), debug: () => {} };
       // Testing only: an update feed served on this computer (electron-updater's generic provider).
       const feed = envVar('UPDATE_FEED');
@@ -631,6 +678,7 @@ export function runDesktopApp(program: DesktopProgram): void {
         },
         refreshMenu: () => buildMenu(),
         prepareInstall,
+        installFailed: (reason) => void installFailed(reason),
         log,
         now: () => Date.now(),
       });

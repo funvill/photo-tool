@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { HttpError, newError } from 'builder-util-runtime';
 import { describe, expect, it } from 'vitest';
 import { hostResolverRules } from '../electron/netGuard';
-import { CHECK_INTERVAL_MS, UPDATE_HOSTS, githubRepo, isNoRelease, latestReleasePage, readUpdateSettings, releasePage, shouldCheckAtStart, updateText, updaterKind, writeUpdateSettings } from '../electron/updateRules';
+import { CHECK_INTERVAL_MS, UPDATE_HOSTS, githubRepo, graphicalSudo, installProblem, isNoRelease, pkexecProbe, relaunchOptions, latestReleasePage, readUpdateSettings, releasePage, shouldCheckAtStart, updateText, updaterKind, writeUpdateSettings } from '../electron/updateRules';
 
 const tempFile = () => join(mkdtempSync(join(tmpdir(), 'updates-')), 'updates.json');
 
@@ -115,6 +115,53 @@ describe('isNoRelease', () => {
     expect(isNoRelease('HttpError: 404')).toBe(false);
     expect(isNoRelease(null)).toBe(false);
     expect(isNoRelease(undefined)).toBe(false);
+  });
+});
+
+describe('before installing: what can be checked before anything is closed', () => {
+  const linuxDeb = { platform: 'linux', kind: 'default' as const, files: ['/home/me/.cache/photo-tool-updater/pending/photo-tool_0.1.40_amd64.deb'], appImage: undefined, sudo: 'pkexec', exists: () => true, writable: () => true };
+
+  it('graphicalSudo: the first of gksudo, kdesudo, pkexec, beesu on PATH (electron-updater\'s order), or null', () => {
+    const on = (...paths: string[]) => (p: string) => paths.includes(p.replace(/\\/g, '/'));
+    expect(graphicalSudo(['/usr/bin', '/bin'], on('/usr/bin/pkexec', '/bin/beesu'))).toBe('pkexec');
+    expect(graphicalSudo(['/usr/bin'], on('/usr/bin/pkexec', '/usr/bin/kdesudo'))).toBe('kdesudo');
+    expect(graphicalSudo(['/usr/bin'], on('/usr/bin/sudo'))).toBeNull();
+    expect(graphicalSudo([], () => true)).toBeNull();
+  });
+
+  it('installProblem: nothing in the way', () => {
+    expect(installProblem(linuxDeb)).toBeNull();
+    expect(installProblem({ ...linuxDeb, platform: 'win32', files: ['C:\\cache\\Photo-Tool-Setup-0.1.40.exe'], sudo: null })).toBeNull();
+    expect(installProblem({ ...linuxDeb, kind: 'appimage', appImage: '/home/me/Apps/Photo-Tool-0.1.33.AppImage', sudo: null })).toBeNull();
+  });
+
+  it('installProblem: the downloaded file is gone', () => {
+    expect(installProblem({ ...linuxDeb, exists: () => false })).toBe(updateText.problem.missingFile);
+    expect(installProblem({ ...linuxDeb, files: [] })).toBe(updateText.problem.missingFile);
+  });
+
+  it("installProblem: the AppImage's folder cannot be written (electron-updater deletes the old file first)", () => {
+    const appImage = '/opt/Apps/Photo-Tool-0.1.33.AppImage';
+    const writable = (p: string) => p !== '/opt/Apps';
+    expect(installProblem({ ...linuxDeb, kind: 'appimage', appImage, writable, sudo: null })).toBe(updateText.problem.appImageNotWritable('/opt/Apps'));
+    expect(installProblem({ ...linuxDeb, kind: 'appimage', appImage, exists: (p) => p !== appImage, sudo: null })).toBe(updateText.problem.appImageNotWritable('/opt/Apps'));
+  });
+
+  it('installProblem: a .deb with no graphical way to ask for the password', () => {
+    expect(installProblem({ ...linuxDeb, sudo: null })).toBe(updateText.problem.noSudo);
+  });
+
+  it('pkexecProbe: 0 can install; 126 the user closed the password box; anything else cannot ask (no polkit agent, refused)', () => {
+    expect(pkexecProbe(0)).toBe('ok');
+    expect(pkexecProbe(126)).toBe('dismissed');
+    expect(pkexecProbe(127)).toBe('unusable');
+    expect(pkexecProbe(1)).toBe('unusable');
+    expect(pkexecProbe(null)).toBe('unusable');
+  });
+
+  it('relaunchOptions: an AppImage starts again from its own file, not the mount it ran from', () => {
+    expect(relaunchOptions({ kind: 'appimage', appImage: '/home/me/Apps/Photo-Tool-0.1.33.AppImage' })).toEqual({ execPath: '/home/me/Apps/Photo-Tool-0.1.33.AppImage' });
+    expect(relaunchOptions({ kind: 'default', appImage: undefined })).toBeUndefined();
   });
 });
 

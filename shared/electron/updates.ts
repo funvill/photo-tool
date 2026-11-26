@@ -24,9 +24,12 @@ export interface UpdaterLike {
   /** Added to every request, last (so these win over electron-updater's own). */
   requestHeaders: OutgoingHttpHeaders | null;
   checkForUpdates(): Promise<{ isUpdateAvailable: boolean; updateInfo: { version: string } } | null>;
-  downloadUpdate(): Promise<unknown>;
+  /** Resolves to the downloaded files (the installer). */
+  downloadUpdate(): Promise<string[]>;
   quitAndInstall(isSilent?: boolean, isForceRunAfter?: boolean): void;
   on(event: 'download-progress', cb: (p: { percent: number }) => void): unknown;
+  on(event: 'error', cb: (e: Error) => void): unknown;
+  removeListener(event: 'error', cb: (e: Error) => void): unknown;
 }
 
 export interface UpdateDeps {
@@ -47,8 +50,10 @@ export interface UpdateDeps {
   setProgress(fraction: number | null): void;
   /** Build the Help menu again (the items below changed). */
   refreshMenu(): void;
-  /** The shell's safe way out before installing; false calls the install off. */
-  prepareInstall(): Promise<boolean>;
+  /** The shell's safe way out before installing, given the downloaded files; false calls the install off. */
+  prepareInstall(o: { files: string[] }): Promise<boolean>;
+  /** The install failed after prepareInstall closed the app's window and server: the shell recovers. */
+  installFailed(reason: string): void;
   log(...a: unknown[]): void;
   now(): number;
 }
@@ -114,6 +119,8 @@ export function createUpdates(d: UpdateDeps): Updates {
   let installOffer: Promise<void> | null = null;
   /** The version downloaded and not yet installed (Later, or the install called off): offered again from the menu. */
   let ready: string | null = null;
+  /** What the download of `ready` resolved to. */
+  let files: string[] = [];
   /** The download's progress in percent, or null when nothing is downloading. */
   let percent: number | null = null;
 
@@ -164,13 +171,12 @@ export function createUpdates(d: UpdateDeps): Updates {
   function offerInstall(version: string): Promise<void> {
     installOffer ??= (async () => {
       if ((await ask(updateText.ready(d.productName, version), [BUTTONS.restart, BUTTONS.later])) !== BUTTONS.restart) return;
-      if (!(await d.prepareInstall())) {
+      if (!(await d.prepareInstall({ files }))) {
         d.log('update install called off');
         return;
       }
       d.log('installing update', version);
-      // Silently, then start the new version (the NSIS installer is one-click; Linux ignores the first flag).
-      updater.quitAndInstall(true, true);
+      install();
     })().finally(() => {
       installOffer = null;
       d.refreshMenu();
@@ -178,12 +184,36 @@ export function createUpdates(d: UpdateDeps): Updates {
     return installOffer;
   }
 
+  /**
+   * Silently, then start the new version (the NSIS installer is one-click; Linux ignores the first flag).
+   * electron-updater installs synchronously and queues app.quit only when that worked; a failure is an
+   * `error` event (or a throw), and it sets quitAndInstallCalled back to false. Either way: installFailed.
+   */
+  function install() {
+    let failure: unknown = null;
+    const onError = (e: Error) => {
+      failure ??= e;
+    };
+    updater.on('error', onError);
+    try {
+      updater.quitAndInstall(true, true);
+    } catch (e) {
+      failure ??= e;
+    } finally {
+      updater.removeListener('error', onError);
+    }
+    if (failure === null && (updater as { quitAndInstallCalled?: unknown }).quitAndInstallCalled !== false) return;
+    const why = failure === null ? 'the installer did not start.' : reason(failure);
+    d.log('update install failed', why);
+    d.installFailed(why);
+  }
+
   function download(version: string): Promise<void> {
     downloading ??= (async () => {
       for (;;) {
         setPercent(0);
         try {
-          await updater.downloadUpdate();
+          files = await updater.downloadUpdate();
         } catch (e) {
           setPercent(null);
           d.log('update download failed', reason(e));

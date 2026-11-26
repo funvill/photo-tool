@@ -3,7 +3,7 @@
 // "nothing published yet", the words the user reads, and the hosts the updater may look up.
 // The controller that drives electron-updater is updates.ts. Unit-tested in shared/tests/update-rules.test.ts.
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 
 /**
  * The only names the updater looks up: GitHub's site and API, and the two hosts a release download
@@ -109,6 +109,54 @@ export function updaterKind(o: { platform: string; appImage: string | undefined 
   return o.platform === 'linux' && !!o.appImage ? 'appimage' : 'default';
 }
 
+/**
+ * The graphical sudo electron-updater's LinuxUpdater.determineSudoCommand would use for a .deb, in its
+ * order, or null (it would fall back to plain sudo, which needs a terminal the app does not have).
+ */
+export function graphicalSudo(pathDirs: string[], exists: (path: string) => boolean): string | null {
+  return ['gksudo', 'kdesudo', 'pkexec', 'beesu'].find((cmd) => pathDirs.some((dir) => exists(join(dir, cmd)))) ?? null;
+}
+
+/**
+ * Restart now, before anything is closed: what would make the install fail? Null when nothing does.
+ * The downloaded file must still be there; an AppImage's folder must be writable (electron-updater
+ * deletes the old AppImage, then moves the new one in); a .deb needs a graphical sudo. Whether pkexec
+ * can actually ask for the password is found out by running it (pkexecProbe).
+ */
+export function installProblem(o: {
+  platform: string;
+  kind: 'appimage' | 'default';
+  files: string[];
+  appImage: string | undefined;
+  sudo: string | null;
+  exists(path: string): boolean;
+  writable(path: string): boolean;
+}): string | null {
+  if (o.files.length === 0 || !o.files.every((f) => o.exists(f))) return updateText.problem.missingFile;
+  if (o.kind === 'appimage') {
+    const folder = dirname(o.appImage ?? '');
+    if (!o.appImage || !o.exists(o.appImage) || !o.writable(folder)) return updateText.problem.appImageNotWritable(folder);
+    return null;
+  }
+  if (o.platform === 'linux' && !o.sudo) return updateText.problem.noSudo;
+  return null;
+}
+
+/**
+ * pkexec's exit code (from `pkexec --disable-internal-agent dpkg --version`, run before anything is
+ * closed): 126 when the user closed the password box; 127 when it could not ask or was refused (no
+ * polkit authentication agent, a wrong password); null when it did not run.
+ */
+export function pkexecProbe(code: number | null): 'ok' | 'dismissed' | 'unusable' {
+  if (code === 0) return 'ok';
+  return code === 126 ? 'dismissed' : 'unusable';
+}
+
+/** app.relaunch's options: an AppImage runs from a mount that is gone once it exits, so it starts from its own file. */
+export function relaunchOptions(o: { kind: 'appimage' | 'default'; appImage: string | undefined }): { execPath: string } | undefined {
+  return o.kind === 'appimage' && o.appImage ? { execPath: o.appImage } : undefined;
+}
+
 /** Everything the update dialogs and the Help menu say. */
 export const updateText = {
   available: (name: string, latest: string, current: string) => `${name} ${latest} is available (you have ${current}).`,
@@ -121,4 +169,15 @@ export const updateText = {
   downloadFailed: (reason: string) => `The update did not download: ${reason}`,
   /** The Help menu's first item once an update is downloaded and not yet installed. */
   installMenu: (version: string) => `Install &update ${version}…`,
+  /** Restart now cannot work (found before anything is closed); the release page is offered instead. */
+  cannotInstall: (name: string, problem: string) => `${name} cannot install this update by itself: ${problem} Download it from the release page and install it from there.`,
+  /** The install failed after the window was closed; the app starts again. */
+  installFailed: (name: string, reason: string) => `The update did not install: ${reason}\n\n${name} will start again. You can download the update from the release page.`,
+  openReleasePage: 'Open the release page',
+  problem: {
+    missingFile: 'the downloaded update is gone.',
+    appImageNotWritable: (folder: string) => `it cannot write to ${folder}.`,
+    noSudo: 'there is no graphical way to ask for the administrator password (pkexec).',
+    noAgent: 'it cannot ask for the administrator password (pkexec found no way to ask, or was refused).',
+  },
 };
