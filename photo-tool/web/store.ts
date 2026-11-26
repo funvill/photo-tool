@@ -386,6 +386,8 @@ let scoreToastId = 0;
 let savingCount = 0;
 /** Saving into the photo file needs the desktop app. */
 const canSaveToFile = () => !!host?.saveEditToFile;
+/** The most photos one Delete takes: the desktop app's own limit (MAX_TRASH_FILES in electron/fileActions.ts). */
+export const MAX_TRASH_PHOTOS = 10_000;
 /** Ctrl+C puts photos on the clipboard only in the desktop app (a plain browser keeps its own Ctrl+C). */
 export const canCopyPhotos = () => !!host?.copyImage;
 /** Ctrl+C copies at most this many photos as files (as many as a drag takes). */
@@ -1102,11 +1104,21 @@ export const useGallery = create<GalleryState>()((set, get) => {
       if (!trash) return;
       const targets = paths ?? selectedShown(get());
       if (!targets.length) return;
+      // Said before anything is asked or moved: the desktop app would refuse it too.
+      if (targets.length > MAX_TRASH_PHOTOS) {
+        get().toast('error', `Delete takes at most ${MAX_TRASH_PHOTOS.toLocaleString('en')} photos at a time. Nothing was moved.`);
+        return;
+      }
       try {
         const r = await trash(targets);
         if (r.cancelled) return;
         if (r.trashed.length) get().removeItems(r.trashed);
-        if (r.failed.length) {
+        // Not moved: a failure in the bin, or a photo that was no longer a file of the folder.
+        const notMoved = targets.length - r.trashed.length;
+        if (notMoved > 0 && r.trashed.length > 0) {
+          const first = r.failed[0];
+          get().toast('error', `Moved ${r.trashed.length} of ${plural(targets.length, 'photo')} to the ${BIN}. ${notMoved} ${notMoved === 1 ? 'was' : 'were'} not moved${first ? `: ${nameOf(first.path)}: ${first.message}` : '.'}`);
+        } else if (r.failed.length) {
           const first = r.failed[0];
           get().toast('error', `Couldn't move ${r.failed.length === 1 ? nameOf(first.path) : plural(r.failed.length, 'photo')} to the ${BIN}: ${first.message}`);
         }
@@ -1130,9 +1142,15 @@ export const useGallery = create<GalleryState>()((set, get) => {
         if (!host?.copyFiles) return;
         const sent = paths.slice(0, MAX_COPY_FILES);
         const r = await host.copyFiles(sent);
-        if (!r.ok) toast('error', r.error ?? "Couldn't copy the photos.");
-        else if (sent.length < paths.length || r.dropped > 0) toast('success', `Copied the first ${r.copied} of ${paths.length} photos`);
-        else toast('success', `Copied ${plural(r.copied, 'photo')}`);
+        if (!r.ok) {
+          toast('error', r.error ?? "Couldn't copy the photos.");
+          return;
+        }
+        // What went on the clipboard, as the desktop app says: the files, or (not on Windows) their paths as text.
+        const some = sent.length < paths.length || r.dropped > 0;
+        const what = some ? `the first ${r.copied} of ${paths.length} photos` : plural(r.copied, 'photo');
+        if (r.as === 'paths') toast('success', `Copied the paths of ${what} as text (copying the files themselves works on Windows only)`);
+        else toast('success', `Copied ${what}`);
       } catch (e) {
         toast('error', `Couldn't copy: ${message(e)}`);
       }

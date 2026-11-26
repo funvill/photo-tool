@@ -341,7 +341,10 @@ describe('#9 Ctrl+C with several photos', () => {
     expect(handler).toContain('if (!allowed(e))');
     expect(handler).toContain('inOpenFolder');
     expect(handler).toContain('copyFilesRequest');
-    expect(handler).toContain("'text/uri-list'");
+    // The files on Windows only (copyFilesClipboard in fileActions.ts), the paths as text elsewhere, and the reply says which.
+    expect(handler).toContain('copyFilesClipboard(request.paths, process.platform)');
+    expect(handler).toContain('clipboard.writeText(put.text)');
+    expect(handler).toContain('as: put.as');
   });
 });
 

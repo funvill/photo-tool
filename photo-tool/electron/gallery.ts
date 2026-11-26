@@ -11,7 +11,7 @@ import { formatById } from '../../shared/core/mediaFormats';
 import { editFormatFor, type PhotoEdit } from '../../shared/core/photoEdit';
 import { launchFolder } from '../../shared/electron/config';
 import { dragFiles, dragRequest, preparedDragFor, sameDragList, type DragCheck, type PreparedDrag } from './drag';
-import { copyFilesRequest, copyTextRequest, fileUrlList, trashConfirm, trashPhotos, type TrashResult } from './fileActions';
+import { copyFilesClipboard, copyFilesRequest, copyTextRequest, trashConfirm, trashPhotos, type TrashResult } from './fileActions';
 import { letPageClose, saveAs, saveToFile, shouldQuit, unsavedClosePrompt, type EditSaveAsResult, type EditSaveResult } from './editActions';
 import { readEditTarget, readMapConsent, writeEditTarget, writeMapConsent, type EditTarget } from './mapTiles';
 
@@ -300,8 +300,9 @@ export function galleryFileActions(o: { window: () => BrowserWindow | null; from
     }
   });
 
-  // Ctrl+C with several photos: the files, as Explorer and chat apps paste them. A text/uri-list of file URLs,
-  // which Electron writes to the Windows clipboard as a file drop list (CF_HDROP). The page sends at most 500.
+  // Ctrl+C with several photos. On Windows the files, as Explorer and chat apps paste them: a text/uri-list of
+  // file URLs, which Electron writes to the Windows clipboard as a file drop list (CF_HDROP). Elsewhere (never
+  // tried there) their paths as text, and the reply says so. The page sends at most 500.
   ipcMain.handle('gallery:copy-files', async (e, raw: unknown): Promise<CopyFilesReply> => {
     if (!allowed(e)) return { ok: false, copied: 0, dropped: 0, error: 'Not allowed' };
     try {
@@ -309,8 +310,10 @@ export function galleryFileActions(o: { window: () => BrowserWindow | null; from
       const ok = new Set(asked.length ? await inOpenFolder(asked) : []);
       const request = copyFilesRequest(asked, (p) => ok.has(p));
       if (!request) return { ok: false, copied: 0, dropped: 0, error: NOT_A_PHOTO };
-      await clipboard.write([new ClipboardItem({ 'text/uri-list': fileUrlList(request.paths) })]);
-      return { ok: true, copied: request.paths.length, dropped: request.dropped };
+      const put = copyFilesClipboard(request.paths, process.platform);
+      if (put.as === 'files') await clipboard.write([new ClipboardItem({ [put.type]: put.data })]);
+      else clipboard.writeText(put.text);
+      return { ok: true, copied: request.paths.length, dropped: request.dropped, as: put.as };
     } catch (err) {
       o.log('copy files failed', String(err));
       return { ok: false, copied: 0, dropped: 0, error: `Couldn't copy the photos: ${failure(err)}` };

@@ -40,7 +40,7 @@ export interface DesktopApi {
    * Gallery window: put these photos (at most 500) on the clipboard as files, so they paste into a file
    * manager or a chat app. Only photos of the open folder; `copied` says how many went, `dropped` how many were left over.
    */
-  copyFiles?(paths: string[]): Promise<{ ok: boolean; copied: number; dropped: number; error?: string }>;
+  copyFiles?(paths: string[]): Promise<{ ok: boolean; copied: number; dropped: number; error?: string; /** 'files' (Windows), or 'paths': their paths as text, where copying files was never tried. */ as?: 'files' | 'paths' }>;
   /**
    * Gallery window: open the photo's folder in the file manager with the photo selected. (Named apart
    * from `showInFolder`, which shows an editor export by its file name.)

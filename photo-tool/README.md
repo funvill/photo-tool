@@ -57,7 +57,7 @@ There is no top or bottom; a plain photo lands roughly between 30 and 90. Choose
 - **Before** (or hold **\\**): shows the original while held.
 - **Reset** (crop, rotation, flip and colour), **Cancel** (**Esc**) and **Done** (**Enter**). While editing, only Esc, Enter, R, \\ and ? act as keys.
 
-Rotate left, Rotate right and Flip horizontally are also on the right-click menu, and **[** and **]** turn photos without opening edit mode. An older Photobook Editor ignores flip and light and colour: it still applies the crop and rotation.
+Rotate left, Rotate right and Flip horizontally are also on the right-click menu, and **[** and **]** turn photos without opening edit mode. An older Photobook Editor ignores flip and light and colour. For a photo that is only cropped or turned it still gets the edit right, but a flipped photo that is also turned or cropped comes in turned the wrong way or cropped from the other side, so update both programs together.
 
 **Done** keeps the edit as *unsaved*: the photo's tile gets a marker, and the preview caption says "Edited · not saved". Clicking another photo while editing does the same. Edit is unavailable for a photo while it is being saved. Nothing is written until you save:
 

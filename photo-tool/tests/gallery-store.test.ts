@@ -4,7 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GalleryItem } from '../server/app';
 
-const { useGallery, connectDesktop, canCopyPhotos, guardUnload, selectVisible, selectStackInfo, selectFiltered, selectFacts, selectStackPlace, menuTargets, shownEdit, selectMeaningStart } = await import('../web/store');
+const { useGallery, connectDesktop, canCopyPhotos, MAX_TRASH_PHOTOS, BIN, guardUnload, selectVisible, selectStackInfo, selectFiltered, selectFacts, selectStackPlace, menuTargets, shownEdit, selectMeaningStart } = await import('../web/store');
 const { IDENTITY_EDIT } = await import('../../shared/core/photoEdit');
 
 function item(over: Partial<GalleryItem> = {}): GalleryItem {
@@ -1802,6 +1802,35 @@ describe('#9 gallery store: select all, select none, Delete', () => {
     expect(g().anchor).toBeNull();
   });
 
+  // #9 fix round 1: every selected photo goes in one call (one confirm for the real count).
+  it('trashSelected sends all 2,000 selected photos at once, and says when some were not moved', async () => {
+    const many = Array.from({ length: 2000 }, (_, n) => item({ path: `p${String(n).padStart(4, '0')}`, fileName: `p${n}.jpg`, key: `k${n}` }));
+    setup(many, 'p0000', { selection: many.map((i) => i.path) });
+    const asked: string[][] = [];
+    disconnect = connectDesktop({
+      trashPhotos: async (paths: string[]) => {
+        asked.push(paths);
+        // One could not be moved, one was no longer a photo of the folder.
+        return { trashed: paths.slice(2), failed: [{ path: paths[0], message: 'No bin on this drive' }], cancelled: false };
+      },
+    });
+    await g().trashSelected();
+    expect(asked.map((a) => a.length)).toEqual([2000]);
+    expect(g().items).toHaveLength(2);
+    expect(g().toasts).toEqual([expect.objectContaining({ kind: 'error', text: `Moved 1998 of 2000 photos to the ${BIN}. 2 were not moved: p0.jpg: No bin on this drive` })]);
+  });
+
+  it(`trashSelected refuses more than ${MAX_TRASH_PHOTOS} photos before asking the desktop app`, async () => {
+    const many = Array.from({ length: MAX_TRASH_PHOTOS + 1 }, (_, n) => item({ path: `p${String(n).padStart(5, '0')}`, fileName: `p${n}.jpg`, key: `k${n}` }));
+    setup(many, 'p00000', { selection: many.map((i) => i.path) });
+    let called = false;
+    disconnect = connectDesktop({ trashPhotos: async () => ((called = true), { trashed: [], failed: [], cancelled: true }) });
+    await g().trashSelected();
+    expect(called).toBe(false);
+    expect(g().items).toHaveLength(MAX_TRASH_PHOTOS + 1);
+    expect(g().toasts).toEqual([expect.objectContaining({ kind: 'error', text: `Delete takes at most ${MAX_TRASH_PHOTOS.toLocaleString('en')} photos at a time. Nothing was moved.` })]);
+  });
+
   it('trashSelected sends only the shown selected photos, removes them, and selects the next photo', async () => {
     // 'b' is selected but hidden, so not shown: it is left out.
     setup([...photos('a'), item({ path: 'b', key: 'b', fileName: 'b.jpg', info: { hidden: true } }), ...photos('c', 'd', 'e')], 'c', { selection: ['b', 'c', 'd'] });
@@ -1980,6 +2009,13 @@ describe('#9 gallery store: Ctrl+C', () => {
     disconnect();
     disconnect = null;
     expect(canCopyPhotos()).toBe(false);
+  });
+
+  it('where the desktop app copies the paths as text (not Windows), the toast says so', async () => {
+    setup(photos('a', 'b', 'c'), 'a', { selection: ['a', 'b', 'c'] });
+    disconnect = connectDesktop({ copyImage: async () => ({ ok: true }), copyFiles: async (ps: string[]) => ({ ok: true, copied: ps.length, dropped: 0, as: 'paths' as const }) });
+    await g().copySelected();
+    expect(g().toasts).toEqual([expect.objectContaining({ kind: 'success', text: 'Copied the paths of 3 photos as text (copying the files themselves works on Windows only)' })]);
   });
 });
 

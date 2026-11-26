@@ -2,7 +2,7 @@
 // photos of the open folder go on the clipboard (as files: a text/uri-list of file URLs, which
 // Electron puts on the Windows clipboard as CF_HDROP, the format Explorer pastes).
 import { describe, expect, it } from 'vitest';
-import { copyFilesRequest, fileUrlList } from '../electron/fileActions';
+import { copyFilesClipboard, copyFilesRequest, fileUrlList } from '../electron/fileActions';
 import { MAX_DRAG_FILES } from '../electron/drag';
 
 describe('copyFilesRequest', () => {
@@ -38,5 +38,21 @@ describe('fileUrlList', () => {
     for (const l of lines) expect(l.startsWith('file:///')).toBe(true);
     expect(lines[0]).toContain('%231');
     expect(lines[1]).toContain('100%25');
+  });
+});
+
+// #9 fix round 1: files on the clipboard were only ever tried on Windows. Elsewhere Ctrl+C with several
+// photos copies their paths as text, and says so, rather than claiming files that may not paste.
+describe('copyFilesClipboard', () => {
+  const paths = ['C:\Trip\a #1.jpg', 'C:\Trip\b.jpg'];
+
+  it('on Windows: the files, as a text/uri-list of file URLs', () => {
+    expect(copyFilesClipboard(paths, 'win32')).toEqual({ as: 'files', type: 'text/uri-list', data: fileUrlList(paths) });
+  });
+
+  it('on Linux and macOS: the paths as text, one per line', () => {
+    for (const platform of ['linux', 'darwin'] as const) {
+      expect(copyFilesClipboard(['/home/u/a.jpg', '/home/u/b.jpg'], platform)).toEqual({ as: 'paths', text: '/home/u/a.jpg\n/home/u/b.jpg' });
+    }
   });
 });

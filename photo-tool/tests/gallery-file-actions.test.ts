@@ -2,7 +2,7 @@
 // to the Recycle Bin, only after the confirm, and a failure is reported rather than retried another way.
 // Every dependency is a fake here: nothing on disk is touched.
 import { describe, expect, it, vi } from 'vitest';
-import { copyTextRequest, MAX_COPY_TEXT, trashConfirm, trashPhotos } from '../electron/fileActions';
+import { copyTextRequest, MAX_COPY_TEXT, MAX_TRASH_FILES, trashConfirm, trashPhotos } from '../electron/fileActions';
 
 function fakes(o: { catalogued?: string[]; confirm?: boolean; failing?: string[]; removedFails?: boolean } = {}) {
   const catalogued = new Set(o.catalogued ?? ['C:\\p\\a.jpg', 'C:\\p\\b.jpg']);
@@ -83,10 +83,42 @@ describe('trashPhotos', () => {
     }
   });
 
-  it('asks the server about at most 500 paths', async () => {
+  it('asks the server about at most 500 paths at a time', async () => {
     const { deps, calls } = fakes();
     await trashPhotos(Array.from({ length: 600 }, (_, i) => `C:\\p\\${i}.jpg`), deps);
     expect(calls.checked[0]).toHaveLength(500);
+  });
+
+  // #9 fix round 1: Ctrl+A then Delete in a big folder. The confirm names the real count, and every
+  // photo it named goes to the bin (checked and reported in batches of 500), never 500 of them only.
+  it('2,000 photos: one confirm for all 2,000, all 2,000 trashed, checked and reported 500 at a time', async () => {
+    const many = Array.from({ length: 2000 }, (_, i) => `C:\\p\\${i}.jpg`);
+    const { deps, calls } = fakes({ catalogued: many });
+    const r = await trashPhotos(many, deps);
+    expect(calls.checked.map((c) => c.length)).toEqual([500, 500, 500, 500]);
+    expect(calls.confirmed).toHaveLength(1);
+    expect(calls.confirmed[0]).toHaveLength(2000);
+    expect(trashConfirm(calls.confirmed[0], 'win32').message).toBe('Move 2000 photos to the Recycle Bin?');
+    expect(calls.trashed).toEqual(many);
+    expect(calls.removed.map((c) => c.length)).toEqual([500, 500, 500, 500]);
+    expect(r).toEqual({ trashed: many, failed: [], cancelled: false });
+  });
+
+  it('a failure part way is reported with what was moved, and the rest still go', async () => {
+    const many = Array.from({ length: 700 }, (_, i) => `C:\\p\\${i}.jpg`);
+    const { deps } = fakes({ catalogued: many, failing: ['C:\\p\\600.jpg'] });
+    const r = await trashPhotos(many, deps);
+    expect(r.trashed).toHaveLength(699);
+    expect(r.failed).toEqual([{ path: 'C:\\p\\600.jpg', message: 'The Recycle Bin is not available on this drive' }]);
+  });
+
+  it(`more than ${MAX_TRASH_FILES} is refused before anything is asked or moved`, async () => {
+    const { deps } = fakes();
+    const r = await trashPhotos(Array.from({ length: MAX_TRASH_FILES + 1 }, (_, i) => `C:\\p\\${i}.jpg`), deps);
+    expect(r).toEqual({ trashed: [], failed: [], cancelled: true });
+    expect(deps.check).not.toHaveBeenCalled();
+    expect(deps.confirm).not.toHaveBeenCalled();
+    expect(deps.trash).not.toHaveBeenCalled();
   });
 });
 

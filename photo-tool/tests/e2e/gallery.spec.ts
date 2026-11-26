@@ -1939,6 +1939,21 @@ test.describe('#9 keys, rotate and flip, light and colour, copy, shortcuts', () 
       await expect(edited).toHaveAttribute('style', /filter/);
       await expect(preview).toContainText('Edited · not saved');
 
+      // Zoomed in, holding \ keeps the zoom (a colour edit keeps the photo's shape): the same detail, before and after.
+      const stage = preview.locator('.gallery-preview-stage');
+      const box = (await stage.boundingBox())!;
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.wheel(0, -300);
+      await expect(stage).toHaveClass(/zoomed/);
+      await page.keyboard.down('Backslash');
+      await expect(caption.getByText('Original', { exact: true })).toBeVisible();
+      await expect(stage).toHaveClass(/zoomed/);
+      await page.keyboard.up('Backslash');
+      await expect(edited).toHaveAttribute('style', /filter/);
+      await expect(stage).toHaveClass(/zoomed/);
+      await stage.dblclick();
+      await expect(stage).not.toHaveClass(/zoomed/);
+
       // The Before button, held.
       const before = preview.getByRole('button', { name: 'Before' });
       await before.hover();
