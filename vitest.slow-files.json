@@ -1,0 +1,15 @@
+{
+  "_comment": "The slow unit and integration test files, chosen from per-file timings (README: Fast loop vs full loop). `npx vitest run` skips them, `npm run test:slow` runs only them, `npm test` (and so CI) runs both. A test file not listed here is fast by default, so a new file lands in the everyday loop without touching this list.",
+  "files": [
+    "photo-tool/tests/gallery-server.test.ts",
+    "photo-tool/tests/gallery-catalog.test.ts",
+    "photo-tool/tests/gallery-edit-server.test.ts",
+    "photobook-editor/tests/fonts.test.ts",
+    "photobook-editor/tests/portable.test.ts",
+    "photobook-editor/tests/milestone.test.ts",
+    "photobook-editor/tests/cutouts.test.ts",
+    "photobook-editor/tests/editor-shell.test.ts",
+    "shared/tests/boundaries.test.ts",
+    "photo-tool/tests/tagging-worker-ping.test.ts"
+  ]
+}

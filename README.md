@@ -27,12 +27,35 @@ Each program has its own commands:
 | Make the installed folder only, without an installer | `npm run dist:dir:photo-tool` | `npm run dist:dir:editor` |
 | End-to-end tests (in your installed Chrome) | `npm run e2e:photo-tool` | `npm run e2e:editor` |
 
-- `npm test` runs every unit test (both programs and `shared/`), `npm run typecheck` checks all the code, and `npm run test:e2e` runs both programs' end-to-end tests.
+- `npm test` runs every unit test (both programs and `shared/`: the fast set, then the slow set; see "Fast loop vs full loop" below), `npm run typecheck` checks all the code, and `npm run test:e2e` runs both programs' end-to-end tests.
 - `npm run dist:all` makes both installers. Each builds for the platform it runs on, into its own folder, `dist/installer/photo-tool/` and `dist/installer/photobook-editor/`: on Windows a per-user installer (`Photo Tool Setup <version>.exe`, `Photobook Editor Setup <version>.exe`, no administrator prompt), on Linux a `.deb` and an AppImage (x64 only, `photo-tool-<version>-amd64.deb`, `photo-tool-<version>-x86_64.AppImage` and the same for `photobook-editor`). Everything a program needs is inside; nothing is downloaded when installing or running it.
 - The installers are not code-signed, so Windows shows "Windows protected your PC" (choose **More info**, then **Run anyway**).
 - From Windows, `node scripts/desktop/linux/docker-build.mjs` makes the Linux packages in Docker, and `node scripts/desktop/linux/docker-test.mjs` installs and self-tests them on clean Linux desktops with the network off.
 - `npm run fixtures` writes 21 synthetic trip photos to `fixtures/generated/trip`, to try either program without your own photos.
 - The code: `photo-tool/` and `photobook-editor/` are the two programs, and `shared/` is what both use (the desktop shell, `photoinfo.json`, reading photos). Neither program imports the other; a test checks it.
+
+## Fast loop vs full loop
+
+Measured on one Windows machine (12 logical cores) at version 0.1.40. Times are wall clock.
+
+| | Before | After |
+| --- | --- | --- |
+| Everyday unit loop: `npx vitest run` (or `npm run test:fast`) | 158 s, 1,198 tests | **21 s**, 900 tests |
+| Slow unit files only: `npm run test:slow` | (inside the 158 s) | 83 s, 300 tests |
+| Every unit test: `npm test` (fast, then slow) | 158 s | 192 s in one measured run (the two sets run one after the other, so the total is no faster than before; the gain is that the everyday loop skips the slow set) |
+| `npm run typecheck` | 28 s | 28 s |
+| Photobook Editor e2e (`npm run e2e:editor`) | 69 s (3 pass, 1 skipped) | not changed |
+| Photo Tool e2e (`npm run e2e:photo-tool`) | 369 s (47 pass) | not changed |
+| `npm run dist:dir:photo-tool` (installed folder, no installer) | 66 s | not changed |
+| `npm run dist:photo-tool` (NSIS installer) | 362 s | not changed |
+
+The editor installer was not timed. Each e2e project also builds and starts both programs' servers, so the editor figure includes the Photo Tool build.
+
+**Fast loop, while working:** `npx vitest run` for the unit tests, `npm run typecheck`, and `npm run e2e:photo-tool` or `npm run e2e:editor` only when you changed that program's page or server. To check the packaged program, use `npm run dist:dir:photo-tool` (or `dist:dir:editor`) rather than the installer.
+
+**Full loop, before a PR and in CI:** `npm run typecheck`, `npm test` (fast and slow sets), `npm run test:e2e`, and the installers only for a release. CI runs `npm test`, so it runs every test.
+
+The slow set is a list of files, `vitest.slow-files.json`, picked from per-file timings: the real-server and image tests (`gallery-server`, `gallery-catalog`, `gallery-edit-server`, `fonts`, `portable`, `milestone`, `cutouts`), the whole-tree and real-build tests (`boundaries`, which includes "photo-tool builds its own page", and `editor-shell`), and the real tagging worker (`tagging-worker-ping`). A new test file is fast by default; add it to the list only if it takes more than about 10 s. `import-graph` (1.6 s) and the "big folder" queue test (2.5 s) measured fast here, so they stay in the everyday loop; they were slow on Windows CI, so re-measure there.
 
 ## Where the data lives
 
