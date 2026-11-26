@@ -93,26 +93,49 @@ export class ImageCache {
     this.pump();
   }
 
-  /** The decoded image for `url`, loaded first (ahead of everything wanted) when it is not here yet. */
-  load(url: string): Promise<CacheImage> {
+  /**
+   * The decoded image for `url`, loaded first (ahead of everything wanted) when it is not here yet. Kept
+   * loading whatever want() says until it settles or `signal` aborts (the photo was stepped past): then
+   * the next want() may cancel it like any other, and the promise rejects.
+   */
+  load(url: string, signal?: AbortSignal): Promise<CacheImage> {
     const e = this.entries.get(url);
     if (e?.ready) {
       this.touch(url);
       return Promise.resolve(e.img);
     }
     if (this.failedUrls.has(url)) return Promise.reject(new Error(`Could not load ${url}`));
+    if (signal?.aborted) return Promise.reject(new Error(`Not wanted: ${url}`));
     this.pinned.set(url, (this.pinned.get(url) ?? 0) + 1);
-    const done = new Promise<CacheImage>((ok, fail) => {
-      const entry = this.entries.get(url) ?? this.start(url, true);
-      entry.waiters.push({ ok, fail });
-    });
+    let pinned = true;
     const unpin = () => {
+      if (!pinned) return;
+      pinned = false;
       const n = (this.pinned.get(url) ?? 1) - 1;
       if (n > 0) this.pinned.set(url, n);
       else this.pinned.delete(url);
     };
-    done.then(unpin, unpin);
-    return done;
+    return new Promise<CacheImage>((ok, fail) => {
+      const entry = this.entries.get(url) ?? this.start(url, true);
+      const waiter = {
+        ok: (img: CacheImage) => {
+          unpin();
+          ok(img);
+        },
+        fail: (err: Error) => {
+          unpin();
+          fail(err);
+        },
+      };
+      entry.waiters.push(waiter);
+      signal?.addEventListener('abort', () => {
+        const at = entry.waiters.indexOf(waiter);
+        if (at < 0) return;
+        entry.waiters.splice(at, 1);
+        unpin();
+        fail(new Error(`Not wanted: ${url}`));
+      }, { once: true });
+    });
   }
 
   private keep(url: string): boolean {
@@ -220,21 +243,21 @@ export function useDecodedSwap<T>(url: string, fallback: string | undefined, val
       setShown({ url: ready, value: latest.current, for: url });
       return;
     }
-    let live = true;
-    const show = (u: string) => live && setShown({ url: u, value: latest.current, for: url });
-    cache.load(url).then(
+    // Stepped past before it came: the load is let go, so the next want() can cancel it.
+    const gone = new AbortController();
+    const show = (u: string) => !gone.signal.aborted && setShown({ url: u, value: latest.current, for: url });
+    cache.load(url, gone.signal).then(
       () => show(url),
       () => {
+        if (gone.signal.aborted) return;
         if (!fallback) return show(url);
-        cache.load(fallback).then(
+        cache.load(fallback, gone.signal).then(
           () => show(fallback),
           () => show(fallback),
         );
       },
     );
-    return () => {
-      live = false;
-    };
+    return () => gone.abort();
   }, [url, fallback, ready, cache]);
 
   if (ready) return { url: ready, value };

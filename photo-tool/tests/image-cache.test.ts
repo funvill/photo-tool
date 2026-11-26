@@ -182,11 +182,35 @@ describe('ImageCache', () => {
     expect(t.requested.filter((u) => u === 'a')).toHaveLength(1);
   });
 
+  it('a load() let go (stepped past) is cancelled by the next want(), and rejects', async () => {
+    const t = setup();
+    const gone = new AbortController();
+    const p = t.cache.load('a', gone.signal);
+    const a = t.img('a');
+    gone.abort();
+    await expect(p).rejects.toThrow();
+    t.cache.want(['b']);
+    expect(a.src).toBe('');
+    expect(t.cache.inFlight).toBe(1);
+  });
+
+  it('holding a key past the warmed photos: each photo the screen asked for is let go, so loads never pile up', () => {
+    const t = setup({ maxInFlight: 2 });
+    let gone: AbortController | null = null;
+    for (let i = 0; i < 10; i++) {
+      gone?.abort();
+      gone = new AbortController();
+      t.cache.load(`u${i}`, gone.signal).catch(() => {});
+      t.cache.want([`u${i}`, `u${i + 1}`]);
+    }
+    expect(t.cache.inFlight).toBeLessThanOrEqual(3);
+  });
+
   it('load() rejects when the picture cannot be had', async () => {
     const t = setup();
-    const p = t.cache.load('a');
+    const rejected = expect(t.cache.load('a')).rejects.toThrow();
     await t.fail('a');
-    await expect(p).rejects.toThrow();
+    await rejected;
     await expect(t.cache.load('a')).rejects.toThrow();
   });
 });

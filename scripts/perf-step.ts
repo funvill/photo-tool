@@ -48,17 +48,19 @@ const KEY_CLOCK = `window.addEventListener('keydown', (e) => {
 
 /** Waits for `img` (a selector) to show a photo other than `before`, fully loaded, then one frame more; ms since the key went down. */
 // Page code is sent as text: tsx would wrap a named inner function in a helper the page does not have.
-function painted(page: Page, selector: string, before: string): Promise<number> {
+function painted(page: Page, selector: string, before: string): Promise<{ swap: number; total: number }> {
   return page.evaluate(`new Promise((done) => {
     const check = () => {
       const img = document.querySelector(${JSON.stringify(selector)});
       if (img && img.alt !== ${JSON.stringify(before)} && img.complete && img.naturalWidth > 0) {
         // Decoded too (at once when it already is), then the frame that draws it.
-        img.decode().catch(() => {}).then(() => requestAnimationFrame(() => done(performance.now() - window.__keyAt)));
+        // swap: the page has put the new photo in (React's work); total: decoded and drawn too.
+        const swap = performance.now() - window.__keyAt;
+        img.decode().catch(() => {}).then(() => requestAnimationFrame(() => done({ swap, total: performance.now() - window.__keyAt })));
       } else requestAnimationFrame(check);
     };
     check();
-  })`) as Promise<number>;
+  })`) as Promise<{ swap: number; total: number }>;
 }
 
 function summary(ms: number[]): string {
@@ -112,14 +114,19 @@ async function run(): Promise<void> {
       // Someone opening a photo looks at it for a moment before the first step.
       await page.waitForTimeout(1000);
       const times: number[] = [];
+      const swaps: number[] = [];
       for (let i = 0; i < STEPS; i++) {
         const before = (await page.locator(selector).getAttribute('alt')) ?? '';
         const wait = painted(page, selector, before);
         await page.keyboard.press('ArrowRight');
-        times.push(await wait);
+        const t = await wait;
+        times.push(t.total);
+        swaps.push(t.swap);
         if (DWELL > 0) await page.waitForTimeout(DWELL);
       }
       results.push(`${where.padEnd(7)}  ${summary(times)}`);
+      const s = [...swaps].sort((a, b) => a - b);
+      results.push(`${''.padEnd(7)}  new photo put in after: median ${s[Math.floor(s.length / 2)].toFixed(1)} ms`);
       await context.close();
     }
     console.log(`\n${PHOTOS} photos, ${STEPS} steps, dwell ${DWELL} ms, latency ${LATENCY} ms`);
