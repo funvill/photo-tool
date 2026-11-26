@@ -1,7 +1,9 @@
 # Builds the installers of both desktop programs, Photo Tool and Photobook Editor, each on its own
 # platform (sharp's native part is chosen by `npm ci` for the machine it runs on): the Windows .exe
 # on Windows, the .deb and AppImage on Linux. The installers are unsigned and are kept as workflow
-# artifacts; nothing is published.
+# artifacts, each with its program's update file (<channel>.yml, <channel>-linux.yml). On a v* tag in
+# funvill/photo-tool, the release job puts all of them into one draft release; nothing is published
+# until someone presses Publish on GitHub, and only then do the installed programs offer the update.
 #
 # Each program is one matrix entry. `dist` is its package script (the editor's is dist:editor),
 # `product` the name a Windows user sees, `env_prefix` the prefix of its _DATA_DIR and _PROFILE_DIR,
@@ -57,7 +59,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.program }}-windows-x64
-          path: dist/installer/${{ matrix.program }}/*.exe
+          # The installer and its update file (<channel>.yml), for the release job.
+          path: |
+            dist/installer/${{ matrix.program }}/*.exe
+            dist/installer/${{ matrix.program }}/${{ matrix.program }}.yml
           if-no-files-found: error
       # The packaged program tests itself (see <program>/electron/selfTest.ts) and fails if anything
       # tried to reach a host other than 127.0.0.1. Its data, browser profile and shared photo info
@@ -331,9 +336,11 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.program }}-linux-x64
+          # The packages and their update file (<channel>-linux.yml), for the release job.
           path: |
             dist/installer/${{ matrix.program }}/*.deb
             dist/installer/${{ matrix.program }}/*.AppImage
+            dist/installer/${{ matrix.program }}/${{ matrix.program }}-linux.yml
           if-no-files-found: error
       # The same self-test as on Windows, on the program as a user gets it: installed from the .deb
       # (whose install script sets up what Chromium's sandbox needs on Ubuntu 24.04), then the
@@ -438,3 +445,49 @@ jobs:
             ${{ runner.temp }}/carry-out/result.json
             ${{ runner.temp }}/carry-out/data/logs/desktop.log
             ${{ runner.temp }}/refuse-out/refused.json
+
+  # A v* tag in funvill/photo-tool (and nowhere else): one job, after every build and its checks have
+  # passed, puts both programs' installers and their four update files into one draft release named
+  # after the tag, so the matrix jobs cannot race to make two. GitHub has no spaces in asset names, and
+  # each update file names its installers the way GitHub will: collect-assets.mjs finds each installer
+  # by the sha512 its update file gives and copies it under that name. Publishing the draft is a person's
+  # job; until then no installed program is offered the update.
+  release:
+    name: draft release
+    needs: [windows, linux]
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'funvill/photo-tool'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 26
+      - name: The tag names this version
+        run: |
+          want="v$(node -p "require('./package.json').version")"
+          [ "$GITHUB_REF_NAME" = "$want" ] || { echo "::error::the tag is $GITHUB_REF_NAME but package.json says $want"; exit 1; }
+      # Each program's -windows-x64 and -linux-x64 artifact (not the -self-test ones).
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: '*-x64'
+          path: in
+      - name: Collect the release files
+        run: |
+          node scripts/release/collect-assets.mjs in out
+          for f in photo-tool.yml photo-tool-linux.yml photobook-editor.yml photobook-editor-linux.yml; do
+            [ -f "out/$f" ] || { ls -la out; echo "::error::no update file $f"; exit 1; }
+          done
+      - name: Upload to the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2>/dev/null); then
+            # Added to the draft already there; a published release is never changed from here.
+            [ "$draft" = true ] || { echo "::error::release $TAG is already published"; exit 1; }
+          else
+            gh release create "$TAG" --draft --verify-tag --title "$TAG" --generate-notes
+          fi
+          gh release upload "$TAG" out/* --clobber
