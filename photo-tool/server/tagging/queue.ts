@@ -3,7 +3,7 @@
 // photo is looked at once. Never blocks anything: the models run in the backend's worker thread.
 import { existsSync } from 'node:fs';
 import { MODEL_CATALOGUE, findModel, type ModelChoice, type TagPart } from '../../core/tagModels';
-import type { Catalog, GalleryPhoto } from '../catalog';
+import type { Catalog, GalleryPhoto, TagRow } from '../catalog';
 import { verifyModel } from '../models/download';
 import { installedModels, modelDir, type TaggingSettings } from '../models/store';
 import { BackendLostError, type TaggerBackend } from './backend';
@@ -33,6 +33,8 @@ export interface TaggingQueueDeps {
   catalogue?: readonly ModelChoice[];
   /** The picture to look at for a photo (its 1600 px thumbnail). */
   imageOf(photo: GalleryPhoto): Promise<string>;
+  /** Where each done result is also kept: the photo's album folder (see albumTags.ts). */
+  albumTags?: { save(photos: GalleryPhoto[], row: TagRow): void };
 }
 
 /** Regenerate can't run: no working descriptions model, or it has not described this photo yet. */
@@ -95,6 +97,12 @@ export class TaggingQueue {
   /** Paths to look at first, in order (the selected photo, then the ones on screen). */
   focus(paths: string[]): void {
     this.focusPaths = paths.slice(0, 1000);
+  }
+
+  /** These pictures' rows changed in the catalogue (they came from an album folder): look them up again. */
+  forget(contentKeys: string[]): void {
+    for (const map of [this.looked, this.seen, this.failedKeys]) for (const keys of map.values()) for (const k of contentKeys) keys.delete(k);
+    if (contentKeys.length) this.cursor = 0;
   }
 
   setSettings(s: TaggingSettings): void {
@@ -183,6 +191,8 @@ export class TaggingQueue {
         // Sampling can end at once: saving nothing would hide the sentence (and this button) for good.
         if (!text) throw new Error(`${m.label} wrote an empty description. Try again.`);
         if (!this.deps.catalog.setDescription(key, m.id, text)) throw new NoDescriptionError(`${m.label} has not described this photo yet.`);
+        const row = this.deps.catalog.tagsFor([key], [m.id]).get(key)?.[0];
+        if (row) this.deps.albumTags?.save(this.samePicture(photo), row);
         this.stamp++;
         return text;
       } catch (e) {
@@ -330,6 +340,12 @@ export class TaggingQueue {
     }
   }
 
+  /** The photo and every other photo of the job with the same picture (a copy): a result is theirs too. */
+  private samePicture(photo: GalleryPhoto, photos: GalleryPhoto[] = this.job?.photos() ?? []): GalleryPhoto[] {
+    const out = photos.filter((p) => p.contentKey === photo.contentKey && p.path !== photo.path);
+    return [photo, ...out];
+  }
+
   private async tag(job: { id: string; photos: () => GalleryPhoto[] }, photo: GalleryPhoto, models: ModelChoice[]): Promise<void> {
     const key = photo.contentKey!;
     if (!existsSync(photo.path)) {
@@ -374,8 +390,10 @@ export class TaggingQueue {
       }
       return;
     }
+    const same = this.samePicture(photo, job.photos());
     for (const { m, row } of results) {
       this.deps.catalog.putTags(row);
+      this.deps.albumTags?.save(same, row);
       this.seen.get(m.id)!.add(key);
       if (row.status === 'failed') this.failedKeys.get(m.id)!.add(key);
     }

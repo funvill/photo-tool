@@ -1,6 +1,7 @@
 // The gallery program: open a folder, review its photos (grid, preview pane, keys, stacks, hidden
 // photos) and star one — the star lands in the folder's photoinfo.json, where the editor will find it.
 import { cpSync, existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test';
@@ -1553,6 +1554,115 @@ test.describe('#5 fast navigation', () => {
     } finally {
       await page.unrouteAll({ behavior: 'ignoreErrors' });
       rmSync(join(dir, '..'), { recursive: true, force: true });
+    }
+  });
+});
+
+test.describe('album tags sidecar: generated tags live in the album folder', () => {
+  // Its own Photo Tool server (ports 5900-5999), so the data folder can be deleted and the server started again.
+  const PORT = Number(process.env.PHOTO_TOOL_SIDECAR_E2E_PORT ?? 5931);
+  const BASE = `http://127.0.0.1:${PORT}`;
+
+  /** Runs node itself (not npx or the tsx CLI), so kill() stops the real server and frees the port and the catalogue. */
+  async function startServer(dataDir: string, fallbackDir: string): Promise<ChildProcess> {
+    const child = spawn(process.execPath, ['--import', 'tsx', join('photo-tool', 'server', 'main.ts')], {
+      cwd: process.cwd(),
+      env: { ...process.env, NODE_ENV: 'production', PHOTO_TOOL_PORT: String(PORT), PHOTO_TOOL_DATA_DIR: dataDir, PHOTOINFO_FALLBACK_DIR: fallbackDir, PHOTO_TOOL_FAKE_TAGGING: '1' },
+      stdio: 'ignore',
+    });
+    for (let i = 0; i < 300; i++) {
+      if (child.exitCode !== null) throw new Error(`The Photo Tool server stopped (exit ${child.exitCode}).`);
+      try {
+        if ((await fetch(`${BASE}/api/health`)).ok) return child;
+      } catch {
+        // not listening yet
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    child.kill();
+    throw new Error('The Photo Tool server did not start.');
+  }
+
+  async function stopServer(child: ChildProcess | null): Promise<void> {
+    if (!child || child.exitCode !== null) return;
+    const exited = new Promise((r) => child.once('exit', r));
+    child.kill();
+    await exited;
+  }
+
+  async function chooseFakeModels(api: APIRequestContext): Promise<void> {
+    for (const id of ['fake-describe-small', 'fake-keywords-small']) {
+      expect((await api.post(`/api/gallery/models/${id}/download`)).status()).toBe(202);
+      await expect.poll(async () => (await (await api.get('/api/gallery/models')).json()).downloading, { timeout: 10_000 }).toBeFalsy();
+    }
+    expect((await api.put('/api/gallery/tagging/settings', { data: { describe: 'fake-describe-small', keywords: 'fake-keywords-small', paused: false } })).ok()).toBe(true);
+  }
+
+  test('tags made by the fake tagger come back from the album folder after the data folder is deleted', async ({ page, playwright }) => {
+    test.setTimeout(240_000);
+    const work = mkdtempSync(join(tmpdir(), 'photo-tool-sidecar-'));
+    const dir = join(work, 'trip');
+    cpSync(FIXTURES, dir, { recursive: true });
+    const dataDir = join(work, 'data');
+    const fallbackDir = join(work, 'photoinfo-shared');
+    const api = await playwright.request.newContext({ baseURL: BASE });
+    let server: ChildProcess | null = null;
+    try {
+      // 1) Tag the folder, and Regenerate one description: text the model never writes on its own.
+      server = await startServer(dataDir, fallbackDir);
+      await chooseFakeModels(api);
+      const job = (await (await api.post('/api/gallery/open', { data: { folder: dir, recursive: false } })).json()).jobId as string;
+      await expect.poll(async () => {
+        const s = await (await api.get('/api/gallery/tagging/status')).json();
+        return s.job === job && s.total > 0 && s.done === s.total && !s.running;
+      }, { timeout: 60_000 }).toBe(true);
+      const street = join(dir, 'day1-02-street.jpg');
+      const regenerated = await api.post('/api/gallery/tagging/regenerate', { data: { job, path: street } });
+      expect(regenerated.ok()).toBe(true);
+      const newText = (await regenerated.json()).description as string;
+      expect(newText).toMatch(/^Another look at street \(\d+\)\.$/);
+      // Closing the folder writes what is waiting.
+      expect((await api.post('/api/gallery/tagging/close', { data: { job } })).status()).toBe(204);
+      const sidecar = JSON.parse(readFileSync(join(dir, 'phototool-tags.json'), 'utf8'));
+      expect(sidecar.format).toBe('phototool-tags/1');
+      expect(sidecar.photos['day1-02-street.jpg'].models['fake-describe-small'].description).toBe(newText);
+      expect(sidecar.photos['day2-04-lake.jpg'].models['fake-keywords-small'].keywords[0].label).toBe('lake');
+      expect(typeof sidecar.photos['day2-04-lake.jpg'].models['fake-keywords-small'].contentKey).toBe('string');
+      expect(existsSync(join(dir, 'phototool-tags.vectors.json'))).toBe(true);
+      // photoinfo.json is for what people type: tagging leaves it alone.
+      expect(existsSync(join(dir, 'photoinfo.json'))).toBe(false);
+
+      // 2) "Reinstall": stop the server, delete its data folder (catalogue, models, settings), start it again.
+      await stopServer(server);
+      server = null;
+      rmSync(dataDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+      expect(existsSync(dataDir)).toBe(false);
+      server = await startServer(dataDir, fallbackDir);
+      await chooseFakeModels(api);
+
+      // 3) Open the folder in the page: the tags are there, read back from the album folder.
+      expect((await api.post('/api/gallery/open', { data: { folder: dir, recursive: false } })).status()).toBe(202);
+      await page.addInitScript(() => {
+        localStorage.setItem('gallery.gridWidth', '900');
+        localStorage.setItem('gallery.thumbSize', '96');
+      });
+      await page.goto(`${BASE}/`);
+      await page.getByRole('button', { name: dir }).click();
+      await expect(page.locator('.gallery-tile').first()).toBeVisible({ timeout: 60_000 });
+      await page.locator('.gallery-tile', { has: page.locator('img[alt="day1-02-street.jpg"]') }).click();
+      const panel = page.locator('#gallery-section-whatsinit');
+      // The regenerated sentence: only the album folder has it (the model would write "A picture of street.").
+      await expect(panel.locator('.gallery-whatsinit-description')).toHaveText(newText, { timeout: 20_000 });
+      await page.locator('.gallery-tile', { has: page.locator('img[alt="day2-04-lake.jpg"]') }).click();
+      await expect(panel.getByRole('group', { name: 'Keywords' }).getByRole('button', { name: 'lake', exact: true })).toBeVisible();
+      // Search by meaning, from the vectors kept beside it.
+      await page.getByLabel('Search photos').fill('coffee');
+      await expect(page.getByRole('note')).toHaveText('Also matching by meaning');
+      await expect(page.locator('.gallery-tile img')).toHaveAttribute('alt', 'day3-01-cafe.jpg');
+    } finally {
+      await api.dispose();
+      await stopServer(server);
+      rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
     }
   });
 });

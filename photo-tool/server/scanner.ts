@@ -36,6 +36,8 @@ interface ScannerOptions {
   readdir?: ReadDir;
   /** Called when a scan ends (finished or cancelled). */
   onDone?: (job: ScanJob) => void;
+  /** Called as each photo is added to a scan (read, or read again by `refresh`). */
+  onPhoto?: (photo: GalleryPhoto) => void;
 }
 
 /**
@@ -60,12 +62,14 @@ export class Scanner {
   private analyze: (workPath: string) => Promise<PhotoAnalysis>;
   private readdir?: ReadDir;
   private onDone?: (job: ScanJob) => void;
+  private onPhoto?: (photo: GalleryPhoto) => void;
 
   constructor(private catalog: Catalog, private dataDir: string, opts: ScannerOptions = {}) {
     this.concurrency = Math.max(1, opts.concurrency ?? 4);
     this.analyze = opts.analyze ?? defaultAnalyze;
     this.readdir = opts.readdir;
     this.onDone = opts.onDone;
+    this.onPhoto = opts.onPhoto;
   }
 
   /** Starts a scan and returns at once; poll `get` for progress. Any earlier scan still running is cancelled. */
@@ -124,7 +128,9 @@ export class Scanner {
         while (next < files.length && !job.cancelled) {
           const file = files[next++];
           try {
-            job.photos.push(await this.readPhoto(job, file));
+            const photo = await this.readPhoto(job, file);
+            this.onPhoto?.(photo);
+            job.photos.push(photo);
           } catch (e) {
             job.errors.push({ path: file, message: e instanceof Error ? e.message : String(e) });
           }
@@ -180,6 +186,7 @@ export class Scanner {
       return null;
     }
     const photo = await this.scanOne(job, file, true);
+    this.onPhoto?.(photo);
     const at = job.photos.findIndex((p) => p.path === photo.path);
     if (at >= 0) job.photos[at] = photo;
     else job.photos.push(photo);

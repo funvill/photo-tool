@@ -1,0 +1,202 @@
+// The album tags sidecar between the catalogue (a cache) and the album folder (where the results live): opening a
+// folder brings its results into the catalogue, and writes out once the ones the catalogue has but the folder lacks.
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { AlbumTagsStore, PHOTOTAGS_NAME, PHOTOVECTORS_NAME, encodeVector } from '../../shared/phototags';
+import { createGalleryApp } from '../server/app';
+import { Catalog, type GalleryPhoto, type TagRow } from '../server/catalog';
+import { AlbumTags } from '../server/tagging/albumTags';
+import type { TaggerBackend } from '../server/tagging/backend';
+import { FAKE_CATALOGUE, fakeFetch } from './support/fakeTagging';
+
+const [describeSmall, , keywordsSmall] = FAKE_CATALOGUE;
+
+let root: string;
+let trip: string;
+let catalog: Catalog;
+let store: AlbumTagsStore;
+let albumTags: AlbumTags;
+
+const photo = (name: string, contentKey = `ck-${name}`): GalleryPhoto => ({
+  path: join(trip, `${name}.jpg`), folder: trip, fileName: `${name}.jpg`, relDir: '', size: 1, mtimeMs: 1, width: 10, height: 10, format: 'jpeg',
+  capturedAt: null, gpsLat: null, gpsLon: null, camera: null, exif: null, analysis: null, key: `k-${name}`, contentKey,
+});
+const row = (contentKey: string, modelId: string, r: Partial<TagRow> = {}): TagRow => ({
+  contentKey, modelId, status: 'done', description: null, keywords: [], objects: [], embedding: null, error: null, ...r,
+});
+const writeSidecar = (photos: Record<string, Record<string, Record<string, unknown>>>) =>
+  writeFileSync(join(trip, PHOTOTAGS_NAME), JSON.stringify({ format: 'phototool-tags/1', photos: Object.fromEntries(Object.entries(photos).map(([n, models]) => [n, { models }])) }));
+const writeVectors = (photos: Record<string, Record<string, { contentKey: string; v: number[] }>>) =>
+  writeFileSync(join(trip, PHOTOVECTORS_NAME), JSON.stringify({
+    format: 'phototool-vectors/1',
+    photos: Object.fromEntries(Object.entries(photos).map(([n, models]) => [n, { models: Object.fromEntries(Object.entries(models).map(([m, x]) => [m, { contentKey: x.contentKey, data: encodeVector(new Float32Array(x.v)) }])) }])),
+  }));
+const sidecar = () => JSON.parse(readFileSync(join(trip, PHOTOTAGS_NAME), 'utf8')).photos;
+const tag = (key: string, id: string) => catalog.tagsFor([key], [id], true).get(key)?.[0];
+
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), 'album-tags-'));
+  trip = join(root, 'trip');
+  mkdirSync(trip);
+  catalog = new Catalog(join(root, 'data'));
+  store = new AlbumTagsStore({ fallbackDir: join(root, 'fallback'), debounceMs: 60_000, maxWaitMs: 60_000, onError: () => {} });
+  albumTags = new AlbumTags({ catalog, store, catalogue: FAKE_CATALOGUE });
+});
+afterEach(() => {
+  store.close();
+  catalog.close();
+  rmSync(root, { recursive: true, force: true });
+});
+
+describe('AlbumTags.sync: opening a folder', () => {
+  it('brings the sidecar results into the catalogue, by content key', () => {
+    writeSidecar({ 'a.jpg': { [describeSmall.id]: { contentKey: 'ck-a', description: 'A dog.', objects: [{ label: 'dog', count: 1 }] } } });
+    expect(albumTags.sync([photo('a')])).toEqual(['ck-a']);
+    expect(tag('ck-a', describeSmall.id)).toMatchObject({ status: 'done', description: 'A dog.', objects: [{ label: 'dog', count: 1 }] });
+  });
+
+  it('a result made from another picture (the file was replaced) is not given to the photo', () => {
+    writeSidecar({ 'a.jpg': { [describeSmall.id]: { contentKey: 'old-picture', description: 'Wrong.' } } });
+    expect(albumTags.sync([photo('a')])).toEqual([]);
+    expect(tag('ck-a', describeSmall.id)).toBeUndefined();
+  });
+
+  it('a renamed photo finds its result by content key, and gets it under its new name too', () => {
+    writeSidecar({ 'old-name.jpg': { [describeSmall.id]: { contentKey: 'ck-a', description: 'A dog.' } } });
+    albumTags.sync([photo('new-name', 'ck-a')]);
+    expect(tag('ck-a', describeSmall.id)?.description).toBe('A dog.');
+    store.flush();
+    expect(sidecar()['new-name.jpg'].models[describeSmall.id]).toMatchObject({ contentKey: 'ck-a', description: 'A dog.' });
+    expect(sidecar()['old-name.jpg']).toBeTruthy();
+  });
+
+  it('a keywords result comes in with its vector; without one it is left for the model to redo', () => {
+    writeSidecar({
+      'a.jpg': { [keywordsSmall.id]: { contentKey: 'ck-a', keywords: [{ label: 'dog', score: 0.9 }] } },
+      'b.jpg': { [keywordsSmall.id]: { contentKey: 'ck-b', keywords: [{ label: 'cat', score: 0.8 }] } },
+    });
+    writeVectors({ 'a.jpg': { [keywordsSmall.id]: { contentKey: 'ck-a', v: [0.5, 0.5] } } });
+    albumTags.sync([photo('a'), photo('b')]);
+    expect(tag('ck-a', keywordsSmall.id)?.keywords).toEqual([{ label: 'dog', score: 0.9 }]);
+    expect([...tag('ck-a', keywordsSmall.id)!.embedding!]).toEqual([0.5, 0.5]);
+    expect(tag('ck-b', keywordsSmall.id)).toBeUndefined();
+  });
+
+  it('migration: catalogue results the folder lacks are written out once (done ones only)', () => {
+    catalog.putTags(row('ck-a', describeSmall.id, { description: 'A dog.', objects: [{ label: 'dog', count: 1 }] }));
+    catalog.putTags(row('ck-a', keywordsSmall.id, { keywords: [{ label: 'dog', score: 0.9 }], embedding: new Float32Array([1, 0]) }));
+    catalog.putTags(row('ck-b', describeSmall.id, { status: 'failed', error: 'unreadable' }));
+    albumTags.sync([photo('a'), photo('b')]);
+    store.flush();
+    const photos = sidecar();
+    expect(Object.keys(photos)).toEqual(['a.jpg']);
+    expect(photos['a.jpg'].models[describeSmall.id]).toMatchObject({ contentKey: 'ck-a', description: 'A dog.' });
+    expect(photos['a.jpg'].models[keywordsSmall.id]).toMatchObject({ contentKey: 'ck-a', keywords: [{ label: 'dog', score: 0.9 }] });
+    expect(existsSync(join(trip, PHOTOVECTORS_NAME))).toBe(true);
+    // Once: a second open has nothing to write.
+    albumTags.sync([photo('a'), photo('b')]);
+    expect(store.hasPending()).toBe(false);
+  });
+
+  it('the sidecar wins: a newer description there (Regenerate on another computer) replaces the catalogue one', () => {
+    catalog.putTags(row('ck-a', describeSmall.id, { description: 'Old.', objects: [{ label: 'dog', count: 1 }] }));
+    writeSidecar({ 'a.jpg': { [describeSmall.id]: { contentKey: 'ck-a', description: 'Newer.', objects: [{ label: 'dog', count: 1 }] } } });
+    expect(albumTags.sync([photo('a')])).toEqual(['ck-a']);
+    expect(tag('ck-a', describeSmall.id)?.description).toBe('Newer.');
+    expect(store.hasPending()).toBe(false);
+    expect(sidecar()['a.jpg'].models[describeSmall.id].description).toBe('Newer.');
+  });
+
+  it('a sidecar result replaces a failed catalogue row', () => {
+    catalog.putTags(row('ck-a', describeSmall.id, { status: 'failed', error: 'unreadable' }));
+    writeSidecar({ 'a.jpg': { [describeSmall.id]: { contentKey: 'ck-a', description: 'A dog.' } } });
+    albumTags.sync([photo('a')]);
+    expect(tag('ck-a', describeSmall.id)).toMatchObject({ status: 'done', description: 'A dog.' });
+  });
+
+  it('a keywords result whose vector is missing from the folder gets it from the catalogue', () => {
+    catalog.putTags(row('ck-a', keywordsSmall.id, { keywords: [{ label: 'dog', score: 0.9 }], embedding: new Float32Array([1, 0]) }));
+    writeSidecar({ 'a.jpg': { [keywordsSmall.id]: { contentKey: 'ck-a', keywords: [{ label: 'dog', score: 0.9 }] } } });
+    albumTags.sync([photo('a')]);
+    store.flush();
+    const kw = store.read(trip).results.find((r) => r.modelId === keywordsSmall.id)!;
+    expect([...kw.embedding!]).toEqual([1, 0]);
+  });
+
+  it('a broken sidecar imports nothing and is left alone', () => {
+    writeFileSync(join(trip, PHOTOTAGS_NAME), '{oops');
+    catalog.putTags(row('ck-a', describeSmall.id, { description: 'A dog.' }));
+    albumTags.sync([photo('a')]);
+    store.flush();
+    expect(readFileSync(join(trip, PHOTOTAGS_NAME), 'utf8')).toBe('{oops');
+    expect(tag('ck-a', describeSmall.id)?.description).toBe('A dog.');
+  });
+});
+
+describe('opening an album with a sidecar through the server', () => {
+  /** A backend that records every call (none are expected) and describes from the file name. */
+  const recording = () => {
+    const calls: string[] = [];
+    const backend: TaggerBackend = {
+      async load() {},
+      async describe(p) { calls.push(`describe:${p}`); return { description: 'From the model.', objects: [] }; },
+      async caption(p) { calls.push(`caption:${p}`); return 'Again.'; },
+      async keywords(p) { calls.push(`keywords:${p}`); return { keywords: [{ label: 'model', score: 0.9 }], embedding: new Float32Array([0, 1]) }; },
+      async embedText() { return new Float32Array([1, 0]); },
+      async close() {},
+    };
+    return { calls, backend };
+  };
+
+  it('a moved or reinstalled album shows its tags at once, and its photos are not tagged again', async () => {
+    const sharp = (await import('sharp')).default;
+    await sharp({ create: { width: 40, height: 30, channels: 3, background: '#c04020' } }).jpeg().toFile(join(trip, 'harbour.jpg'));
+    const dataDir = join(root, 'fresh-data');
+    const { calls, backend } = recording();
+    const { app, close } = createGalleryApp(dataDir, {
+      photoInfoFallbackDir: join(root, 'fallback'),
+      tagging: { fetch: fakeFetch(), catalogue: FAKE_CATALOGUE, backend, imageOf: async (p) => p.path },
+    });
+    const server = await new Promise<import('node:http').Server>((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
+    const base = `http://127.0.0.1:${(server.address() as import('node:net').AddressInfo).port}`;
+    const api = async (method: string, path: string, body?: unknown) => {
+      const res = await fetch(base + path, { method, headers: { 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+      return { status: res.status, body: res.status === 204 ? null : await res.json() };
+    };
+    try {
+      for (const id of [describeSmall.id, keywordsSmall.id]) {
+        expect((await api('POST', `/api/gallery/models/${id}/download`)).status).toBe(202);
+        for (let i = 0; i < 300 && (await api('GET', '/api/gallery/models')).body.downloading; i++) await new Promise((r) => setTimeout(r, 10));
+      }
+      // Work out the content key the way the scan will: open once with tagging off, read it, close.
+      expect((await api('PUT', '/api/gallery/tagging/settings', { describe: null, keywords: null, paused: false })).status).toBe(200);
+      let job = (await api('POST', '/api/gallery/open', { folder: trip, recursive: false })).body.jobId;
+      for (let i = 0; i < 300 && !(await api('GET', `/api/gallery/jobs/${job}`)).body.done; i++) await new Promise((r) => setTimeout(r, 10));
+      const key = (await api('GET', `/api/gallery/items?job=${job}`)).body[0].contentKey as string;
+      // Closed before the models are chosen, so nothing is tagged until it is opened again.
+      expect((await api('POST', '/api/gallery/tagging/close', { job })).status).toBe(204);
+      writeSidecar({ 'harbour.jpg': { [describeSmall.id]: { contentKey: key, description: 'Written on another computer.', objects: [{ label: 'boat', count: 3 }] }, [keywordsSmall.id]: { contentKey: key, keywords: [{ label: 'boat', score: 0.9 }] } } });
+      writeVectors({ 'harbour.jpg': { [keywordsSmall.id]: { contentKey: key, v: [1, 0] } } });
+
+      expect((await api('PUT', '/api/gallery/tagging/settings', { describe: describeSmall.id, keywords: keywordsSmall.id, paused: false })).status).toBe(200);
+      job = (await api('POST', '/api/gallery/open', { folder: trip, recursive: false })).body.jobId;
+      let status = (await api('GET', '/api/gallery/tagging/status')).body;
+      for (let i = 0; i < 300 && !(status.job === job && status.done === 1); i++) {
+        await new Promise((r) => setTimeout(r, 10));
+        status = (await api('GET', '/api/gallery/tagging/status')).body;
+      }
+      expect(status).toMatchObject({ job, total: 1, done: 1, failed: 0 });
+      const [item] = (await api('GET', `/api/gallery/items?job=${job}`)).body;
+      expect(item.tags).toMatchObject({ state: 'done', description: 'Written on another computer.', keywords: ['boat'], objects: [{ label: 'boat', count: 3 }] });
+      // Search by meaning works from the vector in the album folder.
+      expect((await api('GET', `/api/gallery/search?job=${job}&q=boats`)).body.paths).toEqual([join(trip, 'harbour.jpg')]);
+      await new Promise((r) => setTimeout(r, 100));
+      expect(calls).toEqual([]);
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+      close();
+    }
+  });
+});
