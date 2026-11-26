@@ -227,9 +227,9 @@ describe('hidden filter', () => {
 });
 
 describe('count text', () => {
-  it('shows "312 of 2,140" while filtering and "2,140 photos" otherwise', async () => {
+  it('shows "Showing 312 of 2,140" while filtering and "2,140 photos" otherwise', async () => {
     const { countText } = await import('../web/components/FilterBar');
-    expect(countText(312, 2140, true)).toBe('312 of 2,140');
+    expect(countText(312, 2140, true)).toBe('Showing 312 of 2,140');
     expect(countText(2140, 2140, false)).toBe('2,140 photos');
     expect(countText(1, 1, false)).toBe('1 photo');
   });

@@ -165,7 +165,8 @@ test('H hides the photo, it leaves the grid, the next photo is selected; Hidden:
     await expect(page.locator(`.gallery-tile img[alt="${first}"]`)).toHaveCount(0);
     await expect(selectedImg(page)).toHaveAttribute('alt', second!);
 
-    await page.getByRole('combobox', { name: 'Hidden' }).selectOption({ label: 'Show' });
+    await page.getByRole('button', { name: /^Filters/ }).click();
+    await page.getByRole('combobox', { name: 'Hidden', exact: true }).selectOption({ label: 'Show' });
     const back = page.locator('.gallery-tile', { has: page.locator(`img[alt="${first}"]`) });
     await expect(back).toHaveClass(/\bhidden\b/);
     await expect(back.getByLabel('Hidden')).toBeVisible();
@@ -968,7 +969,10 @@ test('a portrait photo in a very wide window never makes the preview scroll; the
   try {
     const version = JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')).version as string;
     await expect(page.locator('.gallery-version')).toHaveText(`v${version}`);
-    await page.getByLabel('Shape').selectOption({ label: 'Portrait' });
+    await page.getByRole('button', { name: /^Filters/ }).click();
+    await page.getByRole('combobox', { name: 'Shape', exact: true }).selectOption({ label: 'Portrait' });
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog', { name: 'Filters' })).toHaveCount(0);
     // Ultrawide sizes, at 100 % and at 150 % display scaling (3440 x 1440 is 2293 x 960 then).
     for (const [width, height] of [[3440, 1440], [5120, 1440], [2293, 960], [2560, 1080]]) {
       await page.setViewportSize({ width, height });
@@ -1256,6 +1260,139 @@ test.describe("#2 Regenerate the description in What's in it", () => {
     } finally {
       await request.put('/api/gallery/tagging/settings', { data: { describe: null, keywords: null, paused: false } });
       await request.delete('/api/gallery/models/fake-describe-small');
+      removeTrip(dir);
+    }
+  });
+});
+
+test.describe('#3 Filters panel, chips, query words and Showing X of Y', () => {
+  const filtersButton = (page: Page) => page.getByRole('button', { name: /^Filters( · \d+)?$/ });
+  const panel = (page: Page) => page.getByRole('dialog', { name: 'Filters' });
+  const row = (page: Page) => page.getByRole('region', { name: 'Active filters' });
+  const search = (page: Page) => page.getByLabel('Search photos');
+
+  test('Filters opens a panel; a filter shows a chip and Showing X of Y; × and Clear filter undo it', async ({ page, request }) => {
+    const dir = await openTrip(page, request);
+    try {
+      await page.getByLabel('Stack similar').uncheck();
+      const tiles = page.locator('.gallery-tile');
+      const total = readdirSync(dir).filter(isSupported).length;
+      await expect(tiles).toHaveCount(total);
+      await expect(page.getByText(`${total} photos`, { exact: true })).toBeVisible();
+      await expect(row(page)).toHaveCount(0);
+      await expect(filtersButton(page)).toHaveText('Filters');
+
+      await filtersButton(page).click();
+      await expect(panel(page)).toBeVisible();
+      await expect(filtersButton(page)).toHaveAttribute('aria-expanded', 'true');
+      await expect(panel(page).locator('legend')).toHaveText(['Photo', 'When', 'Where', 'Content', 'Quality']);
+      await panel(page).getByRole('combobox', { name: 'Shape', exact: true }).selectOption({ label: 'Portrait' });
+      // The panel stays open while filters change.
+      await expect(panel(page)).toBeVisible();
+      await expect(filtersButton(page)).toHaveText('Filters · 1');
+      await expect(row(page).getByRole('button', { name: 'Remove filter Portrait' })).toBeVisible();
+      const shown = await tiles.count();
+      expect(shown).toBeLessThan(total);
+      await expect(row(page)).toContainText(`Showing ${shown} of ${total}`);
+
+      // Esc closes the panel and does nothing else: the selection stays, the viewer doesn't open.
+      const selected = await selectedImg(page).getAttribute('alt');
+      await page.keyboard.press('Escape');
+      await expect(panel(page)).toHaveCount(0);
+      await expect(filtersButton(page)).toBeFocused();
+      await expect(selectedImg(page)).toHaveAttribute('alt', selected!);
+      await expect(page.getByRole('dialog', { name: 'Photo viewer' })).toHaveCount(0);
+
+      await row(page).getByRole('button', { name: 'Remove filter Portrait' }).click();
+      await expect(tiles).toHaveCount(total);
+      await expect(row(page)).toHaveCount(0);
+
+      await filtersButton(page).click();
+      await panel(page).getByRole('combobox', { name: 'Shape', exact: true }).selectOption({ label: 'Portrait' });
+      await expect(tiles).toHaveCount(shown);
+      // A click outside the panel closes it.
+      await page.locator('.gallery-tile').first().click();
+      await expect(panel(page)).toHaveCount(0);
+      await row(page).getByRole('button', { name: 'Clear filter' }).click();
+      await expect(row(page)).toHaveCount(0);
+      await expect(tiles).toHaveCount(total);
+      await expect(filtersButton(page)).toHaveText('Filters');
+    } finally {
+      removeTrip(dir);
+    }
+  });
+
+  test('Showing X counts photos, not tiles, with Stack similar on', async ({ page, request }) => {
+    const seed = Object.fromEntries(['day2-01-trail.jpg', 'day2-02-burst-a.jpg', 'day2-02-burst-b.jpg', 'day2-02-burst-c.jpg'].map((n) => [n, { description: 'summit walk' }]));
+    const dir = await openTrip(page, request, seed);
+    try {
+      const tiles = page.locator('.gallery-tile');
+      const total = readdirSync(dir).filter(isSupported).length;
+      await expect(page.getByLabel('Stack similar')).toBeChecked();
+      await search(page).fill('summit');
+      await expect(row(page)).toContainText(`Showing 4 of ${total}`);
+      // The burst is folded into one tile, but every photo that passes is counted.
+      await expect.poll(() => tiles.count()).toBeLessThan(4);
+      // The search text alone gets no chip.
+      await expect(row(page).getByRole('button', { name: /^Remove filter/ })).toHaveCount(0);
+      await page.getByLabel('Stack similar').uncheck();
+      await expect(tiles).toHaveCount(4);
+      await expect(row(page)).toContainText(`Showing 4 of ${total}`);
+    } finally {
+      removeTrip(dir);
+    }
+  });
+
+  test('query words in the search box become chips', async ({ page, request }) => {
+    const dir = await openTrip(page, request);
+    try {
+      const hint = page.locator('#gallery-search-hint');
+      await expect(search(page)).toHaveAttribute('aria-describedby', 'gallery-search-hint');
+      await expect(hint).toContainText('star:yes');
+      await expect(hint).toContainText('tag:lake');
+
+      await search(page).click();
+      await page.keyboard.type('shape:portrait ');
+      await expect(search(page)).toHaveValue('');
+      await expect(row(page).getByRole('button', { name: 'Remove filter Portrait' })).toBeVisible();
+      await filtersButton(page).click();
+      await expect(panel(page).getByRole('combobox', { name: 'Shape', exact: true })).toHaveValue('portrait');
+      await page.keyboard.press('Escape');
+
+      await search(page).click();
+      await page.keyboard.type('star:maybe');
+      await page.keyboard.press('Enter');
+      await expect(search(page)).toHaveValue('star:maybe');
+      await expect(hint).toHaveText(`"star:maybe" isn't a filter: try star:yes or star:no`);
+      // It stays as search text: nothing has it in its description, so nothing is shown.
+      await expect(row(page)).toContainText('Showing 0 of');
+
+      // Clear filter empties the box, a half-typed word included.
+      await search(page).fill('');
+      await search(page).click();
+      await page.keyboard.type('shape:por');
+      await row(page).getByRole('button', { name: 'Clear filter' }).click();
+      await expect(search(page)).toHaveValue('');
+      await expect(row(page)).toHaveCount(0);
+    } finally {
+      removeTrip(dir);
+    }
+  });
+
+  test("keys typed in the panel don't star or hide", async ({ page, request }) => {
+    const dir = await openTrip(page, request);
+    try {
+      const tiles = page.locator('.gallery-tile');
+      const count = await tiles.count();
+      await tiles.first().click();
+      await filtersButton(page).click();
+      await panel(page).getByLabel('From', { exact: true }).focus();
+      await page.keyboard.press('f');
+      await page.keyboard.press('h');
+      await expect(page.locator('.gallery-tile.selected').getByLabel('Starred')).toHaveCount(0);
+      await expect(tiles).toHaveCount(count);
+      expect(photoInfo(dir)).toEqual({});
+    } finally {
       removeTrip(dir);
     }
   });
