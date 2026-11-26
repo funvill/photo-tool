@@ -16,5 +16,5 @@
     "types": ["node"],
     "noEmit": true
   },
-  "include": ["shared", "photo-tool", "photobook-editor", "scripts", "tests", "vitest.config.ts", "playwright.config.ts"]
+  "include": ["shared", "photo-tool", "photobook-editor", "scripts", "tests", "vitest.config.ts", "vitest.slow.config.ts", "playwright.config.ts"]
 }
