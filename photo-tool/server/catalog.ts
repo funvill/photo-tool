@@ -110,6 +110,9 @@ export class Catalog {
         content_key TEXT NOT NULL, model_id TEXT NOT NULL, status TEXT NOT NULL, description TEXT, keywords TEXT,
         objects TEXT, embedding BLOB, error TEXT, made_at INTEGER NOT NULL, PRIMARY KEY (content_key, model_id)
       );
+      CREATE TABLE IF NOT EXISTS file_keys (
+        path TEXT PRIMARY KEY, size INTEGER NOT NULL, mtime_ms REAL NOT NULL, file_key TEXT
+      );
     `);
   }
 
@@ -195,6 +198,19 @@ export class Catalog {
       if (e) out.set(k, e);
     }
     return out;
+  }
+
+  /**
+   * A photo file's key (shared/phototags/fileKey.ts) worked out earlier, while the file has this size and time:
+   * a string, null when it could not be read then, or undefined when there is none for this file.
+   */
+  fileKey(path: string, size: number, mtimeMs: number): string | null | undefined {
+    const r = this.db.prepare('SELECT size, mtime_ms, file_key FROM file_keys WHERE path = ?').get(path) as { size: number; mtime_ms: number; file_key: string | null } | undefined;
+    return r && r.size === size && r.mtime_ms === mtimeMs ? r.file_key : undefined;
+  }
+
+  putFileKey(path: string, size: number, mtimeMs: number, fileKey: string | null): void {
+    this.db.prepare('INSERT OR REPLACE INTO file_keys (path, size, mtime_ms, file_key) VALUES (?, ?, ?, ?)').run(path, size, mtimeMs, fileKey);
   }
 
   thumbPath(key: string, size: 's' | 'm'): string {

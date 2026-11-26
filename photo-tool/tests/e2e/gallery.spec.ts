@@ -30,7 +30,9 @@ async function openTrip(page: Page, request: APIRequestContext, seed?: Record<st
   return dir;
 }
 
-const removeTrip = (dir: string) => rmSync(join(dir, '..'), { recursive: true, force: true });
+// Retried: the server may be writing the folder's phototool-tags.json just then (a tagging pass ends when a test's
+// clean-up changes the settings), and Windows won't remove a folder while a file in it is open.
+const removeTrip = (dir: string) => rmSync(join(dir, '..'), { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 
 /** The folder's photoinfo.json entries, by file name ({} while there is none). */
 function photoInfo(dir: string): Record<string, Record<string, unknown>> {

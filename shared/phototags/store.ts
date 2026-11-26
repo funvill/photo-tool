@@ -36,6 +36,7 @@ import {
   type StoredResult,
   type TagResult,
 } from './format';
+import { fileKeySize } from './fileKey';
 
 export interface AlbumTagsOptions {
   /** The shared fallback folder of read-only photo folders (the photoinfo one); these files go in its `phototool-tags` subfolder. */
@@ -88,7 +89,9 @@ export interface AlbumTagsView {
 export interface PhotoRef {
   fileName: string;
   contentKey: string | null;
-  /** Worked out only when the content key finds nothing (it reads the photo file). */
+  /** The photo file's size: entries whose file key is for another size are ruled out without reading the file. */
+  size?: number;
+  /** Worked out only when the content key finds nothing and an entry of this size could match (it reads the photo file). */
   fileKey?: () => string | undefined;
 }
 
@@ -260,6 +263,8 @@ interface Index {
   byName: Map<string, AlbumResult>;
   byContent: Map<string, AlbumResult[]>;
   byFile: Map<string, AlbumResult[]>;
+  /** Per model, the file sizes its file keys are for ('?' when a key does not say). */
+  fileSizes: Map<string, Set<number | '?'>>;
   modelIds: Set<string>;
 }
 
@@ -310,8 +315,11 @@ export class AlbumTagsStore {
         if (own && photo.contentKey && own.contentKey === photo.contentKey) return own;
         const renamed = photo.contentKey ? idx.byContent.get(`${photo.contentKey}\0${modelId}`)?.[0] : undefined;
         if (renamed) return renamed;
-        // Made on another computer (its content key differs): the file's own fingerprint.
-        if (!idx.byFile.size || !photo.fileKey) return undefined;
+        // Made on another computer (its content key differs): the file's own fingerprint, read only when an entry of
+        // this model could be for a file of this size.
+        const sizes = idx.fileSizes.get(modelId);
+        if (!sizes || !photo.fileKey) return undefined;
+        if (photo.size !== undefined && !sizes.has(photo.size) && !sizes.has('?')) return undefined;
         const fk = photo.fileKey();
         if (!fk) return undefined;
         if (own?.fileKey === fk) return own;
@@ -513,7 +521,7 @@ export class AlbumTagsStore {
     const vectors = this.load(folder, 'vectors');
     const idx: Index = {
       stamp, checkedAt: now, retryAt: now + this.unreadableRetryMs, status: 'none', source: tags.source,
-      results: [], byName: new Map(), byContent: new Map(), byFile: new Map(), modelIds: new Set(),
+      results: [], byName: new Map(), byContent: new Map(), byFile: new Map(), fileSizes: new Map(), modelIds: new Set(),
     };
     // A vectors file that can't be read only costs the vectors (the keywords model then redoes those photos)...
     // ...unless it is just unreadable for now: then wait, as for the tags file.
@@ -546,6 +554,9 @@ export class AlbumTagsStore {
         if (r.fileKey) {
           const fk = `${r.fileKey}\0${r.modelId}`;
           idx.byFile.set(fk, [...(idx.byFile.get(fk) ?? []), r]);
+          const sizes = idx.fileSizes.get(r.modelId) ?? new Set<number | '?'>();
+          sizes.add(fileKeySize(r.fileKey) ?? '?');
+          idx.fileSizes.set(r.modelId, sizes);
         }
       }
     }

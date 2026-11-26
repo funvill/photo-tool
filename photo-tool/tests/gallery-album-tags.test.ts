@@ -1,9 +1,9 @@
 // The album tags sidecar between the catalogue (a cache) and the album folder (where the results live): opening a
 // folder brings its results into the catalogue, and writes out once the ones the catalogue has but the folder lacks.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AlbumTagsStore, PHOTOTAGS_NAME, PHOTOVECTORS_NAME, encodeVector, fileKeyOf } from '../../shared/phototags';
 import { contentKeyOf } from '../server/scanner';
 import { createGalleryApp } from '../server/app';
@@ -223,7 +223,7 @@ describe('fix round 1: matching a photo on any computer', () => {
     writeFileSync(join(root, 'elsewhere', 'renamed.jpg'), bytes);
     utimesSync(join(root, 'elsewhere', 'renamed.jpg'), new Date('2020-01-01'), new Date('2020-01-01'));
     const k = fileKeyOf(join(trip, 'a.jpg'));
-    expect(k).toMatch(/^fk1:[0-9a-f]{40}$/);
+    expect(k).toMatch(/^fk1:\d+:[0-9a-f]{40}$/);
     expect(fileKeyOf(join(root, 'elsewhere', 'renamed.jpg'))).toBe(k);
     bytes[99_999] ^= 1;
     writeFileSync(join(trip, 'a.jpg'), bytes);
@@ -235,7 +235,7 @@ describe('fix round 1: matching a photo on any computer', () => {
     writeFileSync(join(trip, 'a.jpg'), 'the photo bytes');
     const fk = fileKeyOf(join(trip, 'a.jpg'))!;
     writeSidecar({ 'a.jpg': { [describeSmall.id]: { contentKey: 'their-content-key', fileKey: fk, description: 'From the other computer.' } } });
-    expect(albumTags.sync([photo('a', 'my-content-key')])).toEqual(['my-content-key']);
+    expect(albumTags.sync([{ ...photo('a', 'my-content-key'), size: statSync(join(trip, 'a.jpg')).size }])).toEqual(['my-content-key']);
     expect(tag('my-content-key', describeSmall.id)?.description).toBe('From the other computer.');
     store.flush();
     expect(sidecar()['a.jpg'].models[describeSmall.id].contentKey).toBe('their-content-key');
@@ -304,5 +304,46 @@ describe('fix round 1: a file that never becomes readable', () => {
     now += 600_001;
     expect(at.holds(a)).toBe(false);
     s2.close();
+  });
+});
+
+describe('fix round 1: opening a tagged album reads no photo files', () => {
+  it('a folder fully tagged here (real files, file keys in the sidecar) syncs without working out a single file key', () => {
+    const photos: Record<string, Record<string, Record<string, unknown>>> = {};
+    const list: GalleryPhoto[] = [];
+    for (let i = 0; i < 50; i++) {
+      const path = join(trip, `p${i}.jpg`);
+      writeFileSync(path, `photo number ${i} `.repeat(10 + i));
+      photos[`p${i}.jpg`] = { [describeSmall.id]: { contentKey: `ck-p${i}`, fileKey: fileKeyOf(path), description: `P${i}.` } };
+      list.push({ ...photo(`p${i}`), size: statSync(path).size });
+    }
+    // An untagged photo too.
+    writeFileSync(join(trip, 'new.jpg'), 'a photo nobody has tagged yet');
+    list.push({ ...photo('new'), size: statSync(join(trip, 'new.jpg')).size });
+    writeSidecar(photos);
+    const spy = vi.spyOn(albumTags, 'fileKeyOf');
+    for (const p of list) albumTags.sync([p]);
+    expect(spy).not.toHaveBeenCalled();
+    expect(tag('ck-p49', describeSmall.id)?.description).toBe('P49.');
+  });
+
+  it('the file key starts with the file size, so other sizes are ruled out without reading', () => {
+    writeFileSync(join(trip, 'a.jpg'), 'x'.repeat(1234));
+    expect(fileKeyOf(join(trip, 'a.jpg'))).toMatch(/^fk1:1234:[0-9a-f]{40}$/);
+  });
+});
+
+describe('fix round 1: file keys are kept in the catalogue', () => {
+  it('a later run (a new AlbumTags) does not read the photo file again while it is unchanged', () => {
+    writeFileSync(join(trip, 'a.jpg'), 'the photo bytes');
+    const p = { ...photo('a'), size: statSync(join(trip, 'a.jpg')).size, mtimeMs: statSync(join(trip, 'a.jpg')).mtimeMs };
+    const k = albumTags.fileKeyOf(p);
+    expect(k).toBe(fileKeyOf(join(trip, 'a.jpg')));
+    // The file changes on disk but the catalogue's row is for the same size and time: the kept key is used.
+    const later = new AlbumTags({ catalog, store, catalogue: FAKE_CATALOGUE });
+    rmSync(join(trip, 'a.jpg'));
+    expect(later.fileKeyOf(p)).toBe(k);
+    // Another size or time is another file: worked out again (here: gone, so none).
+    expect(later.fileKeyOf({ ...p, mtimeMs: p.mtimeMs + 1 })).toBeUndefined();
   });
 });

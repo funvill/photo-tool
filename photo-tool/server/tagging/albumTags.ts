@@ -46,11 +46,19 @@ export class AlbumTags {
 
   constructor(private deps: AlbumTagsDeps) {}
 
-  /** The photo file's key (read once per run while its size and time stay the same). */
+  /** The photo file's key: read from the file once while its size and time stay the same (kept in the catalogue). */
   fileKeyOf(p: GalleryPhoto): string | undefined {
     const hit = this.fileKeys.get(p.path);
     if (hit && hit.size === p.size && hit.mtimeMs === p.mtimeMs) return hit.key;
-    const key = fileKeyOf(p.path);
+    const kept = this.deps.catalog.fileKey(p.path, p.size, p.mtimeMs);
+    let key: string | undefined;
+    if (kept !== undefined) {
+      key = kept ?? undefined;
+    } else {
+      key = fileKeyOf(p.path);
+      // A file that can't be read now is not remembered as such: tried again next run.
+      if (key) this.deps.catalog.putFileKey(p.path, p.size, p.mtimeMs, key);
+    }
     this.fileKeys.set(p.path, { size: p.size, mtimeMs: p.mtimeMs, key });
     return key;
   }
@@ -96,7 +104,7 @@ export class AlbumTags {
         const key = p.contentKey!;
         const name = basename(p.path);
         const cached = rows.get(key) ?? [];
-        const ref = { fileName: name, contentKey: key, fileKey: () => this.fileKeyOf(p) };
+        const ref = { fileName: name, contentKey: key, size: p.size, fileKey: () => this.fileKeyOf(p) };
         for (const id of ids) {
           const s = view.find(id, ref);
           const c = cached.find((r) => r.modelId === id);
