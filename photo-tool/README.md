@@ -123,19 +123,23 @@ The descriptions, objects and keywords are written to a file called `phototool-t
   "photos": {
     "IMG_0042.jpg": {
       "models": {
-        "florence2-base-q8": { "contentKey": "3f1c…", "description": "A boat in a harbour.", "objects": [{ "label": "boat", "count": 2 }], "madeAt": "2026-11-25T10:00:00.000Z" },
-        "clip-base-q8": { "contentKey": "3f1c…", "keywords": [{ "label": "harbour", "score": 0.31 }], "madeAt": "2026-11-25T10:00:01.000Z" }
+        "florence2-base-q8": { "contentKey": "3f1c…", "fileKey": "fk1:9a0e…", "description": "A boat in a harbour.", "objects": [{ "label": "boat", "count": 2 }], "madeAt": "2026-11-25T10:00:00.000Z" },
+        "clip-base-q8": { "contentKey": "3f1c…", "fileKey": "fk1:9a0e…", "keywords": [{ "label": "harbour", "score": 0.31 }], "madeAt": "2026-11-25T10:00:01.000Z" }
       }
     }
   }
 }
 ```
 
-- Photos are keyed by file name, and each model's result by the model it came from. `contentKey` is a fingerprint of the picture it was made from: if the photo in that file is replaced or edited, the old result is not shown for it and the photo is tagged again. A photo renamed inside the folder keeps its tags.
-- The file is written a few seconds after tagging stops (at least once a minute while it runs, and when the folder is closed), each time as a whole new file, so a pass over 1,000 photos writes it a few dozen times, not 1,000. Fields and entries it does not know are kept.
+- Photos are keyed by file name, and each model's result by the model it came from. Two fingerprints say which picture a result was made from. `fileKey` comes from the photo file's own bytes, so it is the same on every computer. `contentKey` comes from the thumbnail this computer made, so it can differ on another computer or after an update, and is used only as a quick first check. If the photo in that file is replaced or edited, the old result is not shown for it and the photo is tagged again. A photo renamed inside the folder keeps its tags.
+- While a pass runs, the files are written at most every 5 minutes. They are also written when the pass ends or is paused, a minute after the last result, when the folder is closed, and when Photo Tool closes. Each write replaces the whole file, so a pass over 1,000 photos at the smaller model's 6 s a photo (about 100 minutes) writes them about 20 times, not 1,000. Fields and entries Photo Tool does not know are kept.
+- A write that fails (the file is in use, say) is tried again after 30 s, then after longer and longer waits, up to 10 minutes. If a file cannot be read as JSON, it is left alone and is not written to until it is fixed or deleted. The two files are written separately, so a problem with one does not hold up the other.
 - Only finished results are written. A photo a model could not look at is tried again when the folder is opened somewhere else.
-- When the folder already has a result for a photo and Photo Tool's own copy differs (it was regenerated on another computer, say), the folder's wins. Tags made before this file existed are written into it the first time the folder is opened.
-- If the folder cannot be written, the files go into the shared folder's `phototool-tags` subfolder (`%APPDATA%\Photo Tools Shared\photoinfo\phototool-tags` on Windows), as `photoinfo.json` does. If a file cannot be read as JSON, it is left alone and nothing more is written to it until it is fixed or deleted.
+- The folder's copy always wins. When the folder already has a result for a picture, a new result from tagging never replaces it, even if Photo Tool's own copy differs (because it was regenerated on another computer, say). Only **Regenerate** replaces it. Tags made before this file existed are written into it the first time the folder is opened.
+- If the file cannot be read just then (a sync program has it locked, or an iCloud file is not downloaded while you are offline), Photo Tool does not tag that folder's photos until it can read the file. It never writes over a file it could not read.
+- If the folder cannot be written, the files go into the shared folder's `phototool-tags` subfolder instead (`%APPDATA%\Photo Tools Shared\photoinfo\phototool-tags` on Windows). Once the folder can be written again, its own file and that copy are merged photo by photo: the folder's result wins unless the copy's is newer. The copy is then deleted. The album's own file never contains a path from your computer.
+- While writing, Photo Tool uses a short-lived temporary file named `~$phototool-tags.json.<random>.tmp`, a name OneDrive and Dropbox do not sync. If Photo Tool is stopped in the middle of a write, the leftover is deleted the next time it writes to that folder.
+- Two computers writing to the same synced album at the same moment can make the sync program keep both, as a conflict copy (for example `phototool-tags 2.json`). Photo Tool ignores those copies, and each computer writes what it has again the next time it opens the folder.
 - Photo Tool also keeps a copy of everything in its catalogue (`gallery.sqlite` in its data folder). That copy is only a cache: deleting the data folder loses no tags.
 
 ## Stars and photoinfo.json

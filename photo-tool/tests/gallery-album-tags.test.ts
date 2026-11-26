@@ -1,10 +1,11 @@
 // The album tags sidecar between the catalogue (a cache) and the album folder (where the results live): opening a
 // folder brings its results into the catalogue, and writes out once the ones the catalogue has but the folder lacks.
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { AlbumTagsStore, PHOTOTAGS_NAME, PHOTOVECTORS_NAME, encodeVector } from '../../shared/phototags';
+import { AlbumTagsStore, PHOTOTAGS_NAME, PHOTOVECTORS_NAME, encodeVector, fileKeyOf } from '../../shared/phototags';
+import { contentKeyOf } from '../server/scanner';
 import { createGalleryApp } from '../server/app';
 import { Catalog, type GalleryPhoto, type TagRow } from '../server/catalog';
 import { AlbumTags } from '../server/tagging/albumTags';
@@ -198,5 +199,110 @@ describe('opening an album with a sidecar through the server', () => {
       await new Promise<void>((r) => server.close(() => r()));
       close();
     }
+  });
+});
+
+describe('fix round 1: matching a photo on any computer', () => {
+  it('the content key depends on how this computer encoded the thumbnail (so it is only a hint across computers)', async () => {
+    const sharp = (await import('sharp')).default;
+    const src = join(trip, 'src.png');
+    await sharp({ create: { width: 64, height: 48, channels: 3, background: '#808080' } })
+      .composite([{ input: Buffer.from('<svg width="64" height="48"><circle cx="20" cy="20" r="15" fill="#c04020"/><rect x="35" y="10" width="20" height="30" fill="#2040c0"/></svg>') }])
+      .png().toFile(src);
+    // The same picture through two JPEG encoders (as a different sharp/mozjpeg build would make it).
+    await sharp(src).jpeg({ quality: 82, mozjpeg: true }).toFile(join(trip, 'a.jpg'));
+    await sharp(src).jpeg({ quality: 82, mozjpeg: false }).toFile(join(trip, 'b.jpg'));
+    expect(await contentKeyOf(join(trip, 'a.jpg'))).not.toBe(await contentKeyOf(join(trip, 'b.jpg')));
+  });
+
+  it('the file key is the same for a copy under another name, folder or time, and changes with the bytes', async () => {
+    const bytes = Buffer.alloc(100_000);
+    for (let i = 0; i < bytes.length; i++) bytes[i] = (i * 7) & 0xff;
+    writeFileSync(join(trip, 'a.jpg'), bytes);
+    mkdirSync(join(root, 'elsewhere'));
+    writeFileSync(join(root, 'elsewhere', 'renamed.jpg'), bytes);
+    utimesSync(join(root, 'elsewhere', 'renamed.jpg'), new Date('2020-01-01'), new Date('2020-01-01'));
+    const k = fileKeyOf(join(trip, 'a.jpg'));
+    expect(k).toMatch(/^fk1:[0-9a-f]{40}$/);
+    expect(fileKeyOf(join(root, 'elsewhere', 'renamed.jpg'))).toBe(k);
+    bytes[99_999] ^= 1;
+    writeFileSync(join(trip, 'a.jpg'), bytes);
+    expect(fileKeyOf(join(trip, 'a.jpg'))).not.toBe(k);
+    expect(fileKeyOf(join(trip, 'missing.jpg'))).toBeUndefined();
+  });
+
+  it('a result made on another computer (other content key) is found by the file key; its key in the file is left as it was', () => {
+    writeFileSync(join(trip, 'a.jpg'), 'the photo bytes');
+    const fk = fileKeyOf(join(trip, 'a.jpg'))!;
+    writeSidecar({ 'a.jpg': { [describeSmall.id]: { contentKey: 'their-content-key', fileKey: fk, description: 'From the other computer.' } } });
+    expect(albumTags.sync([photo('a', 'my-content-key')])).toEqual(['my-content-key']);
+    expect(tag('my-content-key', describeSmall.id)?.description).toBe('From the other computer.');
+    store.flush();
+    expect(sidecar()['a.jpg'].models[describeSmall.id].contentKey).toBe('their-content-key');
+  });
+
+  it('results written from here carry the file key', () => {
+    writeFileSync(join(trip, 'a.jpg'), 'the photo bytes');
+    catalog.putTags(row('ck-a', describeSmall.id, { description: 'A dog.' }));
+    albumTags.sync([photo('a')]);
+    albumTags.save([photo('a')], row('ck-a', keywordsSmall.id, { keywords: [{ label: 'dog', score: 1 }], embedding: new Float32Array([1]) }));
+    store.flush();
+    const models = sidecar()['a.jpg'].models;
+    expect(models[describeSmall.id].fileKey).toBe(fileKeyOf(join(trip, 'a.jpg')));
+    expect(models[keywordsSmall.id].fileKey).toBe(fileKeyOf(join(trip, 'a.jpg')));
+  });
+});
+
+describe('fix round 1: opening a big album', () => {
+  it('one index build for a whole folder, however many photos are synced one by one', () => {
+    const n = 5000;
+    const photos: Record<string, Record<string, Record<string, unknown>>> = {};
+    for (let i = 0; i < n; i++) photos[`p${i}.jpg`] = { [describeSmall.id]: { contentKey: `ck-p${i}`, description: `P${i}.` } };
+    writeSidecar(photos);
+    const t = Date.now();
+    for (let i = 0; i < n; i++) albumTags.sync([photo(`p${i}`)]);
+    const ms = Date.now() - t;
+    expect(store.stats.indexBuilds).toBe(1);
+    expect(tag('ck-p4999', describeSmall.id)?.description).toBe('P4999.');
+    expect(ms).toBeLessThan(5_000);
+  }, 30_000);
+});
+
+describe('fix round 1: a folder whose tags file cannot be read just now', () => {
+  it('holds its photos (not tagged, nothing imported) until it can be read, then imports them', () => {
+    writeSidecar({ 'a.jpg': { [describeSmall.id]: { contentKey: 'ck-a', description: 'Saved.' } } });
+    let locked = true;
+    const s2 = new AlbumTagsStore({
+      fallbackDir: join(root, 'fallback'), unreadableRetryMs: 0, onError: () => {},
+      readFile: (p) => { if (locked && p.endsWith(PHOTOTAGS_NAME)) throw Object.assign(new Error('locked'), { code: 'EBUSY' }); return readFileSync(p, 'utf8'); },
+    });
+    const at = new AlbumTags({ catalog, store: s2, catalogue: FAKE_CATALOGUE });
+    const a = photo('a');
+    expect(at.sync([a])).toEqual([]);
+    expect(at.holds(a)).toBe(true);
+    expect(at.retryDeferred()).toEqual([]);
+    locked = false;
+    expect(at.retryDeferred()).toEqual(['ck-a']);
+    expect(at.holds(a)).toBe(false);
+    expect(tag('ck-a', describeSmall.id)?.description).toBe('Saved.');
+    s2.close();
+  });
+});
+
+describe('fix round 1: a file that never becomes readable', () => {
+  it('holds its photos only for a while; then they are tagged (results kept in the catalogue, the file left alone)', () => {
+    writeSidecar({});
+    const s2 = new AlbumTagsStore({
+      fallbackDir: join(root, 'fallback'), unreadableRetryMs: 0, onError: () => {},
+      readFile: (p) => { if (p.endsWith(PHOTOTAGS_NAME)) throw Object.assign(new Error('denied'), { code: 'EACCES' }); return readFileSync(p, 'utf8'); },
+    });
+    let now = 1_000_000;
+    const at = new AlbumTags({ catalog, store: s2, catalogue: FAKE_CATALOGUE, maxHoldMs: 600_000, now: () => now });
+    const a = photo('a');
+    at.sync([a]);
+    expect(at.holds(a)).toBe(true);
+    now += 600_001;
+    expect(at.holds(a)).toBe(false);
+    s2.close();
   });
 });

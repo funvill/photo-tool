@@ -34,7 +34,7 @@ export interface GalleryAppOptions {
   /** Replaces how photoinfo.json is written or renamed. A seam for tests (a read-only or busy folder). */
   photoInfoSeams?: Pick<PhotoInfoOptions, 'writeFile' | 'rename'>;
   /** How long the album folders' tag files wait before they are written (see shared/phototags/store.ts). A seam for tests. */
-  albumTagsTiming?: Pick<AlbumTagsOptions, 'debounceMs' | 'maxWaitMs'>;
+  albumTagsTiming?: Pick<AlbumTagsOptions, 'debounceMs' | 'maxWaitMs' | 'retryMs' | 'maxRetryMs'>;
   /**
    * Photo tagging: `workerFile` is the tagging worker to run (built, or from source in development). The rest are
    * seams for tests and the e2e server: model downloads, the model list, what runs the models, which picture they get.
@@ -115,6 +115,8 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     catalogue: opts.tagging?.catalogue,
     imageOf: opts.tagging?.imageOf ?? (async (p) => catalog.thumbPath(p.key, 'm')),
     albumTags,
+    // A pass ended (or paused): its results go to the album folders now, not minutes later.
+    onPassEnd: () => albumStore.flush(),
   });
   tagging.setSettings({ ...readTaggingSettings(dataDir), paused: false });
   // Tagging starts when the open folder's scan is done (not one cancelled because another folder was opened).
@@ -268,6 +270,8 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     // The earlier folder's tagging stops after the photo in hand; its results not written yet are written now.
     tagging.clearJob();
     albumStore.flush();
+    // Read the album folders' tag files afresh: another computer may have changed them since.
+    albumStore.invalidate();
     res.status(202).json({ jobId: job.id });
   }));
 

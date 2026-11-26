@@ -14,6 +14,11 @@ export const PHOTOVECTORS_FORMAT = 'phototool-vectors/1';
  */
 export interface TagResult {
   contentKey: string;
+  /**
+   * The photo file's own fingerprint (see FILE_KEY_VERSION): the same on every computer, unlike the content key, which
+   * is a hash of a thumbnail this computer's image library made. A result matches a photo by either.
+   */
+  fileKey?: string;
   description?: string;
   objects?: { label: string; count: number }[];
   keywords?: { label: string; score: number }[];
@@ -38,6 +43,8 @@ export interface PhotoTagsFile {
 
 export interface VectorEntry {
   contentKey: string;
+  fileKey?: string;
+  madeAt?: string;
   /** The embedding: base64 of its float32 values, little-endian. */
   data: string;
   [extra: string]: unknown;
@@ -59,6 +66,7 @@ export interface StoredVector {
   fileName: string;
   modelId: string;
   contentKey: string;
+  fileKey?: string;
   embedding: Float32Array;
 }
 
@@ -122,6 +130,7 @@ export function resultsOf(file: PhotoTagsFile): StoredResult[] {
       if (!isPlainObject(r) || typeof r.contentKey !== 'string' || !r.contentKey) continue;
       // Known fields of the wrong shape (a hand edit gone wrong) are left out of what is read.
       const clean: StoredResult = { fileName, modelId, ...(r as TagResult) };
+      if (clean.fileKey !== undefined && typeof clean.fileKey !== 'string') delete clean.fileKey;
       if (clean.description !== undefined && typeof clean.description !== 'string') delete clean.description;
       if (clean.objects !== undefined) clean.objects = listOf(clean.objects, (o) => typeof o.label === 'string' && typeof o.count === 'number');
       if (clean.keywords !== undefined) clean.keywords = listOf(clean.keywords, (k) => typeof k.label === 'string' && typeof k.score === 'number');
@@ -154,7 +163,7 @@ export function vectorsOf(file: PhotoVectorsFile): StoredVector[] {
     for (const [modelId, r] of Object.entries(modelsOf(entry) ?? {})) {
       if (!isPlainObject(r) || typeof r.contentKey !== 'string' || typeof r.data !== 'string') continue;
       const embedding = decodeVector(r.data);
-      if (embedding) out.push({ fileName, modelId, contentKey: r.contentKey, embedding });
+      if (embedding) out.push({ fileName, modelId, contentKey: r.contentKey, ...(typeof r.fileKey === 'string' ? { fileKey: r.fileKey } : {}), embedding });
     }
   }
   return out;

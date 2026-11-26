@@ -683,3 +683,40 @@ describe('album tags sidecar: results land in the album folder', () => {
     expect(q.status().done).toBe(1);
   });
 });
+
+describe('album tags sidecar fix round 1: the queue', () => {
+  it('says when a pass ends (so its results are written then)', async () => {
+    await install(describeSmall);
+    let ends = 0;
+    const q = (queue = new TaggingQueue({ catalog, backend: testBackend().backend, dataDir, catalogue: FAKE_CATALOGUE, onPassEnd: () => ends++, imageOf: async (p) => join(root, 'img', `${p.fileName.replace('.jpg', '')}.img`) }));
+    q.setSettings(settings({ describe: describeSmall.id }));
+    q.startJob('j1', () => [photo('a'), photo('b')]);
+    await idle(q);
+    expect(ends).toBeGreaterThanOrEqual(1);
+  });
+
+  it('photos of a folder whose tags file cannot be read just now are not tagged; once it can be, their results come in instead', async () => {
+    await install(describeSmall);
+    writeFileSync(join(root, 'trip', PHOTOTAGS_NAME), JSON.stringify({ format: 'phototool-tags/1', photos: { 'a.jpg': { models: { [describeSmall.id]: { contentKey: 'ck-a', description: 'Saved in the album.' } } } } }));
+    let locked = true;
+    const store = new AlbumTagsStore({
+      fallbackDir: join(root, 'fallback'), unreadableRetryMs: 0, onError: () => {},
+      readFile: (p) => { if (locked && p.endsWith(PHOTOTAGS_NAME)) throw Object.assign(new Error('locked'), { code: 'EBUSY' }); return readFileSync(p, 'utf8'); },
+    });
+    const albumTags = new AlbumTags({ catalog, store, catalogue: FAKE_CATALOGUE });
+    const t = testBackend();
+    const q = (queue = new TaggingQueue({ catalog, backend: t.backend, dataDir, catalogue: FAKE_CATALOGUE, albumTags, deferRetryMs: 20, imageOf: async (p) => join(root, 'img', `${p.fileName.replace('.jpg', '')}.img`) }));
+    const list = [photo('a'), photo('b')];
+    albumTags.sync(list);
+    q.setSettings(settings({ describe: describeSmall.id }));
+    q.startJob('j1', () => list);
+    await idle(q);
+    expect(t.calls).toEqual([]);
+    locked = false;
+    for (let i = 0; i < 200 && t.calls.length < 1; i++) await new Promise((r) => setTimeout(r, 10));
+    await idle(q);
+    expect(t.calls).toEqual(['describe:b']);
+    expect(catalog.tagsFor(['ck-a'], [describeSmall.id]).get('ck-a')![0].description).toBe('Saved in the album.');
+    store.close();
+  });
+});

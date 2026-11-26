@@ -84,8 +84,12 @@ export class Catalog {
     mkdirSync(join(dataDir, 'thumbs'), { recursive: true });
     mkdirSync(join(dataDir, 'derived'), { recursive: true });
     this.db = new DatabaseSync(join(dataDir, 'gallery.sqlite'));
+    // WAL with synchronous NORMAL (SQLite's advice for WAL): a commit is not flushed to disk on its own, so opening an
+    // album imports thousands of rows from its tags file in well under a second, not one disk flush each. The worst a
+    // power cut can do is lose the last commits of this cache, which the album folders and a rescan make again.
     this.db.exec(`
       PRAGMA journal_mode = WAL;
+      PRAGMA synchronous = NORMAL;
       CREATE TABLE IF NOT EXISTS photos (
         path TEXT PRIMARY KEY, folder TEXT NOT NULL, file_name TEXT NOT NULL, rel_dir TEXT NOT NULL,
         size INTEGER NOT NULL, mtime_ms INTEGER NOT NULL, width INTEGER NOT NULL, height INTEGER NOT NULL,

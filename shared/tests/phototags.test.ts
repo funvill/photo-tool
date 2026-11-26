@@ -2,7 +2,7 @@
 // album folder (atomic, debounced writes; the read-only fallback; broken files left alone).
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   AlbumTagsStore,
@@ -192,7 +192,8 @@ describe('AlbumTagsStore', () => {
       photos: { 'b.jpg': { pinned: true, models: { m: { contentKey: 'kb', description: 'B' } } }, 'a.jpg': { models: { 'describe-1': { contentKey: 'k1', description: 'old', mood: 'calm' } } } },
     }));
     const store = make();
-    store.put(dir, 'A.JPG', 'describe-1', describeResult);
+    // Regenerate replaces the folder's result for the same picture (a tagging result would keep it).
+    store.put(dir, 'A.JPG', 'describe-1', describeResult, 'replace');
     store.flush();
     const tags = json(tagsFile());
     expect(tags.owner).toBe('x');
@@ -317,5 +318,318 @@ describe('phototags format: hand edits gone wrong', () => {
   it('reads past known fields of the wrong shape', () => {
     const file = parsePhotoTags(JSON.stringify({ photos: { 'a.jpg': { models: { m: { contentKey: 'k', description: 3, objects: 'x', keywords: [{ label: 'ok', score: 1 }, { label: 2 }] } } } } }));
     expect(resultsOf(file)).toEqual([{ fileName: 'a.jpg', modelId: 'm', contentKey: 'k', objects: [], keywords: [{ label: 'ok', score: 1 }] }]);
+  });
+});
+
+describe('AlbumTagsStore: fix round 1', () => {
+  let dir: string;
+  let fallbackDir: string;
+  let stores: AlbumTagsStore[];
+  const tagsFile = () => join(dir, PHOTOTAGS_NAME);
+  const vectorsFile = () => join(dir, PHOTOVECTORS_NAME);
+  const json = (path: string) => JSON.parse(readFileSync(path, 'utf8'));
+  const make = (o: Partial<AlbumTagsOptions> = {}) => {
+    const s = new AlbumTagsStore({ fallbackDir, onError: () => {}, ...o });
+    stores.push(s);
+    return s;
+  };
+  const r = (contentKey: string, description = `About ${contentKey}.`) => ({ contentKey, description, objects: [] });
+  const seed = (photos: Record<string, Record<string, Record<string, unknown>>>, path = tagsFile()) =>
+    writeFileSync(path, JSON.stringify({ format: 'phototool-tags/1', photos: Object.fromEntries(Object.entries(photos).map(([n, models]) => [n, { models }])) }));
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'phototags-r1-'));
+    fallbackDir = mkdtempSync(join(tmpdir(), 'phototags-r1-fb-'));
+    stores = [];
+  });
+  afterEach(() => {
+    for (const s of stores) s.close();
+    vi.useRealTimers();
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(fallbackDir, { recursive: true, force: true });
+  });
+
+  describe('write cadence at real model speeds', () => {
+    it('a photo every 10 s for 20 minutes is written about every 5 minutes, not after every photo', () => {
+      vi.useFakeTimers();
+      let writes = 0;
+      const store = make({ writeFile: (t, text) => { writes++; writeFileSync(t, text); } });
+      for (let i = 0; i < 120; i++) {
+        store.put(dir, `p${i}.jpg`, 'describe-1', r(`k${i}`));
+        vi.advanceTimersByTime(10_000);
+      }
+      expect(writes).toBeGreaterThanOrEqual(3);
+      expect(writes).toBeLessThanOrEqual(5);
+    });
+
+    it('once results stop coming, they are written a minute later', () => {
+      vi.useFakeTimers();
+      const store = make();
+      store.put(dir, 'a.jpg', 'describe-1', r('k1'));
+      vi.advanceTimersByTime(59_000);
+      expect(existsSync(tagsFile())).toBe(false);
+      vi.advanceTimersByTime(2_000);
+      expect(existsSync(tagsFile())).toBe(true);
+    });
+  });
+
+  describe('a failed write backs off', () => {
+    const busy = () => {
+      let attempts = 0;
+      let isBusy = true;
+      const rename = (from: string, to: string) => {
+        attempts++;
+        if (isBusy) throw Object.assign(new Error('busy'), { code: 'EBUSY' });
+        renameSync(from, to);
+      };
+      return { rename, attempts: () => attempts, free: () => (isBusy = false) };
+    };
+
+    it('later results do not retry at once; the tail is retried on its own, with a growing wait', () => {
+      vi.useFakeTimers();
+      const b = busy();
+      const store = make({ rename: b.rename });
+      store.put(dir, 'a.jpg', 'describe-1', r('k1'));
+      store.flush();
+      const first = b.attempts();
+      expect(first).toBeGreaterThan(0);
+      for (let i = 0; i < 20; i++) {
+        store.put(dir, `p${i}.jpg`, 'describe-1', r(`k${i}`));
+        vi.advanceTimersByTime(1_000);
+      }
+      store.flush(); // a pass ended: still waiting out the backoff
+      expect(b.attempts()).toBe(first);
+      vi.advanceTimersByTime(10_000);
+      const second = b.attempts();
+      expect(second).toBeGreaterThan(first);
+      // Doubled: nothing 30 s later, again after 60 s.
+      vi.advanceTimersByTime(30_000);
+      expect(b.attempts()).toBe(second);
+      b.free();
+      vi.advanceTimersByTime(31_000);
+      expect(Object.keys(json(tagsFile()).photos)).toHaveLength(21);
+      expect(readdirSync(dir).filter((n) => n.endsWith('.tmp'))).toEqual([]);
+    });
+
+    it('close() still tries, whatever the backoff', () => {
+      const b = busy();
+      const store = make({ rename: b.rename });
+      store.put(dir, 'a.jpg', 'describe-1', r('k1'));
+      store.flush();
+      b.free();
+      store.close();
+      expect(json(tagsFile()).photos['a.jpg']).toBeTruthy();
+    });
+
+    it('a broken vectors file does not make the tags file be rewritten for every result', () => {
+      writeFileSync(vectorsFile(), '{broken');
+      let tagWrites = 0;
+      const store = make({ writeFile: (t, text) => { if (t === tagsFile()) tagWrites++; writeFileSync(t, text); } });
+      for (let i = 0; i < 5; i++) {
+        store.put(dir, `p${i}.jpg`, 'keywords-1', { contentKey: `k${i}`, keywords: [{ label: 'x', score: 1 }], embedding: new Float32Array([1]) });
+        store.flush();
+      }
+      expect(tagWrites).toBe(5); // one per flush with something new in it
+      expect(Object.keys(json(tagsFile()).photos)).toHaveLength(5);
+      expect(readFileSync(vectorsFile(), 'utf8')).toBe('{broken');
+      // Fixed: the vectors waiting go out, and the tags file is not written again.
+      rmSync(vectorsFile());
+      store.flush();
+      expect(Object.keys(json(vectorsFile()).photos)).toHaveLength(5);
+      expect(tagWrites).toBe(5);
+    });
+
+    it('a broken tags file is not read again until it changes', () => {
+      writeFileSync(tagsFile(), '{broken');
+      let reads = 0;
+      const store = make({ readFile: (p) => { if (p === tagsFile()) reads++; return readFileSync(p, 'utf8'); } });
+      store.put(dir, 'a.jpg', 'describe-1', r('k1'));
+      store.flush();
+      const after = reads;
+      for (let i = 0; i < 5; i++) {
+        store.put(dir, `p${i}.jpg`, 'describe-1', r(`k${i}`));
+        store.flush();
+      }
+      expect(reads).toBe(after);
+    });
+  });
+
+  describe('a folder that becomes writable again', () => {
+    it('merges entry by entry: what another device wrote to the folder meanwhile is kept, a newer fallback entry wins', () => {
+      const ro = { on: true };
+      const writeFile = (target: string, text: string) => {
+        if (ro.on && target.startsWith(dir)) throw Object.assign(new Error('read-only'), { code: 'EACCES' });
+        writeFileSync(target, text);
+      };
+      seed({ 'old.jpg': { m: { contentKey: 'ko', description: 'Before.', madeAt: '2026-01-01T00:00:00.000Z' } } });
+      const store = make({ writeFile });
+      store.put(dir, 'mine.jpg', 'm', { ...r('km'), madeAt: '2026-02-01T00:00:00.000Z' });
+      store.put(dir, 'old.jpg', 'm', { ...r('ko', 'Regenerated here.'), madeAt: '2026-03-01T00:00:00.000Z' }, 'replace');
+      store.flush();
+      expect(readdirSync(join(fallbackDir, 'phototool-tags'))).toHaveLength(1);
+      // Meanwhile another device adds a photo and changes one, in the folder's own file.
+      seed({
+        'old.jpg': { m: { contentKey: 'ko', description: 'Before.', madeAt: '2026-01-01T00:00:00.000Z' } },
+        'theirs.jpg': { m: { contentKey: 'kt', description: 'Theirs.', madeAt: '2026-02-15T00:00:00.000Z' } },
+        'mine.jpg': { m: { contentKey: 'km', description: 'Their newer take.', madeAt: '2026-04-01T00:00:00.000Z' } },
+      });
+      // Reads see both while the fallback is there.
+      const seen = Object.fromEntries(store.read(dir).results.map((x) => [x.fileName, x.description]));
+      expect(seen).toEqual({ 'old.jpg': 'Regenerated here.', 'theirs.jpg': 'Theirs.', 'mine.jpg': 'Their newer take.' });
+      ro.on = false;
+      store.put(dir, 'new.jpg', 'm', r('kn'));
+      store.flush();
+      const file = json(tagsFile());
+      const descriptions = Object.fromEntries(Object.entries(file.photos).map(([n, e]) => [n, (e as { models: { m: { description: string } } }).models.m.description]));
+      expect(descriptions).toEqual({
+        'old.jpg': 'Regenerated here.', // the fallback's is newer
+        'theirs.jpg': 'Theirs.', // only in the folder
+        'mine.jpg': 'Their newer take.', // the folder's is newer
+        'new.jpg': 'About kn.',
+      });
+      // No local path in the synced file, and the fallback copy is gone.
+      expect(file.folder).toBeUndefined();
+      expect(readdirSync(join(fallbackDir, 'phototool-tags'))).toEqual([]);
+    });
+  });
+
+  describe('a read error is not a missing file', () => {
+    it('is not cached: the folder is read again later', () => {
+      seed({ 'a.jpg': { m: { contentKey: 'k', description: 'Here.' } } });
+      let fail = true;
+      const store = make({ unreadableRetryMs: 0, readFile: (p) => { if (fail && p === tagsFile()) throw Object.assign(new Error('locked'), { code: 'EBUSY' }); return readFileSync(p, 'utf8'); } });
+      const view = store.lookup(dir);
+      expect(view.status).toBe('unreadable');
+      expect(view.find('m', { fileName: 'a.jpg', contentKey: 'k' })).toBeUndefined();
+      fail = false;
+      expect(store.lookup(dir).find('m', { fileName: 'a.jpg', contentKey: 'k' })?.description).toBe('Here.');
+    });
+
+    it('a file that could not be read is never written over', () => {
+      seed({ 'a.jpg': { m: { contentKey: 'k', description: 'Here.' } } });
+      const before = readFileSync(tagsFile(), 'utf8');
+      let writes = 0;
+      const store = make({
+        readFile: (p) => { if (p === tagsFile()) throw Object.assign(new Error('offline'), { code: 'EIO' }); return readFileSync(p, 'utf8'); },
+        writeFile: (t, text) => { writes++; writeFileSync(t, text); },
+      });
+      store.put(dir, 'b.jpg', 'm', r('kb'));
+      store.flush();
+      expect(writes).toBe(0);
+      expect(readFileSync(tagsFile(), 'utf8')).toBe(before);
+      expect(store.hasPending(dir)).toBe(true);
+    });
+  });
+
+  describe('new tagging output never replaces the folder entry for the same picture', () => {
+    it('keeps a regenerated (or any) folder entry for the same picture; Regenerate replaces it', () => {
+      seed({ 'a.jpg': { m: { contentKey: 'k', description: 'Regenerated elsewhere.', madeAt: '2026-01-01T00:00:00.000Z', mood: 'calm' } } });
+      const store = make();
+      store.put(dir, 'a.jpg', 'm', r('k', 'Fresh model output.'));
+      store.flush();
+      expect(json(tagsFile()).photos['a.jpg'].models.m.description).toBe('Regenerated elsewhere.');
+      store.put(dir, 'a.jpg', 'm', r('k', 'Regenerated here.'), 'replace');
+      store.flush();
+      expect(json(tagsFile()).photos['a.jpg'].models.m).toMatchObject({ description: 'Regenerated here.', mood: 'calm' });
+    });
+
+    it('the same picture by file key (another computer content key) counts too; its file key is added when missing', () => {
+      seed({ 'a.jpg': { m: { contentKey: 'their-key', fileKey: 'fk1:abc', description: 'Theirs.' } }, 'b.jpg': { m: { contentKey: 'kb', description: 'Old format.' } } });
+      const store = make();
+      store.put(dir, 'a.jpg', 'm', { ...r('my-key', 'Mine.'), fileKey: 'fk1:abc' });
+      store.put(dir, 'b.jpg', 'm', { ...r('kb', 'Mine.'), fileKey: 'fk1:bbb' });
+      store.flush();
+      const photos = json(tagsFile()).photos;
+      expect(photos['a.jpg'].models.m).toMatchObject({ contentKey: 'their-key', description: 'Theirs.' });
+      expect(photos['b.jpg'].models.m).toMatchObject({ contentKey: 'kb', description: 'Old format.', fileKey: 'fk1:bbb' });
+    });
+
+    it('a result for another picture (the photo was replaced) still replaces the old one', () => {
+      seed({ 'a.jpg': { m: { contentKey: 'old', fileKey: 'fk1:old', description: 'Old picture.' } } });
+      const store = make();
+      store.put(dir, 'a.jpg', 'm', { ...r('new', 'New picture.'), fileKey: 'fk1:new' });
+      store.flush();
+      expect(json(tagsFile()).photos['a.jpg'].models.m.description).toBe('New picture.');
+    });
+  });
+
+  describe('finding a photo result', () => {
+    it('by its name and content key, by content key under another name, or by file key', () => {
+      seed({
+        'a.jpg': { m: { contentKey: 'ka', description: 'A.' } },
+        'old-name.jpg': { m: { contentKey: 'kr', description: 'Renamed.' } },
+        'c.jpg': { m: { contentKey: 'other-computer', fileKey: 'fk1:c', description: 'C.' } },
+      });
+      const view = make().lookup(dir);
+      expect(view.status).toBe('ok');
+      expect(view.find('m', { fileName: 'A.JPG', contentKey: 'ka' })?.description).toBe('A.');
+      expect(view.find('m', { fileName: 'new-name.jpg', contentKey: 'kr' })?.fileName).toBe('old-name.jpg');
+      let asked = 0;
+      expect(view.find('m', { fileName: 'c.jpg', contentKey: 'mine', fileKey: () => (asked++, 'fk1:c') })?.description).toBe('C.');
+      expect(view.find('m', { fileName: 'a.jpg', contentKey: 'ka', fileKey: () => (asked++, 'x') })).toBeTruthy();
+      expect(asked).toBe(1); // only worked out when the content key did not match
+      expect(view.find('m', { fileName: 'c.jpg', contentKey: 'mine', fileKey: () => 'fk1:different' })).toBeUndefined();
+    });
+
+    it('builds its index once per change of the file, however many photos are looked up', () => {
+      const photos: Record<string, Record<string, Record<string, unknown>>> = {};
+      for (let i = 0; i < 3000; i++) photos[`p${i}.jpg`] = { m: { contentKey: `k${i}`, description: `P${i}.` } };
+      seed(photos);
+      const store = make();
+      const t = Date.now();
+      for (let i = 0; i < 3000; i++) expect(store.lookup(dir).find('m', { fileName: `p${i}.jpg`, contentKey: `k${i}` })?.description).toBe(`P${i}.`);
+      expect(store.stats.indexBuilds).toBe(1);
+      expect(Date.now() - t).toBeLessThan(3000);
+    });
+  });
+
+  describe('leftovers and odd cases', () => {
+    it('the temp file has a name sync engines skip (~$... .tmp), and old leftovers are cleaned up on the next write', () => {
+      const renames: string[] = [];
+      writeFileSync(join(dir, '~$phototool-tags.json.1234.abcd.tmp'), 'left by a crash');
+      writeFileSync(join(dir, '.phototool-tags.json.1234.abcd.tmp'), 'left by an older version');
+      writeFileSync(join(dir, 'someone-else.tmp'), 'not ours');
+      const store = make({ rename: (from, to) => { renames.push(from); renameSync(from, to); } });
+      store.put(dir, 'a.jpg', 'm', r('k'));
+      store.flush();
+      expect(basename(renames[0])).toMatch(/^~\$phototool-tags\.json\.[0-9a-f]+\.tmp$/);
+      expect(readdirSync(dir).sort()).toEqual([PHOTOTAGS_NAME, 'someone-else.tmp']);
+    });
+
+    it('an entry under our name that this version cannot read is left alone', () => {
+      writeFileSync(tagsFile(), JSON.stringify({ format: 'phototool-tags/1', photos: { 'a.jpg': 'future shape', 'b.jpg': { models: [1, 2] } } }));
+      const store = make();
+      store.put(dir, 'a.jpg', 'm', r('k'));
+      store.put(dir, 'b.jpg', 'm', r('k2'));
+      store.put(dir, 'c.jpg', 'm', r('k3'));
+      store.flush();
+      const photos = json(tagsFile()).photos;
+      expect(photos['a.jpg']).toBe('future shape');
+      expect(photos['b.jpg']).toEqual({ models: [1, 2] });
+      expect(photos['c.jpg']).toBeTruthy();
+    });
+
+    it('a result kept after close() is written at once', () => {
+      const store = make();
+      store.close();
+      store.put(dir, 'a.jpg', 'm', r('k'));
+      expect(json(tagsFile()).photos['a.jpg']).toBeTruthy();
+    });
+  });
+});
+
+describe('AlbumTagsStore: invalidate', () => {
+  it('a file written just after a lookup is seen once the store is told a folder is being opened', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'phototags-inv-'));
+    const store = new AlbumTagsStore({ fallbackDir: join(dir, 'fb'), onError: () => {} });
+    try {
+      expect(store.lookup(dir).status).toBe('none');
+      writeFileSync(join(dir, PHOTOTAGS_NAME), JSON.stringify({ format: 'phototool-tags/1', photos: { 'a.jpg': { models: { m: { contentKey: 'k', description: 'New.' } } } } }));
+      store.invalidate();
+      expect(store.lookup(dir).find('m', { fileName: 'a.jpg', contentKey: 'k' })?.description).toBe('New.');
+    } finally {
+      store.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
