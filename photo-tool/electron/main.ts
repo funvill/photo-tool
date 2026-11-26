@@ -31,6 +31,7 @@ function photoTool(): DesktopProgram {
     page: (base) => base,
     // The one name Photo Tool may look up: the map tile server's, for its Map tab (see mapTiles.ts).
     hostResolverRules: mapHostResolverRules(),
+    updateChannel: 'photo-tool',
     // Tiles may load after the user chose Load maps, never during a self-test.
     requestAllowed: (url, method, guard) => galleryRequestAllowed(url, method, { ...guard, mapsAllowed: mapsOnline && !selfTest }),
     sendHeaders: (ses, version) => {

@@ -74,6 +74,11 @@ export function releasePage(repo: { owner: string; repo: string }, version: stri
   return `${GITHUB_ORIGIN}/${repo.owner}/${repo.repo}/releases/tag/v${version}`;
 }
 
+/** The newest published release, for a program that cannot install an update by itself. */
+export function latestReleasePage(repo: { owner: string; repo: string }): string {
+  return `${GITHUB_ORIGIN}/${repo.owner}/${repo.repo}/releases/latest`;
+}
+
 /**
  * Does this error only say that nothing is published yet? Until the first release is published (and
  * while only drafts exist) GitHub answers 404; that is "up to date", never an error box.

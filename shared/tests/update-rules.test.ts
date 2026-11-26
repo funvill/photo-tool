@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { hostResolverRules } from '../electron/netGuard';
-import { CHECK_INTERVAL_MS, UPDATE_HOSTS, githubRepo, isNoRelease, readUpdateSettings, releasePage, shouldCheckAtStart, updateText, writeUpdateSettings } from '../electron/updateRules';
+import { CHECK_INTERVAL_MS, UPDATE_HOSTS, githubRepo, isNoRelease, latestReleasePage, readUpdateSettings, releasePage, shouldCheckAtStart, updateText, writeUpdateSettings } from '../electron/updateRules';
 
 const tempFile = () => join(mkdtempSync(join(tmpdir(), 'updates-')), 'updates.json');
 
@@ -79,6 +79,7 @@ describe('where releases live', () => {
 
   it('links the release page of a version', () => {
     expect(releasePage({ owner: 'funvill', repo: 'photo-tool' }, '0.1.40')).toBe('https://github.com/funvill/photo-tool/releases/tag/v0.1.40');
+    expect(latestReleasePage({ owner: 'funvill', repo: 'photo-tool' })).toBe('https://github.com/funvill/photo-tool/releases/latest');
   });
 });
 

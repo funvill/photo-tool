@@ -128,16 +128,82 @@ describe('the local server\'s port', () => {
   });
 });
 
-describe('the shell', () => {
-  it('has no updater and no crash reporter', () => {
-    const code = ['runDesktopApp', 'serverHost', 'selfTest', 'dataFolders', 'config', 'netGuard']
-      .map((f) => read(`shared/electron/${f}.ts`))
-      .join('\n')
-      .split('\n')
-      .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
-      .join('\n');
-    expect(code).not.toMatch(/crashReporter|autoUpdater|electron-updater|update-electron-app/);
+describe('updates in the shell', () => {
+  const code = read('shared/electron/runDesktopApp.ts')
+    .split('\n')
+    .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+    .join('\n');
+  /** The body of `function name(` (or `async function name(`), up to the next line that closes at its indent. */
+  const fn = (name: string) => {
+    const m = new RegExp(`\\n( *)(async )?function ${name}\\(`).exec(code);
+    if (!m) throw new Error(`no function ${name}`);
+    const end = code.indexOf(`\n${m[1]}}`, m.index + 1);
+    return code.slice(m.index, end);
+  };
+
+  it('uses electron-updater, and has no crash reporter', () => {
+    expect(code).toMatch(/import \{ autoUpdater \} from 'electron-updater';/);
+    expect(code).not.toMatch(/crashReporter|update-electron-app/);
+    for (const f of ['serverHost', 'selfTest', 'dataFolders', 'config', 'netGuard', 'updateRules', 'updates']) expect(read(`shared/electron/${f}.ts`), f).not.toMatch(/crashReporter|from 'electron-updater'|update-electron-app/);
   });
+
+  it('touches autoUpdater only when it is not a self-test', () => {
+    const start = fn('startUpdates');
+    expect(start).toMatch(/if \(selfTest\) return;/);
+    expect(start.indexOf('if (selfTest) return;')).toBeLessThan(start.indexOf('autoUpdater'));
+    // Everywhere else autoUpdater is only named inside startUpdates.
+    expect(code.replace(start, '').replace("import { autoUpdater } from 'electron-updater';", '')).not.toContain('autoUpdater');
+  });
+
+  it('runs the check at start a few seconds after the page loads, never in a self-test', () => {
+    const main = fn('main');
+    expect(main).toMatch(/if \(!selfTest && updates\)[\s\S]{0,200}\b(u|updates\??)\.checkAtStart\(\{ selfTest: !!selfTest, disabledByEnv: !!envVar\('NO_UPDATE_CHECK'\) \}\)/);
+    expect(main.indexOf('await win.loadURL')).toBeLessThan(main.indexOf('checkAtStart'));
+    expect(code.match(/checkAtStart\(/g)).toHaveLength(1);
+  });
+
+  it('a test feed (<PREFIX>_UPDATE_FEED) is used only when it is set', () => {
+    expect(code.match(/setFeedURL\(/g)).toHaveLength(1);
+    expect(fn('startUpdates')).toMatch(/const feed = envVar\('UPDATE_FEED'\);[\s\S]{0,300}if \(feed\) autoUpdater\.setFeedURL\(\{ provider: 'generic', url: feed, channel: program\.updateChannel \}\)/);
+  });
+
+  it('window-all-closed does not quit while installing; before-quit lets a quit through once quitting', () => {
+    expect(code).toMatch(/app\.on\('window-all-closed', \(\) => \{\s*if \(installing\) return;/);
+    expect(code).toMatch(/app\.on\('before-quit', \(event\) => \{\s*if \(quitting\) return;/);
+  });
+
+  it('prepareInstall: unsaved edits first, then closes the window for up to 10 s, then stops the server', () => {
+    const p = fn('prepareInstall');
+    const at = (s: string) => {
+      const i = p.indexOf(s);
+      expect(i, s).toBeGreaterThanOrEqual(0);
+      return i;
+    };
+    expect(at('program.confirmQuit()')).toBeLessThan(at('installing = true'));
+    expect(at('installing = true')).toBeLessThan(at('win.close()'));
+    expect(p).toMatch(/Date\.now\(\) \+ 10_000/);
+    expect(p).toMatch(/while \(win && !win\.isDestroyed\(\) && Date\.now\(\) < until\)/);
+    // Still open (the editor's pending save cancelled the close): nothing was stopped, and the user is told.
+    expect(p).toMatch(/installing = false;[\s\S]{0,120}updateText\.stillSaving[\s\S]{0,80}return false;/);
+    // quitting before the server stops, so its exit is not taken for a crash; the server stops before true.
+    expect(at('win.close()')).toBeLessThan(at('quitting = true'));
+    expect(at('quitting = true')).toBeLessThan(at('await stopServer()'));
+    expect(at('await stopServer()')).toBeLessThan(at('return true'));
+  });
+
+  it("a .deb with no graphical sudo opens the release page instead of installing", () => {
+    const p = fn('prepareInstall');
+    expect(p.indexOf('cannotInstallDeb()')).toBeLessThan(p.indexOf('program.confirmQuit()'));
+    expect(p).toMatch(/if \(cannotInstallDeb\(\)\)[\s\S]{0,400}shell\.openExternal\(latestReleasePage\(/);
+    expect(fn('cannotInstallDeb')).toMatch(/process\.platform !== 'linux' \|\| env\.APPIMAGE/);
+  });
+
+  it('the Help menu carries the update items', () => {
+    expect(fn('buildMenu')).toMatch(/updates\?\.menuItems\(\)/);
+  });
+});
+
+describe('the shell', () => {
 
   it("names neither program: each program's names come from its own product.json", () => {
     for (const product of ['photo-tool/product.json', 'photobook-editor/product.json'].map((f) => JSON.parse(read(f)))) {

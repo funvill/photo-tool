@@ -47,6 +47,7 @@ function editor(): DesktopProgram {
     page: (base) => base,
     // No name is ever looked up.
     hostResolverRules: hostResolverRules(),
+    updateChannel: 'photobook-editor',
     requestAllowed: (url, _method, guard) => isAllowedRequest(url, guard),
     fileMenu: () => [],
     registerIpc: (ctx) => exportActions(ctx),
