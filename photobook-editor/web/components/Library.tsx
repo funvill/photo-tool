@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { chronological, groupSimilar, type BookDocument, type ImageElement, type PhotoAsset } from '../../core';
-import { api, isBrowserBackend, thumbUrl } from '../api';
+import { api, thumbUrl } from '../api';
 import { useEditor } from '../store';
 import { ASSET_MIME } from './Canvas';
 import { FolderPicker } from './FolderPicker';
@@ -26,24 +26,6 @@ export function Library() {
 
   const usage = useMemo(() => parseUsage(usageKey), [usageKey]);
   const hover = useHoverPreview(assets);
-
-  // Web version: after a browser restart, folders read in place need permission again.
-  const [needAccess, setNeedAccess] = useState(0);
-  useEffect(() => {
-    if (!api.web) return;
-    let live = true;
-    void api.web.foldersNeedingAccess(projectId).then((n) => live && setNeedAccess(n), () => undefined);
-    return () => {
-      live = false;
-    };
-  }, [projectId, assets.length, links.length]);
-  const allowAccess = async () => {
-    await api.web!.requestFolderAccess(projectId);
-    setNeedAccess(await api.web!.foldersNeedingAccess(projectId));
-    await useEditor.getState().refreshAssets();
-    await useEditor.getState().refreshLinks();
-    void useEditor.getState().syncLinks({ force: true });
-  };
 
   // Near-duplicate groups (same rule the generator uses), for the "similar" badge.
   const similarCount = useMemo(() => {
@@ -118,12 +100,6 @@ export function Library() {
         </div>
       )}
       <Shelf />
-      {needAccess > 0 && (
-        <div className="notice">
-          <span>Your browser needs permission again to read {needAccess === 1 ? 'your photo folder' : `${needAccess} photo folders`} (for export and linked folders).</span>
-          <button className="btn btn-small" onClick={() => void allowAccess()}>Allow access</button>
-        </div>
-      )}
       {missing > 0 && (
         <div className="notice notice-error">
           {missing} original{missing > 1 ? 's' : ''} missing.{' '}
@@ -156,9 +132,7 @@ export function Library() {
         <div className="empty">
           <p>No photos yet.</p>
           <p className="muted">
-            {isBrowserBackend
-              ? 'Import a folder of photos. Everything stays on this device, in this browser; nothing is uploaded.'
-              : 'Link a folder from the Shelf above, or import any folder. Originals stay where they are; only thumbnails are created, on this computer.'}
+            Link a folder from the Shelf above, or import any folder. Originals stay where they are; only thumbnails are created, on this computer.
           </p>
           <button className="btn" onClick={() => setPicker('import')}>Choose a folder…</button>
         </div>

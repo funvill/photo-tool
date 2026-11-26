@@ -16,7 +16,6 @@ async function call<T>(method: string, path: string, body?: unknown, init: Reque
 }
 
 export const httpBackend: Backend = {
-  kind: 'http',
   deletedProjects: () => call<{ id: string; title: string; deletedAt: string; product: 'book' | 'poster' }[]>('GET', '/api/projects-deleted'),
   trashProject: (id) => call<{ ok: true }>('DELETE', `/api/projects/${id}`),
   restoreProject: (id) => call<{ ok: true }>('POST', `/api/projects/${id}/restore`),

@@ -13,13 +13,11 @@ const appVersion = (JSON.parse(readFileSync(resolve(projectDir, 'package.json'),
 
 export default defineConfig({
   root: resolve(import.meta.dirname, 'web'),
-  // web/public held the dropped web version's demo (sample photos, demo-welcome.js, overview/): never shipped.
+  // Nothing is copied in as is: everything the page uses is imported by its code.
   publicDir: false,
   plugins: [react()],
-  // The in-browser backend (web/backend/browser) is no longer built: it stays in the code, switched off.
   // The version the pages show, so a build can be named exactly.
-  define: { __BROWSER_BACKEND__: JSON.stringify(false), __APP_VERSION__: JSON.stringify(appVersion) },
-  worker: { format: 'es' },
+  define: { __APP_VERSION__: JSON.stringify(appVersion) },
   server: {
     host: '127.0.0.1',
     port: webPort,

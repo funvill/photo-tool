@@ -6,7 +6,6 @@ import './styles.css';
 import { Editor } from './components/Editor';
 import { Home } from './components/Home';
 import { API_VERSION } from '../core';
-import { isBrowserBackend } from './api';
 
 function useHashRoute() {
   const [hash, setHash] = useState(location.hash);
@@ -23,8 +22,7 @@ function App() {
   const m = hash.match(/^#\/book\/([\w-]+)/);
   return (
     <>
-      {/* The web version has no server to be out of date. */}
-      {!isBrowserBackend && <VersionCheck />}
+      <VersionCheck />
       {m ? <Editor key={m[1]} projectId={m[1]} /> : <Home />}
     </>
   );
@@ -90,7 +88,3 @@ createRoot(document.getElementById('root')!).render(
     <App />
   </StrictMode>,
 );
-
-// Web version: the demo projects (always there), and the portfolio's demo welcome (only for
-// visitors arriving with ?from=portfolio).
-if (__BROWSER_BACKEND__) void import('./demo').then((m) => m.startDemo()).catch((e) => console.warn('demo', e));
