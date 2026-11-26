@@ -19,6 +19,7 @@ import {
 import type { Size } from '../../core/previewZoom';
 import { galleryApi, thumbUrl, type GalleryItem } from '../api';
 import { shownEdit, useGallery } from '../store';
+import { matchShortcut } from '../shortcuts';
 import { EditedImage } from './EditedImage';
 
 // Edit mode in the preview pane, as Google Photos does it: the whole photo, turned and straightened, with a
@@ -85,6 +86,9 @@ export function EditPane({ item }: { item: GalleryItem }) {
   const frameBox = pic && room.w > 0 && room.h > 0 ? editCss(whole, pic.w, pic.h, room.w, room.h).box : null;
   // The frame's shape is the turned photo's (straightening keeps it), known before the picture has loaded too.
   const turned = pic ? turnedSize(pic.w, pic.h, draft.rotate) : { w: 1, h: 1 };
+  // \ or Before held: the photo with no edit at all, fitted in the same room.
+  const original = useGallery((st) => st.showOriginal);
+  const originalBox = pic && room.w > 0 && room.h > 0 ? editCss(IDENTITY_EDIT, pic.w, pic.h, room.w, room.h).box : null;
 
   // Kept current for the key and pointer handlers.
   const live = useRef({ draft, aspect, flipped, turned, frameBox });
@@ -136,19 +140,25 @@ export function EditPane({ item }: { item: GalleryItem }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.defaultPrevented || e.ctrlKey || e.altKey || e.metaKey || inside(e, TYPING)) return;
-      if (e.key === 'Escape') {
+      // The keyboard shortcuts list takes the keys while it is open (Esc there closes it, not the edit).
+      if (e.defaultPrevented || useGallery.getState().shortcutsOpen || inside(e, TYPING)) return;
+      // Edit mode's keys are the table's (shortcuts.ts); \ is useOriginalKey's.
+      const id = matchShortcut('edit', e);
+      if (id === 'edit-cancel') {
         e.preventDefault();
         cancel();
-      } else if (e.key === 'Enter') {
+      } else if (id === 'edit-done') {
         // Enter on a toolbar button reached with the keyboard presses that button (one clicked with the
         // mouse lets go of the focus, below, so Enter is Done after it).
         if (inside(e, 'button')) return;
         e.preventDefault();
         if (!e.repeat) done();
-      } else if (e.key === 'r' || e.key === 'R') {
+      } else if (id === 'edit-rotate') {
         e.preventDefault();
         if (!e.repeat) rotate();
+      } else if (id === 'shortcuts') {
+        e.preventDefault();
+        if (!e.repeat) useGallery.getState().toggleShortcuts();
       }
     };
     window.addEventListener('keydown', onKey);
@@ -184,22 +194,29 @@ export function EditPane({ item }: { item: GalleryItem }) {
   return (
     <div className="gallery-editpane" role="group" aria-label="Edit photo">
       <div className="gallery-edit-stage" ref={stageRef} onContextMenu={(e) => e.preventDefault()}>
-        <div
-          className="gallery-edit-frame"
-          style={frameBox ? { width: frameBox.w, height: frameBox.h, left: (stage.w - frameBox.w) / 2, top: (stage.h - frameBox.h) / 2 } : { visibility: 'hidden' }}
-        >
-          <EditedImage src={thumbUrl(item.key, 'm')} alt={item.fileName} edit={whole} box={frameBox ?? { w: 0, h: 0 }} onPicture={(s) => setPic((p) => p ?? s)} />
-          <div
-            className="gallery-crop-box"
-            aria-label="Crop"
-            style={{ left: `${c.x * 100}%`, top: `${c.y * 100}%`, width: `${c.w * 100}%`, height: `${c.h * 100}%` }}
-            {...dragProps('move')}
-          >
-            {HANDLES.map((h) => (
-              <div key={h} className={`gallery-crop-handle ${h}`} aria-label={`Resize from the ${HANDLE_NAMES[h]}`} {...dragProps(h)} />
-            ))}
+        {/* While \ or Before is held, the original (no edit at all) takes the frame's place; the draft stays as it is. */}
+        {original && originalBox ? (
+          <div className="gallery-edit-frame gallery-edit-original" style={{ width: originalBox.w, height: originalBox.h, left: (stage.w - originalBox.w) / 2, top: (stage.h - originalBox.h) / 2 }}>
+            <EditedImage src={thumbUrl(item.key, 'm')} alt={item.fileName} edit={IDENTITY_EDIT} box={originalBox} />
           </div>
-        </div>
+        ) : (
+          <div
+            className="gallery-edit-frame"
+            style={frameBox ? { width: frameBox.w, height: frameBox.h, left: (stage.w - frameBox.w) / 2, top: (stage.h - frameBox.h) / 2 } : { visibility: 'hidden' }}
+          >
+            <EditedImage src={thumbUrl(item.key, 'm')} alt={item.fileName} edit={whole} box={frameBox ?? { w: 0, h: 0 }} onPicture={(s) => setPic((p) => p ?? s)} />
+            <div
+              className="gallery-crop-box"
+              aria-label="Crop"
+              style={{ left: `${c.x * 100}%`, top: `${c.y * 100}%`, width: `${c.w * 100}%`, height: `${c.h * 100}%` }}
+              {...dragProps('move')}
+            >
+              {HANDLES.map((h) => (
+                <div key={h} className={`gallery-crop-handle ${h}`} aria-label={`Resize from the ${HANDLE_NAMES[h]}`} {...dragProps(h)} />
+              ))}
+            </div>
+          </div>
+        )}
       </div>
       <div className="gallery-edit-tools gallery-edit-colour" role="group" aria-label="Light and colour" onClick={blurClicked}>
         {COLOUR_SLIDERS.map(({ key, label }) => {

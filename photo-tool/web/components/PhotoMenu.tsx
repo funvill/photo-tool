@@ -3,6 +3,7 @@ import { Icon } from '../../../shared/web/components/Icon';
 import { desktop } from '../../../shared/web/desktop';
 import { useShallow } from 'zustand/react/shallow';
 import { editActions, menuTargets, useGallery } from '../store';
+import { keyHint } from '../shortcuts';
 
 // Right-click menu on a photo (a tile or the preview), in the editor's .ctx-menu style. Copy to
 // clipboard and Show in file explorer act on the photo clicked; Copy path, Favourite, Hide and Delete
@@ -156,9 +157,9 @@ export function PhotoMenu({ x, y, path, onClose }: PhotoMenuProps) {
 
   return (
     <div className="ctx-menu" ref={ref} style={pos} role="menu" aria-label="Photo" onContextMenu={(e) => e.preventDefault()}>
-      <MenuItem icon="crop" label="Edit" hint="E" disabled={editing} onClick={go(() => edit(path))} />
-      <MenuItem icon="rotate-left" label="Rotate left" hint="[" disabled={anyEditing} onClick={go(() => useGallery.getState().turnSelected('left'))} />
-      <MenuItem icon="rotate" label="Rotate right" hint="]" disabled={anyEditing} onClick={go(() => useGallery.getState().turnSelected('right'))} />
+      <MenuItem icon="crop" label="Edit" hint={keyHint('edit')} disabled={editing} onClick={go(() => edit(path))} />
+      <MenuItem icon="rotate-left" label="Rotate left" hint={keyHint('rotate-left')} disabled={anyEditing} onClick={go(() => useGallery.getState().turnSelected('left'))} />
+      <MenuItem icon="rotate" label="Rotate right" hint={keyHint('rotate-right')} disabled={anyEditing} onClick={go(() => useGallery.getState().turnSelected('right'))} />
       <MenuItem icon="swap" label="Flip horizontally" disabled={anyEditing} onClick={go(() => useGallery.getState().flipSelected())} />
       {actions?.save && (
         <>
@@ -169,14 +170,14 @@ export function PhotoMenu({ x, y, path, onClose }: PhotoMenuProps) {
       {!!actions?.saveAll && <MenuItem icon="check" label={`Save all (${actions.saveAll})`} disabled={saving} onClick={go(() => useGallery.getState().saveAllEdits())} />}
       {actions?.revert && <MenuItem icon="undo" label="Revert to original" disabled={saving} onClick={go(() => useGallery.getState().revertEdit(path))} />}
       <div className="ctx-sep" />
-      <MenuItem icon="image" label="Copy to clipboard" hint="Ctrl+C" disabled={!desktop?.copyImage} onClick={go(() => copyImage(path))} />
+      <MenuItem icon="image" label="Copy to clipboard" hint={keyHint('copy')} disabled={!desktop?.copyImage} onClick={go(() => copyImage(path))} />
       <MenuItem icon="copy" label="Copy path to clipboard" onClick={go(() => copyPaths(path))} />
       <MenuItem icon="folder" label="Show in file explorer" disabled={!desktop?.showPhotoInFolder} onClick={go(() => showInFolder(path))} />
       <div className="ctx-sep" />
-      <MenuItem icon="star" label={starred ? 'Unfavourite' : 'Favourite'} hint="F" onClick={go(() => toggleFlag('star'))} />
-      <MenuItem icon={hidden ? 'eye' : 'eye-off'} label={hidden ? 'Unhide' : 'Hide'} hint="H" onClick={go(() => toggleFlag('hidden'))} />
+      <MenuItem icon="star" label={starred ? 'Unfavourite' : 'Favourite'} hint={keyHint('favourite')} onClick={go(() => toggleFlag('star'))} />
+      <MenuItem icon={hidden ? 'eye' : 'eye-off'} label={hidden ? 'Unhide' : 'Hide'} hint={keyHint('hide')} onClick={go(() => toggleFlag('hidden'))} />
       <div className="ctx-sep" />
-      <MenuItem icon="trash" label="Delete" hint="Del" danger disabled={!desktop?.trashPhotos} onClick={go(() => trash(path))} />
+      <MenuItem icon="trash" label="Delete" hint={keyHint('delete')} danger disabled={!desktop?.trashPhotos} onClick={go(() => trash(path))} />
     </div>
   );
 }

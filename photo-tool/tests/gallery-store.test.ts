@@ -1982,3 +1982,39 @@ describe('#9 gallery store: Ctrl+C', () => {
     expect(canCopyPhotos()).toBe(false);
   });
 });
+
+describe('#9 gallery store: before/after and the shortcut list', () => {
+  const g = () => useGallery.getState();
+  let disconnect: (() => void) | null = null;
+  afterEach(() => {
+    disconnect?.();
+    disconnect = null;
+    useGallery.setState({ showOriginal: false, shortcutsOpen: false });
+  });
+
+  it('showing the original changes nothing else: no edit, no undo step', () => {
+    useGallery.setState({ pendingEdits: { a: { ...IDENTITY_EDIT, rotate: 90 } }, undoStack: [] });
+    g().setShowOriginal(true);
+    expect(g().showOriginal).toBe(true);
+    g().setShowOriginal(false);
+    expect(g().showOriginal).toBe(false);
+    expect(g().pendingEdits).toEqual({ a: { ...IDENTITY_EDIT, rotate: 90 } });
+    expect(g().undoStack).toEqual([]);
+  });
+
+  it('? toggles the list; Help > Keyboard shortcuts opens it', () => {
+    g().toggleShortcuts();
+    expect(g().shortcutsOpen).toBe(true);
+    g().toggleShortcuts();
+    expect(g().shortcutsOpen).toBe(false);
+    let show: (() => void) | null = null;
+    disconnect = connectDesktop({ onShowShortcuts: (cb: () => void) => ((show = cb), () => (show = null)) });
+    show!();
+    expect(g().shortcutsOpen).toBe(true);
+    show!();
+    expect(g().shortcutsOpen).toBe(true);
+    disconnect();
+    disconnect = null;
+    expect(show).toBeNull();
+  });
+});

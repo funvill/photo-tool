@@ -6,6 +6,7 @@ import { formatSize, formatTaken } from '../../../shared/web/components/HoverPre
 import { thumbUrl, type GalleryItem } from '../api';
 import { imageCache, usePicture } from '../imageCache';
 import { selectVisible, useGallery, useVisibleItems } from '../store';
+import { matchShortcut } from '../shortcuts';
 
 // The full-screen viewer: one photo at a time over the whole window, stepping through the grid's own
 // list (filtered and sorted). Left/Right move, S or F stars or unstars, H hides or unhides, I shows the
@@ -54,9 +55,16 @@ function OpenViewer({ path }: { path: string }) {
       // Caught on the way down, before the grid or anything else on the page sees it.
       e.stopPropagation();
       if (e.ctrlKey || e.altKey || e.metaKey) return;
-      if (SWALLOWED.has(e.key)) e.preventDefault();
       const s = useGallery.getState();
+      // The list of keys takes them while it is open (its Esc closes it, not the viewer).
+      if (s.shortcutsOpen) return;
+      if (SWALLOWED.has(e.key)) e.preventDefault();
       if (s.viewing === null) return;
+      if (matchShortcut('viewer', e) === 'shortcuts') {
+        e.preventDefault();
+        if (!e.repeat) s.toggleShortcuts();
+        return;
+      }
       const list = selectVisible(s);
       const i = indexIn(list, s.viewing, last.current);
       const shown = list[i];
@@ -113,7 +121,7 @@ function OpenViewer({ path }: { path: string }) {
           </span>
         )}
         <span className="gallery-viewer-count">{index + 1} / {items.length}</span>
-        <span className="gallery-viewer-keys small">← → move · F or S favourite · H hide · I details · Esc close</span>
+        <span className="gallery-viewer-keys small">← → move · F or S favourite · H hide · I details · ? keys · Esc close</span>
         <button type="button" className="icon-btn" aria-label="Close viewer" title="Close (Esc)" onClick={() => useGallery.getState().closeViewer(item.path)}>
           <Icon name="x" />
         </button>

@@ -14,7 +14,8 @@ import { TidyDialog } from './components/TidyDialog';
 import { Toasts } from './components/Toasts';
 import { Viewer } from './components/Viewer';
 import { connectDesktop, useGallery, useVisibleItems } from './store';
-import { useReviewKeys } from './useReviewKeys';
+import { useOriginalKey, useReviewKeys } from './useReviewKeys';
+import { Shortcuts } from './components/Shortcuts';
 
 /** Double-click on a photo, or Enter or Space on the selected one. */
 const openViewer = (path: string) => useGallery.getState().openViewer(path);
@@ -41,6 +42,7 @@ export function GalleryApp() {
     void useGallery.getState().loadEditTarget();
   }, []);
   useReviewKeys(openViewer);
+  useOriginalKey();
 
   return (
     <div className="gallery">
@@ -52,6 +54,7 @@ export function GalleryApp() {
       {root && !empty && <Viewer />}
       {root && tidyOpen && <TidyDialog />}
       <LeaveDialog />
+      <Shortcuts />
       <Toasts />
     </div>
   );

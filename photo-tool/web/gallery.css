@@ -115,6 +115,10 @@
 .gallery-preview-caption .badge { font-size: 11px; padding: 2px 7px; white-space: nowrap; background: rgba(255, 255, 255, 0.12); }
 .gallery-preview-caption .gallery-badge-fav { background: var(--accent); color: var(--accent-ink); }
 .gallery-preview-caption .gallery-badge-unsaved { background: #d98b2b; color: #111; }
+/* Before (hold to see the original) and the caption while it shows. */
+.gallery-preview-caption .gallery-badge-original { background: #3a7bd5; color: #fff; }
+.gallery-preview-caption .gallery-preview-before { flex: none; user-select: none; touch-action: none; }
+.gallery-preview-caption .gallery-preview-before.on { background: #3a7bd5; color: #fff; }
 .gallery-preview-caption .gallery-preview-edit { flex: none; gap: 5px; }
 /* Save, Save as…, Save all, Revert to original and Edit, at the caption's right end. */
 .gallery-preview-actions { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 6px; }

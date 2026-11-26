@@ -30,6 +30,8 @@ export interface DesktopApi {
    * (a folder given on the command line at start, or from a second launch). Returns a function that stops listening.
    */
   onOpenFolder?(cb: (folder: string) => void): () => void;
+  /** Gallery window: Help > Keyboard shortcuts was chosen; show the list. Returns a function that stops listening. */
+  onShowShortcuts?(cb: () => void): () => void;
   /** Gallery window: put text (Copy path) on the clipboard; the page's own clipboard is not allowed in the app. */
   copyText?(text: string): Promise<{ ok: boolean; error?: string }>;
   /** Gallery window: put this photo on the clipboard as a picture, at full size. */

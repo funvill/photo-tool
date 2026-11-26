@@ -86,6 +86,10 @@ export interface GalleryState {
   editDirty: boolean;
   /** The Settings dialog is open. */
   settingsOpen: boolean;
+  /** \ (or the Before button) is held: the preview and edit mode show the photo with no edit at all. Never saved. */
+  showOriginal: boolean;
+  /** The keyboard shortcuts list (?) is open. */
+  shortcutsOpen: boolean;
   /** Opening another folder (or closing this one) waits for "without saving?": what was asked for. */
   leaving: { folder: string; recursive: boolean } | 'close' | null;
   /** What Ctrl+Z takes back, oldest first (at most UNDO_LIMIT); emptied when a folder is opened or closed. */
@@ -166,6 +170,10 @@ export interface GalleryState {
   close(): void;
   setTidyOpen(open: boolean): void;
   setSettingsOpen(open: boolean): void;
+  /** Show the original (while \ or Before is held), or the edit again. Changes nothing else. */
+  setShowOriginal(on: boolean): void;
+  /** ? opens or closes the keyboard shortcuts list; `open` says which (Help > Keyboard shortcuts opens it). */
+  toggleShortcuts(open?: boolean): void;
   setGridCols(cols: number): void;
   setView(view: 'grid' | 'map'): void;
   /** Open edit mode on this photo; not while its save is on its way. */
@@ -823,6 +831,8 @@ export const useGallery = create<GalleryState>()((set, get) => {
     saving: false,
     savingPaths: [],
     settingsOpen: false,
+    showOriginal: false,
+    shortcutsOpen: false,
     tagging: null,
     meaning: null,
 
@@ -1177,6 +1187,14 @@ export const useGallery = create<GalleryState>()((set, get) => {
 
     setSettingsOpen(settingsOpen) {
       set({ settingsOpen });
+    },
+
+    setShowOriginal(on) {
+      if (get().showOriginal !== on) set({ showOriginal: on });
+    },
+
+    toggleShortcuts(open) {
+      set((s) => ({ shortcutsOpen: open ?? !s.shortcutsOpen }));
     },
 
     setGridCols(cols) {
@@ -1609,6 +1627,8 @@ export function connectDesktop(d: Partial<DesktopApi> | undefined): () => void {
   // A folder from outside asks first, as Open folder does, while there are unsaved edits.
   const stopFolders = d?.onOpenFolder?.((folder) => void useGallery.getState().requestOpen(folder, useGallery.getState().recursive));
   const stopDrags = d?.onDragFailed?.((message) => useGallery.getState().toast('error', message));
+  // Help > Keyboard shortcuts.
+  const stopShortcuts = d?.onShowShortcuts?.(() => useGallery.getState().toggleShortcuts(true));
   // The desktop app asks before the window closes while this count is above 0.
   const report = () => d?.setUnsavedEdits?.(unsavedCount(useGallery.getState()));
   report();
@@ -1618,6 +1638,7 @@ export function connectDesktop(d: Partial<DesktopApi> | undefined): () => void {
   return () => {
     stopFolders?.();
     stopDrags?.();
+    stopShortcuts?.();
     stopCount?.();
     win?.removeEventListener('beforeunload', guardUnload);
     if (host === d) host = undefined;

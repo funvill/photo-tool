@@ -344,3 +344,13 @@ describe('#9 Ctrl+C with several photos', () => {
     expect(handler).toContain("'text/uri-list'");
   });
 });
+
+describe('#9 Help > Keyboard shortcuts', () => {
+  it('Photo Tool adds the item to the Help menu, and it tells the page to show the list', () => {
+    const main = read('photo-tool/electron/main.ts');
+    expect(main).toMatch(/helpMenu: \(ctx\) => \[\{ label: '&Keyboard shortcuts', click: \(\) => showShortcuts\(ctx\) \}\]/);
+    expect(main).toMatch(/webContents\.send\('gallery:show-shortcuts'\)/);
+    const preload = read('photo-tool/electron/preload.ts');
+    expect(preload).toMatch(/onShowShortcuts: \(cb\) => \{[\s\S]{0,200}ipcRenderer\.on\('gallery:show-shortcuts', listener\)/);
+  });
+});

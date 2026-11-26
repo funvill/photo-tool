@@ -41,6 +41,9 @@ export function Preview({ onOpen, onContextMenu }: PreviewProps) {
   const unsaved = useGallery((s) => item !== undefined && item.path in s.pendingEdits);
   const shown = useGallery((s) => (item ? shownEdit(s, item) : null));
   const edit = shown && !isIdentityEdit(shown) ? shown : null;
+  // \ or Before held: the photo with no edit at all (edit mode shows it in its own stage).
+  const original = useGallery((s) => s.showOriginal);
+  const before = (on: boolean) => () => useGallery.getState().setShowOriginal(on);
 
   return (
     <section className="gallery-preview" aria-label="Preview">
@@ -49,10 +52,35 @@ export function Preview({ onOpen, onContextMenu }: PreviewProps) {
           {editing ? (
             <EditPane key={item.key} item={item} />
           ) : (
-            <PreviewPicture item={item} edit={edit} onOpen={onOpen} onContextMenu={onContextMenu} />
+            <PreviewPicture item={item} edit={original ? null : edit} onOpen={onOpen} onContextMenu={onContextMenu} />
           )}
           <div className="gallery-preview-caption">
             <strong className="ellipsis" title={item.path}>{item.relDir ? `${item.relDir}/${item.fileName}` : item.fileName}</strong>
+            {(edit || editing) && (
+              <button
+                type="button"
+                className={`btn btn-small gallery-preview-before${original ? ' on' : ''}`}
+                title="Hold to see the original (or hold \)"
+                aria-pressed={original}
+                onPointerDown={(e) => {
+                  if (e.button !== 0) return;
+                  // Held wherever the pointer goes, until it is let go.
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  before(true)();
+                }}
+                onPointerUp={before(false)}
+                onPointerCancel={before(false)}
+                onLostPointerCapture={before(false)}
+                onKeyDown={(e) => (e.key === ' ' || e.key === 'Enter') && !e.repeat && before(true)()}
+                onKeyUp={before(false)}
+                onBlur={before(false)}
+                // Let go of the focus after a click, so Enter is Done again in edit mode.
+                onClick={(e) => e.detail > 0 && e.currentTarget.blur()}
+              >
+                Before
+              </button>
+            )}
+            {original && (edit || editing) && <span className="badge gallery-badge-original">Original</span>}
             {item.info.star === true && <span className="badge gallery-badge-fav">Favourite</span>}
             {item.info.hidden === true && <span className="badge">Hidden</span>}
             {stack && <span className="badge">{stack}</span>}

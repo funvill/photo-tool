@@ -1916,5 +1916,141 @@ test.describe('#9 keys, rotate and flip, light and colour, copy, shortcuts', () 
       rmSync(join(dir, '..'), { recursive: true, force: true });
     }
   });
+
+  test('holding \\ shows the original, in the preview and in edit mode; letting go (or leaving the window) shows the edit again', async ({ page, request }) => {
+    const dir = await openTrip(page, request);
+    try {
+      const preview = page.getByRole('region', { name: 'Preview' });
+      const caption = preview.locator('.gallery-preview-caption');
+      // An unsaved brightness edit.
+      await page.keyboard.press('e');
+      const colour = preview.getByRole('group', { name: 'Light and colour' });
+      await colour.getByLabel('Brightness').fill('40');
+      await preview.getByRole('button', { name: 'Done' }).click();
+      const edited = preview.locator('.gallery-preview-img.gallery-edited img');
+      await expect(edited).toHaveAttribute('style', /filter/);
+
+      await page.keyboard.down('Backslash');
+      await expect(caption.getByText('Original', { exact: true })).toBeVisible();
+      await expect(edited).toHaveCount(0);
+      await expect(preview.locator('img[style*="filter"]')).toHaveCount(0);
+      await page.keyboard.up('Backslash');
+      await expect(caption.getByText('Original', { exact: true })).toHaveCount(0);
+      await expect(edited).toHaveAttribute('style', /filter/);
+      await expect(preview).toContainText('Edited · not saved');
+
+      // The Before button, held.
+      const before = preview.getByRole('button', { name: 'Before' });
+      await before.hover();
+      await page.mouse.down();
+      await expect(caption.getByText('Original', { exact: true })).toBeVisible();
+      await page.mouse.up();
+      await expect(caption.getByText('Original', { exact: true })).toHaveCount(0);
+
+      // Leaving the window while it is held shows the edit again.
+      await page.keyboard.down('Backslash');
+      await expect(caption.getByText('Original', { exact: true })).toBeVisible();
+      await page.evaluate(() => window.dispatchEvent(new Event('blur')));
+      await expect(caption.getByText('Original', { exact: true })).toHaveCount(0);
+      await page.keyboard.up('Backslash');
+
+      // Edit mode: straight after a slider moved with the keyboard, \ still works, and the draft survives it.
+      await page.keyboard.press('e');
+      const slider = colour.getByLabel('Contrast');
+      await slider.focus();
+      await page.keyboard.press('ArrowRight');
+      const value = await slider.inputValue();
+      expect(value).not.toBe('0');
+      const frameImg = page.locator('.gallery-edit-frame .gallery-edited img');
+      await expect(frameImg).toHaveAttribute('style', /filter/);
+      await page.keyboard.down('Backslash');
+      await expect(caption.getByText('Original', { exact: true })).toBeVisible();
+      await expect(page.locator('.gallery-edit-frame img[style*="filter"]')).toHaveCount(0);
+      await page.keyboard.up('Backslash');
+      await expect(frameImg).toHaveAttribute('style', /filter/);
+      await expect(slider).toHaveValue(value);
+      await expect(colour.getByLabel('Brightness')).toHaveValue('40');
+      await preview.getByRole('button', { name: 'Cancel' }).click();
+    } finally {
+      removeTrip(dir);
+    }
+  });
+
+  test('? shows the keys for where you are; ? again, Esc or a click outside closes it; in a field ? is typed', async ({ page, request }) => {
+    const dir = await openTrip(page, request);
+    try {
+      const list = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
+      await page.locator('.gallery-tile').first().click();
+      await page.keyboard.press('?');
+      await expect(list).toBeVisible();
+      const favourite = list.locator('.shortcut-row', { hasText: 'Favourite or unfavourite' });
+      await expect(favourite.locator('kbd')).toHaveText('F');
+      // The keys under it do nothing while it is open.
+      await page.keyboard.press('f');
+      await page.waitForTimeout(200);
+      await expect(page.locator('.gallery-tile.selected .gallery-star-badge')).toHaveCount(0);
+      await page.keyboard.press('Escape');
+      await expect(list).toHaveCount(0);
+      await page.keyboard.press('?');
+      await expect(list).toBeVisible();
+      await page.keyboard.press('?');
+      await expect(list).toHaveCount(0);
+      await page.keyboard.press('?');
+      await page.mouse.click(5, 5);
+      await expect(list).toHaveCount(0);
+
+      const search = page.getByLabel('Search photos');
+      await search.fill('');
+      await search.press('?');
+      await expect(search).toHaveValue('?');
+      await expect(list).toHaveCount(0);
+      await search.fill('');
+      await search.blur();
+
+      // In the viewer: the viewer's keys; Esc closes the list, not the viewer.
+      await page.locator('.gallery-tile').first().dblclick();
+      const viewer = page.getByRole('dialog', { name: 'Photo viewer' });
+      await expect(viewer).toBeVisible();
+      await page.keyboard.press('?');
+      await expect(list.locator('.shortcut-row', { hasText: 'Show or hide details' }).locator('kbd')).toHaveText('I');
+      await page.keyboard.press('Escape');
+      await expect(list).toHaveCount(0);
+      await expect(viewer).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(viewer).toHaveCount(0);
+
+      // In edit mode: edit mode's keys; Esc closes the list and keeps the edit going.
+      const preview = page.getByRole('region', { name: 'Preview' });
+      await page.keyboard.press('e');
+      await preview.getByRole('group', { name: 'Light and colour' }).getByLabel('Warmth').fill('30');
+      await page.keyboard.press('?');
+      await expect(list.locator('.shortcut-row', { hasText: 'Cancel the edit' })).toBeVisible();
+      await expect(list.locator('.shortcut-row', { hasText: 'Favourite' })).toHaveCount(0);
+      await page.keyboard.press('Escape');
+      await expect(list).toHaveCount(0);
+      await expect(preview.getByRole('group', { name: 'Light and colour' }).getByLabel('Warmth')).toHaveValue('30');
+      await preview.getByRole('button', { name: 'Cancel' }).click();
+    } finally {
+      removeTrip(dir);
+    }
+  });
+
+  test('Help > Keyboard shortcuts opens the list (the desktop app tells the page)', async ({ page, request }) => {
+    await page.addInitScript(() => {
+      const w = window as unknown as { desktop: unknown; __showShortcuts?: () => void };
+      w.desktop = { onShowShortcuts: (cb: () => void) => ((w.__showShortcuts = cb), () => (w.__showShortcuts = undefined)) };
+    });
+    const dir = await openTrip(page, request);
+    try {
+      await page.evaluate(() => (window as unknown as { __showShortcuts: () => void }).__showShortcuts());
+      const list = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
+      await expect(list).toBeVisible();
+      // The desktop app's own keys are listed there.
+      await expect(list.locator('.shortcut-row', { hasText: 'About Photo Tool' }).locator('kbd')).toHaveText('F1');
+      await expect(list.locator('.shortcut-row', { hasText: 'Send feedback on GitHub' }).locator('kbd')).toHaveText('F2');
+    } finally {
+      removeTrip(dir);
+    }
+  });
 });
 

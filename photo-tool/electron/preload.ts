@@ -34,6 +34,11 @@ const api: PhotoToolDesktopApi = {
   setEditTarget: (target) => ipcRenderer.invoke('gallery:set-edit-target', target === 'file' ? 'file' : 'info'),
   saveEditToFile: (path, edit) => ipcRenderer.invoke('gallery:save-edit-file', String(path), edit),
   saveEditAs: (path, edit, info) => ipcRenderer.invoke('gallery:save-edit-as', String(path), edit, info),
+  onShowShortcuts: (cb) => {
+    const listener = () => cb();
+    ipcRenderer.on('gallery:show-shortcuts', listener);
+    return () => void ipcRenderer.removeListener('gallery:show-shortcuts', listener);
+  },
   setUnsavedEdits: (count) => ipcRenderer.send('gallery:unsaved-edits', Number(count) || 0),
   onOpenFolder: (cb) => {
     const listener = (_e: Electron.IpcRendererEvent, folder: unknown) => {
