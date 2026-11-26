@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { hostResolverRules } from '../../shared/electron/netGuard';
+import { UPDATE_HOSTS } from '../../shared/electron/updateRules';
 
 const require = createRequire(import.meta.url);
 const root = resolve(__dirname, '../..');
@@ -88,7 +89,7 @@ describe('builder config', () => {
     expect(product).toEqual({
       productName: 'Photobook Editor',
       appId: 'app.photobookeditor.desktop',
-      description: 'Make a photobook from a folder of photos and export print-ready PDFs. Works offline.',
+      description: 'Make a photobook from a folder of photos and export print-ready PDFs. Works offline; checks GitHub once a day for a new version (Help › Check for updates automatically turns this off).',
       maintainer: 'Photobook Editor <photobook-editor@localhost>',
       repository: 'github:funvill/photo-tool',
     });
@@ -185,11 +186,12 @@ describe('the editor program', () => {
     expect(read('shared/electron/runDesktopApp.ts')).toMatch(/setAppUserModelId\(program\.appUserModelId\)/);
   });
 
-  it('may reach only its own server and looks up no name', () => {
+  it("may reach only its own server, and looks up no name but GitHub's (for updates)", () => {
     const shell = read('shared/electron/runDesktopApp.ts');
     expect(main()).toMatch(/requestAllowed: \(url, _method, guard\) => isAllowedRequest\(url, guard\)/);
-    expect(main()).toContain('hostResolverRules: hostResolverRules()');
-    expect(hostResolverRules()).toBe('MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost');
+    expect(main()).toContain('hostResolverRules: hostResolverRules(UPDATE_HOSTS)');
+    expect(main()).toContain("updateChannel: 'photobook-editor'");
+    expect(hostResolverRules(UPDATE_HOSTS)).toBe('MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost, EXCLUDE github.com, EXCLUDE api.github.com, EXCLUDE objects.githubusercontent.com, EXCLUDE release-assets.githubusercontent.com');
     for (const c of [main(), shell]) expect(c).not.toContain('MAP * ~NOTFOUND');
   });
 

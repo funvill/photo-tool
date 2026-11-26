@@ -211,6 +211,13 @@ describe('the Photo Tool program', () => {
     expect(m).not.toContain('MAP * ~NOTFOUND');
   });
 
+  it('checks for updates on its own channel, and says so in its description', () => {
+    expect(main()).toContain("updateChannel: 'photo-tool'");
+    expect(JSON.parse(read('photo-tool/product.json')).description).toBe(
+      'Look through a folder of photos, star the best ones and drag them into other programs. Uses the network only for map tiles (if you choose Load maps), to download photo-tagging models you ask for, and to check GitHub for a new version.',
+    );
+  });
+
   it('takes the folder to open as its first argument that is not a flag', () => {
     expect(main()).toContain('launchFolder(process.argv, !!process.defaultApp)');
     expect(launchFolder(['Photo Tool.exe', 'D:\\Pics'], false)).toBe('D:\\Pics');
