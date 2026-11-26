@@ -207,12 +207,22 @@ describe('F1: About', () => {
   const code = read('shared/electron/runDesktopApp.ts');
 
   it('F1 opens About', () => {
-    expect(code).toMatch(/\{ label: `&About \$\{NAME\}`, accelerator: 'F1', click: about \}/);
+    expect(code).toMatch(/const aboutItem: MenuItemConstructorOptions = \{ label: `&About \$\{NAME\}`, accelerator: 'F1', click: about \};/);
   });
 
   it('offers Check for updates in the installed program only, and shows Electron and the platform', () => {
     expect(code).toMatch(/canCheckForUpdates: app\.isPackaged && !selfTest/);
-    expect(code).toContain('runtime: `Electron ${process.versions.electron}, ${process.platform} ${process.arch}`');
+    expect(code).toContain('const runtime = () => `Electron ${process.versions.electron}, ${process.platform} ${process.arch}`;');
+    expect(code).toContain('runtime: runtime(),');
+  });
+
+  it('F2 opens the feedback page in the browser, only when the program names its GitHub repository', () => {
+    expect(code).toMatch(/const repo = githubRepo\(program\.repository\);\s*const feedback: MenuItemConstructorOptions\[\] = repo\s*\? \[\{ label: 'Send &feedback on GitHub…', accelerator: 'F2', click: \(\) => void shell\.openExternal\(feedbackUrl\(repo, \{ productName: NAME, version: app\.getVersion\(\), runtime: runtime\(\) \}\)\) \}\]\s*: \[\];/);
+  });
+
+  it('Help: the update items, then feedback (F2), then About (F1), each group apart', () => {
+    expect(code).toMatch(/const help = \[updateItems, feedback, \[aboutItem\]\]\.filter\(\(g\) => g\.length > 0\)\.flatMap\(\(g, i\) => \(i === 0 \? g : \[\{ type: 'separator' \}, \.\.\.g\]\)\)/);
+    expect(code).toMatch(/\{ label: '&Help', submenu: help \}/);
   });
 
   it('its Check for updates button runs the same check as the menu item', () => {

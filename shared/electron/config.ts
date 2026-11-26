@@ -2,6 +2,7 @@
 // where data lives, the local server's port, the window's remembered place, and how a failed start is put into words.
 // Unit-tested in shared/tests/desktop-config.test.ts.
 import { join, posix, resolve, win32 } from 'node:path';
+import { GITHUB_ORIGIN } from './updateRules';
 
 // ---- the program
 
@@ -266,6 +267,19 @@ export const NOTICES_FILE = 'THIRD-PARTY-NOTICES.txt';
 export const NOTICES_BUTTON = 'Third-party notices';
 /** About's button that runs Help > Check for updates (shared/electron/updates.ts). */
 export const CHECK_UPDATES_BUTTON = 'Check for updates';
+
+/**
+ * F2 / Help > Send feedback on GitHub: the repository's new-issue page, with the program, its version and
+ * the platform (`runtime`, as About shows it) filled in. Nothing else about the user goes in: no folders,
+ * no names. Opened in the user's own browser; posting needs a GitHub account.
+ */
+export function feedbackUrl(repo: { owner: string; repo: string }, o: { productName: string; version: string; runtime: string }): string {
+  const params = new URLSearchParams({
+    title: `[${o.productName} ${o.version}] `,
+    body: `Program: ${o.productName} ${o.version}\nSystem: ${o.runtime}\n\nWhat happened, or what would you like?\n`,
+  });
+  return `${GITHUB_ORIGIN}/${repo.owner}/${repo.repo}/issues/new?${params}`;
+}
 
 export interface About {
   title: string;

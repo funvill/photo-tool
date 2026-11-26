@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CHECK_UPDATES_BUTTON, DEFAULT_WINDOW, MIN_WINDOW, NOTICES_BUTTON, dataLayout, describeAbout, describeFailure, launchFolder, parseSelfTest, parseSavedPort, photoInfoFallbackDir, restoreWindow, selfTestOverlap, serverPortRequest } from '../electron/config';
+import { CHECK_UPDATES_BUTTON, DEFAULT_WINDOW, MIN_WINDOW, NOTICES_BUTTON, dataLayout, describeAbout, describeFailure, feedbackUrl, launchFolder, parseSelfTest, parseSavedPort, photoInfoFallbackDir, restoreWindow, selfTestOverlap, serverPortRequest } from '../electron/config';
 
 const root = resolve(__dirname, '../..');
 
@@ -261,6 +261,19 @@ describe('Help > About', () => {
     expect(a.detail).toContain('uses the network only for OpenStreetMap map tiles, and only after you choose Load maps');
     expect(a.detail).toContain('to check GitHub for a new version once a day, unless you turn that off in Help.');
     expect(a.detail).not.toContain('never uses the network');
+  });
+
+  it('F2: the feedback page is a new issue with the program, version and platform filled in, and nothing else', () => {
+    const url = feedbackUrl({ owner: 'funvill', repo: 'photo-tool' }, { productName: 'Photo Tool', version: '0.1.40', runtime: 'Electron 45.4.1, win32 x64' });
+    expect(url.startsWith('https://github.com/funvill/photo-tool/issues/new?')).toBe(true);
+    const u = new URL(url);
+    expect([...u.searchParams.keys()]).toEqual(['title', 'body']);
+    expect(u.searchParams.get('title')).toBe('[Photo Tool 0.1.40] ');
+    expect(u.searchParams.get('body')).toBe('Program: Photo Tool 0.1.40\nSystem: Electron 45.4.1, win32 x64\n\nWhat happened, or what would you like?\n');
+    // Encoded: no raw spaces or newlines in the address.
+    expect(url).not.toMatch(/[ \n]/);
+    // Nothing about the user: no folders, no user name.
+    expect(decodeURIComponent(url)).not.toMatch(/[\\/]Users[\\/]|AppData|home\//i);
   });
 
   it('has no addresses in it (it must make sense offline)', () => {

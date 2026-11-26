@@ -15,7 +15,7 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renam
 import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 import { autoUpdater } from 'electron-updater';
-import { CHECK_UPDATES_BUTTON, LICENCE_FILE, MIN_WINDOW, NOTICES_BUTTON, NOTICES_FILE, describeAbout, describeFailure, parseSavedPort, parseSelfTest, restoreWindow, serverPortRequest, type ProgramNames, type SelfTestArgs, type WindowState } from './config';
+import { CHECK_UPDATES_BUTTON, LICENCE_FILE, MIN_WINDOW, NOTICES_BUTTON, NOTICES_FILE, describeAbout, describeFailure, feedbackUrl, parseSavedPort, parseSelfTest, restoreWindow, serverPortRequest, type ProgramNames, type SelfTestArgs, type WindowState } from './config';
 import { CarryOverError, carryOverRefusal, prepareProgramFolders } from './dataFolders';
 import { isAppNavigation, requestHost, type GuardOptions } from './netGuard';
 import { SELF_TEST_CONTROL_URLS, type SelfTestContext, type Step } from './selfTest';
@@ -463,6 +463,9 @@ export function runDesktopApp(program: DesktopProgram): void {
     return file && existsSync(file) ? file : null;
   }
 
+  /** Electron and the platform, as About and the feedback page give them. */
+  const runtime = () => `Electron ${process.versions.electron}, ${process.platform} ${process.arch}`;
+
   function aboutBox() {
     const licence = legalFile(LICENCE_FILE);
     return describeAbout({
@@ -475,7 +478,7 @@ export function runDesktopApp(program: DesktopProgram): void {
       hasNotices: !!legalFile(NOTICES_FILE),
       // Updates work only in the installed program, and never during a self-test.
       canCheckForUpdates: app.isPackaged && !selfTest,
-      runtime: `Electron ${process.versions.electron}, ${process.platform} ${process.arch}`,
+      runtime: runtime(),
     });
   }
 
@@ -504,6 +507,15 @@ export function runDesktopApp(program: DesktopProgram): void {
   function buildMenu() {
     const about = () => void showAbout();
     const updateItems = updates?.menuItems() ?? [];
+    // F2 opens the repository's new-issue page in the user's browser (from source too); the window's guard is unaffected.
+    const repo = githubRepo(program.repository);
+    const feedback: MenuItemConstructorOptions[] = repo
+      ? [{ label: 'Send &feedback on GitHub…', accelerator: 'F2', click: () => void shell.openExternal(feedbackUrl(repo, { productName: NAME, version: app.getVersion(), runtime: runtime() })) }]
+      : [];
+    // F1 works whenever the window has focus (neither page uses it; if one ever does, the menu wins).
+    const aboutItem: MenuItemConstructorOptions = { label: `&About ${NAME}`, accelerator: 'F1', click: about };
+    // Help: the update items, then feedback, then About, each group apart. Later Help items go after these.
+    const help = [updateItems, feedback, [aboutItem]].filter((g) => g.length > 0).flatMap((g, i) => (i === 0 ? g : [{ type: 'separator' }, ...g])) as MenuItemConstructorOptions[];
     const template: MenuItemConstructorOptions[] = [
       // macOS expects the app menu and the standard Edit menu; Windows and Linux need neither
       // (the page handles its own shortcuts, and text fields work without a menu).
@@ -516,7 +528,7 @@ export function runDesktopApp(program: DesktopProgram): void {
           ...(app.isPackaged ? [] : ([{ type: 'separator' }, { role: 'reload' }, { role: 'toggleDevTools' }] as MenuItemConstructorOptions[])),
         ],
       },
-      { label: '&Help', submenu: [...updateItems, ...(updateItems.length ? ([{ type: 'separator' }] as MenuItemConstructorOptions[]) : []), { label: `&About ${NAME}`, accelerator: 'F1', click: about }] },
+      { label: '&Help', submenu: help },
     ];
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));
   }
