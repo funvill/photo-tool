@@ -160,7 +160,7 @@ describe('updates in the shell', () => {
 
   it("an AppImage updates as an AppImage (APPIMAGE decides, not resources/package-type), without touching autoUpdater", () => {
     // autoUpdater is a getter that picks DebUpdater from package-type; on the AppImage path it is never read.
-    expect(fn('startUpdates')).toMatch(/updateKind = updaterKind\(\{ platform: process\.platform, appImage: env\.APPIMAGE \}\);\s*const updater = updateKind === 'appimage' \? new AppImageUpdater\(\) : autoUpdater;/);
+    expect(fn('startUpdates')).toMatch(/updateKind = updaterKind\(\{ platform: process\.platform, appImage: env\.APPIMAGE, appDir: env\.APPDIR, execPath: process\.execPath \}\);\s*const updater = updateKind === 'appimage' \? new AppImageUpdater\(\) : autoUpdater;/);
     expect(fn('startUpdates').match(/autoUpdater/g)).toHaveLength(1);
   });
 

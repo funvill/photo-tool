@@ -168,15 +168,24 @@ describe('before installing: what can be checked before anything is closed', () 
 describe('updaterKind', () => {
   // Both Linux packages are built from one folder, so the AppImage may carry resources/package-type
   // = deb, and electron-updater would then update it as a .deb. The AppImage's own APPIMAGE decides.
-  it('is the AppImage updater on Linux whenever APPIMAGE is set, whatever package-type says', () => {
-    expect(updaterKind({ platform: 'linux', appImage: '/home/me/Apps/Photo-Tool-0.1.40.AppImage' })).toBe('appimage');
+  const own = { platform: 'linux', appImage: '/home/me/Apps/Photo-Tool-0.1.40.AppImage', appDir: '/tmp/.mount_PhotoTabc', execPath: '/tmp/.mount_PhotoTabc/photo-tool' };
+
+  it('is the AppImage updater on Linux when this program runs from the AppImage, whatever package-type says', () => {
+    expect(updaterKind(own)).toBe('appimage');
+    expect(updaterKind({ ...own, appDir: undefined })).toBe('appimage'); // a runtime that sets no APPDIR
+  });
+
+  it("is not, when APPIMAGE was inherited from another AppImage (a launcher or terminal): that file is not this program's", () => {
+    // AppImageUpdater's install deletes $APPIMAGE first: a .deb install must never get it.
+    expect(updaterKind({ ...own, execPath: '/opt/Photo Tool/photo-tool' })).toBe('default');
+    expect(updaterKind({ ...own, execPath: '/tmp/.mount_PhotoTabcdef/photo-tool' })).toBe('default');
   });
 
   it("is electron-updater's own choice otherwise", () => {
-    expect(updaterKind({ platform: 'linux', appImage: undefined })).toBe('default');
-    expect(updaterKind({ platform: 'linux', appImage: '' })).toBe('default');
-    expect(updaterKind({ platform: 'win32', appImage: 'C:\\x.AppImage' })).toBe('default');
-    expect(updaterKind({ platform: 'darwin', appImage: undefined })).toBe('default');
+    expect(updaterKind({ ...own, appImage: undefined })).toBe('default');
+    expect(updaterKind({ ...own, appImage: '' })).toBe('default');
+    expect(updaterKind({ ...own, platform: 'win32', appImage: 'C:\\x.AppImage' })).toBe('default');
+    expect(updaterKind({ ...own, platform: 'darwin', appImage: undefined })).toBe('default');
   });
 });
 

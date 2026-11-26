@@ -656,7 +656,7 @@ export function runDesktopApp(program: DesktopProgram): void {
   function startUpdates() {
     if (selfTest) return;
     try {
-      updateKind = updaterKind({ platform: process.platform, appImage: env.APPIMAGE });
+      updateKind = updaterKind({ platform: process.platform, appImage: env.APPIMAGE, appDir: env.APPDIR, execPath: process.execPath });
       const updater = updateKind === 'appimage' ? new AppImageUpdater() : autoUpdater;
       updater.logger = { info: (m: unknown) => log('[updater]', m), warn: (m: unknown) => log('[updater warn]', m), error: (m: unknown) => log('[updater error]', m), debug: () => {} };
       // Testing only: an update feed served on this computer (electron-updater's generic provider).

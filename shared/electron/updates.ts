@@ -90,8 +90,8 @@ export const NO_STAGING_ID = '00000000-0000-0000-0000-000000000000';
 /**
  * electron-updater makes a random id per install (<userData>/.updaterId), for staged rollouts, and
  * sends it as x-user-staging-id with every check. Releases here are never staged, so: every user is in
- * every rollout, the id is never made, and the header (which cannot be left out, only overridden: the
- * request headers are applied last) carries the same zeros for everyone. stagingUserIdPromise is
+ * every rollout, the id is never made, and the header (electron-updater always sets it; requestHeaders,
+ * applied last, override it; an undefined value to drop it was not tried) carries the same zeros for everyone. stagingUserIdPromise is
  * electron-updater's own (not typed); shared/tests/updates.test.ts checks this against its real class.
  */
 function withoutStagingId(updater: UpdaterLike) {

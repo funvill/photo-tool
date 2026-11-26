@@ -104,9 +104,14 @@ export function isNoRelease(e: unknown): boolean {
  * Which updater: on Linux the AppImage sets APPIMAGE to its own path, and that decides. electron-updater
  * itself picks DebUpdater whenever resources/package-type says deb, and the AppImage may carry that file
  * (both Linux packages are built from one folder), so an AppImage would otherwise update as a .deb.
+ * APPIMAGE (and APPDIR, the AppImage's mount) are inherited by everything an AppImage starts, so a
+ * .deb install launched from another AppImage would see that one's: when APPDIR is set, this program
+ * must be running from inside it. That matters, because AppImageUpdater's install deletes $APPIMAGE.
  */
-export function updaterKind(o: { platform: string; appImage: string | undefined }): 'appimage' | 'default' {
-  return o.platform === 'linux' && !!o.appImage ? 'appimage' : 'default';
+export function updaterKind(o: { platform: string; appImage: string | undefined; appDir: string | undefined; execPath: string }): 'appimage' | 'default' {
+  if (o.platform !== 'linux' || !o.appImage) return 'default';
+  if (o.appDir && !o.execPath.startsWith(`${o.appDir.replace(/\/+$/, '')}/`)) return 'default';
+  return 'appimage';
 }
 
 /**
