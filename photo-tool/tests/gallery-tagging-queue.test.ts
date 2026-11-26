@@ -1,5 +1,5 @@
 // The background tagging queue: one photo at a time, selected photo first, results kept by content key.
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -9,6 +9,8 @@ import { downloadModel } from '../server/models/download';
 import { modelDir, type TaggingSettings } from '../server/models/store';
 import { BackendLostError, ModelLoadError, type TaggerBackend } from '../server/tagging/backend';
 import { NoDescriptionError, TaggingQueue } from '../server/tagging/queue';
+import { AlbumTags } from '../server/tagging/albumTags';
+import { AlbumTagsStore, PHOTOTAGS_NAME } from '../../shared/phototags';
 import { FAKE_CATALOGUE, fakeFetch } from './support/fakeTagging';
 
 const [describeSmall, describeLarge, keywordsSmall, keywordsLarge] = FAKE_CATALOGUE;
@@ -594,5 +596,127 @@ describe('tagging through the server', () => {
       await new Promise<void>((r) => server.close(() => r()));
       close();
     }
+  });
+});
+
+describe('album tags sidecar: results land in the album folder', () => {
+  const sidecar = () => {
+    const store = new AlbumTagsStore({ fallbackDir: join(root, 'fallback'), debounceMs: 60_000, maxWaitMs: 60_000, onError: () => {} });
+    const albumTags = new AlbumTags({ catalog, store, catalogue: FAKE_CATALOGUE });
+    return { store, albumTags };
+  };
+  const queueWith = (b: TaggerBackend, albumTags: AlbumTags) =>
+    (queue = new TaggingQueue({ catalog, backend: b, dataDir, catalogue: FAKE_CATALOGUE, albumTags, imageOf: async (p) => join(root, 'img', `${p.fileName.replace('.jpg', '')}.img`) }));
+  const file = () => JSON.parse(readFileSync(join(root, 'trip', PHOTOTAGS_NAME), 'utf8'));
+
+  it('a tagging pass writes each done result (description, objects, keywords, vector) under the file name', async () => {
+    await install(describeSmall, keywordsSmall);
+    const t = testBackend();
+    const { store, albumTags } = sidecar();
+    const q = queueWith(t.backend, albumTags);
+    q.setSettings(settings({ describe: describeSmall.id, keywords: keywordsSmall.id }));
+    q.startJob('j1', () => [photo('a'), photo('b')]);
+    await idle(q);
+    // Debounced: nothing is written until the store flushes.
+    expect(existsSync(join(root, 'trip', PHOTOTAGS_NAME))).toBe(false);
+    store.flush();
+    const photos = file().photos;
+    expect(Object.keys(photos).sort()).toEqual(['a.jpg', 'b.jpg']);
+    expect(photos['a.jpg'].models[describeSmall.id]).toMatchObject({ contentKey: 'ck-a', description: 'About a.', objects: [{ label: 'thing', count: 1 }] });
+    expect(photos['a.jpg'].models[keywordsSmall.id]).toMatchObject({ contentKey: 'ck-a', keywords: [{ label: 'a', score: 0.9 }] });
+    const kw = store.read(join(root, 'trip')).results.find((r) => r.fileName === 'a.jpg' && r.modelId === keywordsSmall.id)!;
+    expect([...kw.embedding!]).toEqual([1, 0]);
+  });
+
+  it('a copy of the photo in the same job (same picture) gets the result too', async () => {
+    await install(describeSmall);
+    const { store, albumTags } = sidecar();
+    const q = queueWith(testBackend().backend, albumTags);
+    q.setSettings(settings({ describe: describeSmall.id }));
+    q.startJob('j1', () => [photo('a'), photo('a-copy', 'ck-a')]);
+    await idle(q);
+    store.flush();
+    expect(file().photos['a-copy.jpg'].models[describeSmall.id].description).toBe('About a.');
+  });
+
+  it('failed results stay in the catalogue only, so they are tried again after a move', async () => {
+    await install(describeSmall);
+    const t = testBackend();
+    t.failOn.add('a');
+    const { store, albumTags } = sidecar();
+    const q = queueWith(t.backend, albumTags);
+    q.setSettings(settings({ describe: describeSmall.id }));
+    q.startJob('j1', () => [photo('a'), photo('b')]);
+    await idle(q);
+    store.flush();
+    expect(Object.keys(file().photos)).toEqual(['b.jpg']);
+  });
+
+  it('Regenerate writes the new description; objects stay', async () => {
+    await install(describeSmall);
+    const t = testBackend();
+    const { store, albumTags } = sidecar();
+    const q = queueWith(t.backend, albumTags);
+    q.setSettings(settings({ describe: describeSmall.id }));
+    const a = photo('a');
+    q.startJob('j1', () => [a]);
+    await idle(q);
+    await q.regenerate(a);
+    store.flush();
+    expect(file().photos['a.jpg'].models[describeSmall.id]).toMatchObject({ contentKey: 'ck-a', description: 'Again a (1).', objects: [{ label: 'thing', count: 1 }] });
+  });
+
+  it('forget(keys) makes the queue look in the catalogue again (rows that arrived from a sidecar are not redone)', async () => {
+    await install(describeSmall);
+    const t = testBackend();
+    const q = makeQueue(t.backend);
+    q.setSettings(settings({ describe: describeSmall.id, paused: true }));
+    const list = [photo('a')];
+    q.startJob('j1', () => list);
+    expect(q.status().done).toBe(0); // looked: no row
+    catalog.putTags({ contentKey: 'ck-a', modelId: describeSmall.id, status: 'done', description: 'From the album.', keywords: [], objects: [], embedding: null, error: null });
+    q.forget(['ck-a']);
+    q.setSettings(settings({ describe: describeSmall.id }));
+    q.startJob('j1', () => list);
+    await idle(q);
+    expect(t.calls).toEqual([]);
+    expect(q.status().done).toBe(1);
+  });
+});
+
+describe('album tags sidecar fix round 1: the queue', () => {
+  it('says when a pass ends (so its results are written then)', async () => {
+    await install(describeSmall);
+    let ends = 0;
+    const q = (queue = new TaggingQueue({ catalog, backend: testBackend().backend, dataDir, catalogue: FAKE_CATALOGUE, onPassEnd: () => ends++, imageOf: async (p) => join(root, 'img', `${p.fileName.replace('.jpg', '')}.img`) }));
+    q.setSettings(settings({ describe: describeSmall.id }));
+    q.startJob('j1', () => [photo('a'), photo('b')]);
+    await idle(q);
+    expect(ends).toBeGreaterThanOrEqual(1);
+  });
+
+  it('photos of a folder whose tags file cannot be read just now are not tagged; once it can be, their results come in instead', async () => {
+    await install(describeSmall);
+    writeFileSync(join(root, 'trip', PHOTOTAGS_NAME), JSON.stringify({ format: 'phototool-tags/1', photos: { 'a.jpg': { models: { [describeSmall.id]: { contentKey: 'ck-a', description: 'Saved in the album.' } } } } }));
+    let locked = true;
+    const store = new AlbumTagsStore({
+      fallbackDir: join(root, 'fallback'), unreadableRetryMs: 0, onError: () => {},
+      readFile: (p) => { if (locked && p.endsWith(PHOTOTAGS_NAME)) throw Object.assign(new Error('locked'), { code: 'EBUSY' }); return readFileSync(p, 'utf8'); },
+    });
+    const albumTags = new AlbumTags({ catalog, store, catalogue: FAKE_CATALOGUE });
+    const t = testBackend();
+    const q = (queue = new TaggingQueue({ catalog, backend: t.backend, dataDir, catalogue: FAKE_CATALOGUE, albumTags, deferRetryMs: 20, imageOf: async (p) => join(root, 'img', `${p.fileName.replace('.jpg', '')}.img`) }));
+    const list = [photo('a'), photo('b')];
+    albumTags.sync(list);
+    q.setSettings(settings({ describe: describeSmall.id }));
+    q.startJob('j1', () => list);
+    await idle(q);
+    expect(t.calls).toEqual([]);
+    locked = false;
+    for (let i = 0; i < 200 && t.calls.length < 1; i++) await new Promise((r) => setTimeout(r, 10));
+    await idle(q);
+    expect(t.calls).toEqual(['describe:b']);
+    expect(catalog.tagsFor(['ck-a'], [describeSmall.id]).get('ck-a')![0].description).toBe('Saved in the album.');
+    store.close();
   });
 });

@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import sharp from 'sharp';
 import { folderStamp, forgetPhotos, infoFor, PhotoInfoWriteError, readFolderInfo, updatePhotoInfo, type FolderInfo, type PhotoInfo, type PhotoInfoOptions } from '../../shared/photoinfo';
+import { AlbumTagsStore, type AlbumTagsOptions } from '../../shared/phototags';
 import { isIdentityEdit, parseEdit } from '../../shared/core/photoEdit';
 import { hashFile, workingFile } from '../../shared/server/media';
 import { editFormatFor, renderEdited } from '../../shared/server/photoEditRender';
@@ -15,6 +16,7 @@ import { MODEL_CATALOGUE, type ModelChoice } from '../core/tagModels';
 import { modelRoutes } from './models/routes';
 import { readTaggingSettings } from './models/store';
 import { workerBackend, type TaggerBackend } from './tagging/backend';
+import { AlbumTags } from './tagging/albumTags';
 import { NoDescriptionError, TaggingQueue } from './tagging/queue';
 import { cpus } from 'node:os';
 
@@ -31,6 +33,8 @@ export interface GalleryAppOptions {
   resourceRoot?: string;
   /** Replaces how photoinfo.json is written or renamed. A seam for tests (a read-only or busy folder). */
   photoInfoSeams?: Pick<PhotoInfoOptions, 'writeFile' | 'rename'>;
+  /** How long the album folders' tag files wait before they are written (see shared/phototags/store.ts). A seam for tests. */
+  albumTagsTiming?: Pick<AlbumTagsOptions, 'debounceMs' | 'maxWaitMs' | 'retryMs' | 'maxRetryMs'>;
   /**
    * Photo tagging: `workerFile` is the tagging worker to run (built, or from source in development). The rest are
    * seams for tests and the e2e server: model downloads, the model list, what runs the models, which picture they get.
@@ -101,12 +105,18 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
   // Photo tagging: the models run in a worker thread with half the processor's threads.
   // Without a worker file (tests that never choose a model) a model would fail to load and show as not working.
   const backend = opts.tagging?.backend ?? workerBackend(Math.max(1, Math.floor(cpus().length / 2)), opts.tagging?.workerFile ?? '');
+  // The tagging results live in each album folder (a read-only one's beside its photoinfo fallback); the catalogue caches them.
+  const albumStore = new AlbumTagsStore({ fallbackDir: opts.photoInfoFallbackDir, ...opts.albumTagsTiming });
+  const albumTags = new AlbumTags({ catalog, store: albumStore, catalogue: opts.tagging?.catalogue ?? MODEL_CATALOGUE });
   const tagging = new TaggingQueue({
     catalog,
     backend,
     dataDir,
     catalogue: opts.tagging?.catalogue,
     imageOf: opts.tagging?.imageOf ?? (async (p) => catalog.thumbPath(p.key, 'm')),
+    albumTags,
+    // A pass ended (or paused): its results go to the album folders now, not minutes later.
+    onPassEnd: () => albumStore.flush(),
   });
   tagging.setSettings({ ...readTaggingSettings(dataDir), paused: false });
   // Tagging starts when the open folder's scan is done (not one cancelled because another folder was opened).
@@ -114,6 +124,14 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     onDone: (job) => {
       // The live list: tag() checks the photo in hand is still on disk, and the items route leaves out deleted ones.
       if (!job.cancelled && jobIds.at(-1) === job.id) tagging.startJob(job.id, () => job.photos);
+    },
+    // Each photo's results in its album folder reach the catalogue before tagging starts (and are not made again).
+    onPhoto: (photo) => {
+      try {
+        tagging.forget(albumTags.sync([photo]));
+      } catch (e) {
+        console.warn(`Could not read the saved tags for ${photo.path}:`, e);
+      }
     },
   });
   const infoOpts: PhotoInfoOptions = { fallbackDir: opts.photoInfoFallbackDir, ...opts.photoInfoSeams };
@@ -249,8 +267,11 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     }
     jobIds.push(job.id);
     while (jobIds.length > MAX_JOBS) scanner.forget(jobIds.shift()!);
-    // The earlier folder's tagging stops after the photo in hand.
+    // The earlier folder's tagging stops after the photo in hand; its results not written yet are written now.
     tagging.clearJob();
+    albumStore.flush();
+    // Read the album folders' tag files afresh: another computer may have changed them since.
+    albumStore.invalidate();
     res.status(202).json({ jobId: job.id });
   }));
 
@@ -512,6 +533,7 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
     const job = req.body?.job;
     if (typeof job !== 'string') throw new HttpError(400, 'Send the job.');
     if (jobIds.at(-1) === job) tagging.clearJob();
+    albumStore.flush();
     res.status(204).end();
   }));
 
@@ -593,6 +615,8 @@ export function createGalleryApp(dataDir: string, opts: GalleryAppOptions): { ap
       // The worker is stopped; a photo being looked at is dropped (stop() marks the queue stopped at once,
       // so nothing is written to the catalogue after it is closed).
       void tagging.stop();
+      // What the album folders' tag files are still waiting for is written before the catalogue closes.
+      albumStore.close();
       catalog.close();
     },
   };

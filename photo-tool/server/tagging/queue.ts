@@ -3,7 +3,7 @@
 // photo is looked at once. Never blocks anything: the models run in the backend's worker thread.
 import { existsSync } from 'node:fs';
 import { MODEL_CATALOGUE, findModel, type ModelChoice, type TagPart } from '../../core/tagModels';
-import type { Catalog, GalleryPhoto } from '../catalog';
+import type { Catalog, GalleryPhoto, TagRow } from '../catalog';
 import { verifyModel } from '../models/download';
 import { installedModels, modelDir, type TaggingSettings } from '../models/store';
 import { BackendLostError, type TaggerBackend } from './backend';
@@ -33,6 +33,20 @@ export interface TaggingQueueDeps {
   catalogue?: readonly ModelChoice[];
   /** The picture to look at for a photo (its 1600 px thumbnail). */
   imageOf(photo: GalleryPhoto): Promise<string>;
+  /**
+   * Where each done result is also kept: the photo's album folder (see albumTags.ts). A photo it `holds` (its folder's
+   * file can't be read just now) is not tagged until `retryDeferred` brings that folder's results in.
+   */
+  albumTags?: {
+    save(photos: GalleryPhoto[], row: TagRow, mode?: 'keep' | 'replace'): void;
+    holds?(photo: GalleryPhoto): boolean;
+    retryDeferred?(): string[];
+    hasDeferred?(): boolean;
+  };
+  /** A pass stopped (nothing left to do, paused, or a problem): its results are written now. */
+  onPassEnd?(): void;
+  /** How long to wait before looking again at photos held back. Default 30 s. */
+  deferRetryMs?: number;
 }
 
 /** Regenerate can't run: no working descriptions model, or it has not described this photo yet. */
@@ -69,6 +83,7 @@ export class TaggingQueue {
   private lost = new Set<TagPart>();
   private losses: Partial<Record<TagPart, number>> = {};
   private readonly catalogue: readonly ModelChoice[];
+  private deferTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private deps: TaggingQueueDeps) {
     this.catalogue = deps.catalogue ?? MODEL_CATALOGUE;
@@ -95,6 +110,12 @@ export class TaggingQueue {
   /** Paths to look at first, in order (the selected photo, then the ones on screen). */
   focus(paths: string[]): void {
     this.focusPaths = paths.slice(0, 1000);
+  }
+
+  /** These pictures' rows changed in the catalogue (they came from an album folder): look them up again. */
+  forget(contentKeys: string[]): void {
+    for (const map of [this.looked, this.seen, this.failedKeys]) for (const keys of map.values()) for (const k of contentKeys) keys.delete(k);
+    if (contentKeys.length) this.cursor = 0;
   }
 
   setSettings(s: TaggingSettings): void {
@@ -183,6 +204,8 @@ export class TaggingQueue {
         // Sampling can end at once: saving nothing would hide the sentence (and this button) for good.
         if (!text) throw new Error(`${m.label} wrote an empty description. Try again.`);
         if (!this.deps.catalog.setDescription(key, m.id, text)) throw new NoDescriptionError(`${m.label} has not described this photo yet.`);
+        const row = this.deps.catalog.tagsFor([key], [m.id]).get(key)?.[0];
+        if (row) this.deps.albumTags?.save(this.samePicture(photo), row, 'replace');
         this.stamp++;
         return text;
       } catch (e) {
@@ -195,6 +218,7 @@ export class TaggingQueue {
 
   async stop(): Promise<void> {
     this.stopped = true;
+    if (this.deferTimer) clearTimeout(this.deferTimer);
     this.job = null;
     await this.loop;
     await this.deps.backend.close();
@@ -230,10 +254,26 @@ export class TaggingQueue {
       })
       .finally(() => {
         this.loop = null;
+        try {
+          this.deps.onPassEnd?.();
+        } catch {
+          // Writing is the album store's business; it never stops tagging.
+        }
+        this.retryHeldLater();
         // The job changed while the last step ran (another folder opened during a model load): start on it.
         if (!this.problem && this.job && this.job !== ran) this.kick();
       });
     const ran = this.job;
+  }
+
+  /** Photos are held back (their folder's file can't be read just now): look again in a while. */
+  private retryHeldLater(): void {
+    if (this.deferTimer || this.stopped || !this.job || !this.deps.albumTags?.hasDeferred?.()) return;
+    this.deferTimer = setTimeout(() => {
+      this.deferTimer = null;
+      this.kick();
+    }, this.deps.deferRetryMs ?? 30_000);
+    (this.deferTimer as { unref?: () => void }).unref?.();
   }
 
   /** What has been looked at for these models, from the catalogue (once per model). */
@@ -261,7 +301,7 @@ export class TaggingQueue {
   }
 
   private next(models: ModelChoice[], photos: GalleryPhoto[]): GalleryPhoto | undefined {
-    const todo = (p: GalleryPhoto) => !!p.contentKey && !this.gone.has(p.path) && models.some((m) => !this.seen.get(m.id)?.has(p.contentKey!));
+    const todo = (p: GalleryPhoto) => !!p.contentKey && !this.gone.has(p.path) && models.some((m) => !this.seen.get(m.id)?.has(p.contentKey!)) && !this.deps.albumTags?.holds?.(p);
     const byPath = new Map(photos.map((p) => [p.path, p]));
     for (const path of this.focusPaths) {
       const p = byPath.get(path);
@@ -312,6 +352,12 @@ export class TaggingQueue {
       if (this.job !== job) continue;
       if (!models.length) return;
       const photos = job.photos();
+      // Folders held back that can be read now: their results come in first (and those photos need no tagging).
+      const held = this.deps.albumTags?.hasDeferred?.() ?? false;
+      const changed = held ? (this.deps.albumTags?.retryDeferred?.() ?? []) : [];
+      if (changed.length) this.forget(changed);
+      // The cursor may have passed photos that were held: look from the start.
+      if (held) this.cursor = 0;
       this.learn(models, photos);
       const photo = this.next(models, photos);
       if (!photo) return;
@@ -328,6 +374,12 @@ export class TaggingQueue {
       }
       this.lost.clear();
     }
+  }
+
+  /** The photo and every other photo of the job with the same picture (a copy): a result is theirs too. */
+  private samePicture(photo: GalleryPhoto, photos: GalleryPhoto[] = this.job?.photos() ?? []): GalleryPhoto[] {
+    const out = photos.filter((p) => p.contentKey === photo.contentKey && p.path !== photo.path);
+    return [photo, ...out];
   }
 
   private async tag(job: { id: string; photos: () => GalleryPhoto[] }, photo: GalleryPhoto, models: ModelChoice[]): Promise<void> {
@@ -374,8 +426,10 @@ export class TaggingQueue {
       }
       return;
     }
+    const same = this.samePicture(photo, job.photos());
     for (const { m, row } of results) {
       this.deps.catalog.putTags(row);
+      this.deps.albumTags?.save(same, row);
       this.seen.get(m.id)!.add(key);
       if (row.status === 'failed') this.failedKeys.get(m.id)!.add(key);
     }

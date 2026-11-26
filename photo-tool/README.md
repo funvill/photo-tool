@@ -70,7 +70,7 @@ Run from source in a plain browser (`npm run dev:photo-tool`), Photo Tool can ed
 
 - **Photo**: date, size, megapixels, shape, format and folder.
 - **Camera**: camera, lens, focal length, aperture, shutter speed, ISO, exposure compensation and flash, when the file has them.
-- **What's in it**: what photo tagging found (see Photo tagging below): a sentence about the photo, its keywords and the objects in it. Click a keyword or an object to show only the photos that have it. **Regenerate**, under the sentence, asks the chosen descriptions model to describe the photo again in other words; the new sentence replaces the old one in Photo Tool's own catalogue (nothing is written to the photo's folder), and the keywords and objects stay as they are. It works while tagging is paused.
+- **What's in it**: what photo tagging found (see Photo tagging below): a sentence about the photo, its keywords and the objects in it. Click a keyword or an object to show only the photos that have it. **Regenerate**, under the sentence, asks the chosen descriptions model to describe the photo again in other words; the new sentence replaces the old one in the folder's `phototool-tags.json` (see Where the tags are kept, below), and the keywords and objects stay as they are. It works while tagging is paused.
 - **Histogram**: red, green, blue and brightness, with the share of clipped shadows and highlights.
 - **Place**, **People**, **Date and time**, and **Description and notes**: the fields you can type. Each is saved when you leave the field.
 
@@ -111,11 +111,40 @@ Photo Tool can look at each photo and write down what is in it, on this computer
 
 A model is downloaded from Hugging Face only when you click **Download** and say yes to the size it shows. The files are pinned to one version and checked against their known fingerprints before use; a download can be cancelled, and continues where it stopped. **Remove** deletes a model's files. They are kept in Photo Tool's data folder, under `models`. Once downloaded, the models run on this computer, on its processor; the photos never leave it, and nothing else is sent anywhere. All four models are MIT licensed.
 
-Once a folder is read, its photos are tagged one at a time in the background: the selected photo first, then the ones on screen, then the rest. The bar shows "Tagging 120 of 2,140" with **Pause** and **Resume**; Pause holds until Resume or until another folder is opened, and closing the folder stops tagging it. With the smaller models, a folder of 2,000 photos takes about 3½ hours, so a big folder is best left overnight. What was found is kept with the thumbnails, by the photo's content, so a photo is looked at once even if it is renamed or opened from another folder, and closing Photo Tool loses nothing. Choosing another model for a part looks at every photo again with it; until it has, the other model's results still show. A model that is damaged or won't load shows **Not working · Download again** in Settings (a damaged file is found and deleted, so Download again fetches it), and if tagging has to stop (say the disk is full) the bar says why, with **Try again**.
+Once a folder is read, its photos are tagged one at a time in the background: the selected photo first, then the ones on screen, then the rest. The bar shows "Tagging 120 of 2,140" with **Pause** and **Resume**; Pause holds until Resume or until another folder is opened, and closing the folder stops tagging it. With the smaller models, a folder of 2,000 photos takes about 3½ hours, so a big folder is best left overnight. What was found is kept in the photo's own folder (below), by the photo's content, so a photo is looked at once even if it is renamed, moved or opened from another folder, and closing Photo Tool loses nothing. Choosing another model for a part looks at every photo again with it; until it has, the other model's results still show. A model that is damaged or won't load shows **Not working · Download again** in Settings (a damaged file is found and deleted, so Download again fetches it), and if tagging has to stop (say the disk is full) the bar says why, with **Try again**.
+
+### Where the tags are kept
+
+The descriptions, objects and keywords are written to a file called `phototool-tags.json` in the same folder as the photos, so they move with the folder: copy or move an album (say to another drive, or through iCloud to another computer), or reinstall Photo Tool, and the tags show as soon as the folder is opened, without running the models again. Beside it, `phototool-tags.vectors.json` keeps what search by meaning needs (one list of numbers per photo, from the keywords model; about 3 KB a photo). Both files hold only what the models made and can be deleted at any time: Photo Tool writes them again from its own copy the next time the folder is opened, or tags the photos again. Stars, people and notes stay in `photoinfo.json`.
+
+```json
+{
+  "format": "phototool-tags/1",
+  "photos": {
+    "IMG_0042.jpg": {
+      "models": {
+        "florence2-base-q8": { "contentKey": "3f1c…", "fileKey": "fk1:9a0e…", "description": "A boat in a harbour.", "objects": [{ "label": "boat", "count": 2 }], "madeAt": "2026-11-25T10:00:00.000Z" },
+        "clip-base-q8": { "contentKey": "3f1c…", "fileKey": "fk1:9a0e…", "keywords": [{ "label": "harbour", "score": 0.31 }], "madeAt": "2026-11-25T10:00:01.000Z" }
+      }
+    }
+  }
+}
+```
+
+- Photos are keyed by file name, and each model's result by the model it came from. `fileKey` is `fk1:<file size>:<hash of the size and of the file's first and last 16 KB>`, so working it out reads 32 KB of a photo, never the whole file. Photo Tool keeps each photo's key in its catalogue, so the photo is read once. Two fingerprints say which picture a result was made from. `fileKey` comes from the photo file's own bytes, so it is the same on every computer. `contentKey` comes from the thumbnail this computer made, so it can differ on another computer or after an update, and is used only as a quick first check. If the photo in that file is replaced or edited, the old result is not shown for it and the photo is tagged again. A photo renamed inside the folder keeps its tags.
+- While a pass runs, the files are written at most every 5 minutes. They are also written when the pass ends or is paused, a minute after the last result, when the folder is closed, and when Photo Tool closes. Each write replaces the whole file, so a pass over 1,000 photos at the smaller model's 6 s a photo (about 100 minutes) writes them about 20 times, not 1,000. Fields and entries Photo Tool does not know are kept.
+- A write that fails (the file is in use, say) is tried again after 30 s, then after longer and longer waits, up to 10 minutes. If a file cannot be read as JSON, it is left alone and is not written to until it is fixed or deleted. The two files are written separately, so a problem with one does not hold up the other.
+- Only finished results are written. A photo a model could not look at is tried again when the folder is opened somewhere else.
+- The folder's copy always wins. When the folder already has a result for a picture, a new result from tagging never replaces it, even if Photo Tool's own copy differs (because it was regenerated on another computer, say). Only **Regenerate** replaces it. Tags made before this file existed are written into it the first time the folder is opened.
+- If the file cannot be read just then (a sync program has it locked, or an iCloud file is not downloaded while you are offline), Photo Tool does not tag that folder's photos until it can read the file. It never writes over a file it could not read.
+- If the folder cannot be written, the files go into the shared folder's `phototool-tags` subfolder instead (`%APPDATA%\Photo Tools Shared\photoinfo\phototool-tags` on Windows). Once the folder can be written again, its own file and that copy are merged photo by photo: the folder's result wins unless the copy's is newer. The copy is then deleted. The album's own file never contains a path from your computer.
+- While writing, Photo Tool uses a short-lived temporary file named `~$phototool-tags.json.<random>.tmp`. It is chosen to look like the temporary files that sync programs usually leave alone. This has not been checked with iCloud. If Photo Tool is stopped in the middle of a write, the leftover is deleted the next time it writes to that folder.
+- Two computers writing to the same synced album at the same moment can make the sync program keep both, as a conflict copy (for example `phototool-tags 2.json`). Photo Tool ignores those copies, and each computer writes what it has again the next time it opens the folder.
+- Photo Tool also keeps a copy of everything in its catalogue (`gallery.sqlite` in its data folder). That copy is only a cache: deleting the data folder loses no tags.
 
 ## Stars and photoinfo.json
 
-A photo's star, date, place, people and notes live in a small file called `photoinfo.json` in the same folder as the photo. Both programs read and write it: a star set in Photo Tool shows up in Photobook Editor within about 3 seconds, and the other way round, and a star added by another program (or by hand in Notepad) shows up too. The file is the only thing ever written beside your photos; the photos themselves are never changed, renamed or moved (unless you save an edit into the photo file, above).
+A photo's star, date, place, people and notes live in a small file called `photoinfo.json` in the same folder as the photo. Both programs read and write it: a star set in Photo Tool shows up in Photobook Editor within about 3 seconds, and the other way round, and a star added by another program (or by hand in Notepad) shows up too. Apart from the tags files (above), it is the only thing ever written beside your photos; the photos themselves are never changed, renamed or moved (unless you save an edit into the photo file, above).
 
 ```json
 {
