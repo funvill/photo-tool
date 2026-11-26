@@ -19,11 +19,13 @@ export interface CacheImage {
 }
 
 export interface ImageCacheOptions {
-  /** Loads running at once (default 6, the browser's connections per host). The most wanted photo may make it one more. */
+  /** Loads running at once (default 4: under the browser's 6 connections per host, so the photo on screen, which may make it one more, and the grid's tiles are not queued behind preloads). */
   maxInFlight?: number;
   /** Decoded images kept (default 40). A 1600 px picture is about 10 MB decoded. */
   capacity?: number;
   createImage?: () => CacheImage;
+  /** The clock, in ms (a fake one in the tests). */
+  now?: () => number;
 }
 
 interface Entry {
@@ -34,14 +36,18 @@ interface Entry {
 
 /** Failed addresses remembered (so they are not asked for on every step), oldest forgotten first. */
 const FAILED_KEPT = 500;
+/** How long a failure is remembered: long enough not to hammer a missing picture, short enough that a passing server error does not stick. */
+const FAILED_FOR_MS = 15_000;
 
 export class ImageCache {
   private readonly maxInFlight: number;
   private readonly capacity: number;
   private readonly createImage: () => CacheImage;
+  private readonly now: () => number;
   /** Loading and loaded images, least recently wanted first (a Map keeps insertion order). */
   private readonly entries = new Map<string, Entry>();
-  private readonly failedUrls = new Set<string>();
+  /** Failed addresses, with when each may be tried again. */
+  private readonly failedUrls = new Map<string, number>();
   /** The last want() list, most wanted first. */
   private wanted: string[] = [];
   private wantedSet = new Set<string>();
@@ -50,9 +56,10 @@ export class ImageCache {
   private loads = 0;
 
   constructor(opts: ImageCacheOptions = {}) {
-    this.maxInFlight = Math.max(1, opts.maxInFlight ?? 6);
+    this.maxInFlight = Math.max(1, opts.maxInFlight ?? 4);
     this.capacity = Math.max(1, opts.capacity ?? 40);
     this.createImage = opts.createImage ?? (() => new Image() as unknown as CacheImage);
+    this.now = opts.now ?? (() => Date.now());
   }
 
   /** Loads running now. */
@@ -73,9 +80,13 @@ export class ImageCache {
     return e?.ready ? e.img : undefined;
   }
 
-  /** Whether `url` failed to load (a missing picture). */
+  /** Whether `url` failed to load lately (a missing picture, or a server error not yet worth trying again). */
   failed(url: string): boolean {
-    return this.failedUrls.has(url);
+    const until = this.failedUrls.get(url);
+    if (until === undefined) return false;
+    if (this.now() < until) return true;
+    this.failedUrls.delete(url);
+    return false;
   }
 
   /**
@@ -104,7 +115,7 @@ export class ImageCache {
       this.touch(url);
       return Promise.resolve(e.img);
     }
-    if (this.failedUrls.has(url)) return Promise.reject(new Error(`Could not load ${url}`));
+    if (this.failed(url)) return Promise.reject(new Error(`Could not load ${url}`));
     if (signal?.aborted) return Promise.reject(new Error(`Not wanted: ${url}`));
     this.pinned.set(url, (this.pinned.get(url) ?? 0) + 1);
     let pinned = true;
@@ -183,8 +194,9 @@ export class ImageCache {
       this.evict();
     } else {
       this.entries.delete(url);
-      this.failedUrls.add(url);
-      if (this.failedUrls.size > FAILED_KEPT) this.failedUrls.delete(this.failedUrls.values().next().value!);
+      this.failedUrls.delete(url);
+      this.failedUrls.set(url, this.now() + FAILED_FOR_MS);
+      if (this.failedUrls.size > FAILED_KEPT) this.failedUrls.delete(this.failedUrls.keys().next().value!);
       for (const w of entry.waiters.splice(0)) w.fail(new Error(`Could not load ${url}`));
     }
     this.pump();
@@ -201,7 +213,7 @@ export class ImageCache {
   private pump(): void {
     let first = true;
     for (const url of this.wanted) {
-      if (this.entries.has(url) || this.failedUrls.has(url)) {
+      if (this.entries.has(url) || this.failed(url)) {
         first = false;
         continue;
       }

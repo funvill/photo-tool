@@ -17,7 +17,7 @@ class FakeImage implements CacheImage {
   }
 }
 
-function setup(opts: { maxInFlight?: number; capacity?: number } = {}) {
+function setup(opts: { maxInFlight?: number; capacity?: number; now?: () => number } = {}) {
   const made: FakeImage[] = [];
   /** Every url ever asked of the network, in order. */
   const requested: string[] = [];
@@ -35,7 +35,8 @@ function setup(opts: { maxInFlight?: number; capacity?: number } = {}) {
     },
   });
   const loading = () => made.filter((i) => i.src && i.onload);
-  const img = (url: string) => made.find((i) => i.src === url)!;
+  // The latest image for `url` (an earlier one may have failed).
+  const img = (url: string) => made.findLast((i) => i.src === url)!;
   /** The network delivers `url`; then the decode settles. */
   const arrive = async (url: string) => {
     const i = img(url);
@@ -160,6 +161,35 @@ describe('ImageCache', () => {
     expect(t.requested).toEqual(['a', 'b']);
     t.cache.want(['a', 'b']);
     expect(t.requested).toEqual(['a', 'b']);
+  });
+
+  it('a failure is forgotten after a while: a later visit asks again (a passing server error does not stick)', async () => {
+    let clock = 1_000;
+    const t = setup({ now: () => clock });
+    t.cache.want(['a']);
+    await t.fail('a');
+    expect(t.cache.failed('a')).toBe(true);
+    clock += 5_000;
+    t.cache.want(['a']);
+    expect(t.requested).toEqual(['a']);
+    clock += 30_000;
+    expect(t.cache.failed('a')).toBe(false);
+    t.cache.want(['a']);
+    expect(t.requested).toEqual(['a', 'a']);
+    await t.arrive('a');
+    expect(t.cache.get('a')).toBeDefined();
+  });
+
+  it('load() of a failure forgotten loads it again', async () => {
+    let clock = 0;
+    const t = setup({ now: () => clock });
+    const first = expect(t.cache.load('a')).rejects.toThrow();
+    await t.fail('a');
+    await first;
+    clock += 60_000;
+    const again = t.cache.load('a');
+    await t.arrive('a');
+    await expect(again).resolves.toBeDefined();
   });
 
   it('a decode that fails still shows the picture when it has pixels', async () => {
