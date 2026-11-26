@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { viewerNeighbours, viewerStep } from '../../core/galleryViewer';
+import { viewerStep } from '../../core/galleryViewer';
+import { pathIndex, preloadOrder } from '../../core/preloadWindow';
 import { Icon } from '../../../shared/web/components/Icon';
 import { formatSize, formatTaken } from '../../../shared/web/components/HoverPreview';
 import { thumbUrl, type GalleryItem } from '../api';
+import { imageCache, useDecodedSwap } from '../imageCache';
 import { selectVisible, useGallery, useVisibleItems } from '../store';
 
 // The full-screen viewer: one photo at a time over the whole window, stepping through the grid's own
@@ -14,8 +16,8 @@ const SWALLOWED = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'P
 
 /** Where `path` is in `list`. A photo that has left the list (starred under a "not starred" filter) leaves the viewer on the one now in its place. */
 function indexIn(list: GalleryItem[], path: string, last: number): number {
-  const i = list.findIndex((p) => p.path === path);
-  return i >= 0 ? i : Math.min(last, list.length - 1);
+  const i = pathIndex(list).get(path);
+  return i ?? Math.min(last, list.length - 1);
 }
 
 export function Viewer() {
@@ -82,19 +84,22 @@ function OpenViewer({ path }: { path: string }) {
     return () => window.removeEventListener('keydown', onKey, true);
   }, []);
 
-  // The next two and the previous two are loaded ahead, so stepping shows them at once.
-  const around = viewerNeighbours(index, items.length).map((i) => items[i].key).join(',');
-  const preloaded = useRef<HTMLImageElement[]>([]);
+  // The photo shown, then the next 20 and the previous 5 (the other way round after a step back) are
+  // loaded and decoded ahead, so a step shows the next one from memory.
+  const went = useRef<{ index: number; direction: 1 | -1 }>({ index, direction: 1 });
+  if (index !== went.current.index) went.current = { index, direction: index < went.current.index ? -1 : 1 };
+  const direction = went.current.direction;
   useEffect(() => {
-    preloaded.current = around ? around.split(',').map((key) => Object.assign(new Image(), { src: thumbUrl(key, 'm') })) : [];
-  }, [around]);
+    if (index < 0 || index >= items.length) return;
+    imageCache.want([index, ...preloadOrder(index, items.length, { direction })].map((i) => thumbUrl(items[i].key, 'm')));
+  }, [index, items, direction]);
 
   if (!item) return null;
   const starred = item.info.star === true;
   const hidden = item.info.hidden === true;
   return (
     <div className="gallery-viewer" role="dialog" aria-modal="true" aria-label="Photo viewer">
-      <ViewerImage key={item.key} item={item} />
+      <ViewerImage item={item} />
       <div className="gallery-viewer-bar">
         <strong className="ellipsis" title={item.path}>{item.fileName}</strong>
         {starred && (
@@ -123,10 +128,10 @@ function OpenViewer({ path }: { path: string }) {
   );
 }
 
-/** The 1600 px picture; the 400 px one when that is missing. */
+/** The 1600 px picture (the 400 px one when that is missing), from the image cache: the photo before stays until it is decoded. */
 function ViewerImage({ item }: { item: GalleryItem }) {
-  const [small, setSmall] = useState(false);
-  return <img className="gallery-viewer-img" src={thumbUrl(item.key, small ? 's' : 'm')} alt={item.fileName} draggable={false} onError={() => setSmall(true)} />;
+  const shown = useDecodedSwap(thumbUrl(item.key, 'm'), thumbUrl(item.key, 's'), item);
+  return <img className="gallery-viewer-img" src={shown.url} alt={shown.value.fileName} draggable={false} />;
 }
 
 /** What the details panel knows about the photo, read-only. */
