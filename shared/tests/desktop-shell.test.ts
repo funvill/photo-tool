@@ -203,6 +203,23 @@ describe('updates in the shell', () => {
   });
 });
 
+describe('F1: About', () => {
+  const code = read('shared/electron/runDesktopApp.ts');
+
+  it('F1 opens About', () => {
+    expect(code).toMatch(/\{ label: `&About \$\{NAME\}`, accelerator: 'F1', click: about \}/);
+  });
+
+  it('offers Check for updates in the installed program only, and shows Electron and the platform', () => {
+    expect(code).toMatch(/canCheckForUpdates: app\.isPackaged && !selfTest/);
+    expect(code).toContain('runtime: `Electron ${process.versions.electron}, ${process.platform} ${process.arch}`');
+  });
+
+  it('its Check for updates button runs the same check as the menu item', () => {
+    expect(code).toMatch(/buttons\[response\] === CHECK_UPDATES_BUTTON\) \{\s*void updates\?\.checkNow\(\);/);
+  });
+});
+
 describe('the shell', () => {
 
   it("names neither program: each program's names come from its own product.json", () => {

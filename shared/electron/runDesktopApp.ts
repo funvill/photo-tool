@@ -15,7 +15,7 @@ import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renam
 import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 import { autoUpdater } from 'electron-updater';
-import { LICENCE_FILE, MIN_WINDOW, NOTICES_BUTTON, NOTICES_FILE, describeAbout, describeFailure, parseSavedPort, parseSelfTest, restoreWindow, serverPortRequest, type ProgramNames, type SelfTestArgs, type WindowState } from './config';
+import { CHECK_UPDATES_BUTTON, LICENCE_FILE, MIN_WINDOW, NOTICES_BUTTON, NOTICES_FILE, describeAbout, describeFailure, parseSavedPort, parseSelfTest, restoreWindow, serverPortRequest, type ProgramNames, type SelfTestArgs, type WindowState } from './config';
 import { CarryOverError, carryOverRefusal, prepareProgramFolders } from './dataFolders';
 import { isAppNavigation, requestHost, type GuardOptions } from './netGuard';
 import { SELF_TEST_CONTROL_URLS, type SelfTestContext, type Step } from './selfTest';
@@ -473,6 +473,9 @@ export function runDesktopApp(program: DesktopProgram): void {
       licence: licence ? readFileSync(licence, 'utf8') : null,
       repository: program.repository,
       hasNotices: !!legalFile(NOTICES_FILE),
+      // Updates work only in the installed program, and never during a self-test.
+      canCheckForUpdates: app.isPackaged && !selfTest,
+      runtime: `Electron ${process.versions.electron}, ${process.platform} ${process.arch}`,
     });
   }
 
@@ -480,6 +483,11 @@ export function runDesktopApp(program: DesktopProgram): void {
     const { buttons, ...words } = aboutBox();
     const options = { type: 'info' as const, ...words, buttons, defaultId: 0, cancelId: 0, noLink: true };
     const { response } = win && !win.isDestroyed() ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options);
+    // The box has closed by now; the check shows its own result.
+    if (buttons[response] === CHECK_UPDATES_BUTTON) {
+      void updates?.checkNow();
+      return;
+    }
     const notices = legalFile(NOTICES_FILE);
     if (buttons[response] !== NOTICES_BUTTON || !notices) return;
     // A plain text file on this computer, opened by whatever the system uses for those.
@@ -508,7 +516,7 @@ export function runDesktopApp(program: DesktopProgram): void {
           ...(app.isPackaged ? [] : ([{ type: 'separator' }, { role: 'reload' }, { role: 'toggleDevTools' }] as MenuItemConstructorOptions[])),
         ],
       },
-      { label: '&Help', submenu: [...updateItems, ...(updateItems.length ? ([{ type: 'separator' }] as MenuItemConstructorOptions[]) : []), { label: `&About ${NAME}`, click: about }] },
+      { label: '&Help', submenu: [...updateItems, ...(updateItems.length ? ([{ type: 'separator' }] as MenuItemConstructorOptions[]) : []), { label: `&About ${NAME}`, accelerator: 'F1', click: about }] },
     ];
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));
   }

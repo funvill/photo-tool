@@ -4,7 +4,7 @@
 import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { DEFAULT_WINDOW, MIN_WINDOW, NOTICES_BUTTON, dataLayout, describeAbout, describeFailure, launchFolder, parseSelfTest, parseSavedPort, photoInfoFallbackDir, restoreWindow, selfTestOverlap, serverPortRequest } from '../electron/config';
+import { CHECK_UPDATES_BUTTON, DEFAULT_WINDOW, MIN_WINDOW, NOTICES_BUTTON, dataLayout, describeAbout, describeFailure, launchFolder, parseSelfTest, parseSavedPort, photoInfoFallbackDir, restoreWindow, selfTestOverlap, serverPortRequest } from '../electron/config';
 
 const root = resolve(__dirname, '../..');
 
@@ -228,18 +228,30 @@ describe('failure wording', () => {
 
 describe('Help > About', () => {
   const licence = readFileSync(join(root, 'LICENSE'), 'utf8');
-  const base = { productName: 'Photobook Editor', version: '0.1.0', description: 'Make a photobook.', dataDir: resolve('/appdata/data'), licence, repository: 'github:someone/some_project', hasNotices: true };
+  const base = { productName: 'Photobook Editor', version: '0.1.0', description: 'Make a photobook.', dataDir: resolve('/appdata/data'), licence, repository: 'github:someone/some_project', hasNotices: true, canCheckForUpdates: true, runtime: 'Electron 45.4.1, win32 x64' };
 
-  it('names the app, says it stays offline, and credits the project and its licence', () => {
+  it('names the app, says it stays on this computer but for the update check, and credits the project and its licence', () => {
     const a = describeAbout(base);
     expect(a.title).toBe('About Photobook Editor');
     expect(a.message).toBe('Photobook Editor 0.1.0');
-    expect(a.detail).toContain('Everything stays on this computer. Photobook Editor never uses the network.');
+    expect(a.detail).toContain('Everything stays on this computer. Photobook Editor uses the network only to check GitHub for a new version once a day, unless you turn that off in Help.');
+    expect(a.detail).not.toContain('never uses the network');
     expect(a.detail).toContain(base.dataDir);
     expect(a.detail).toContain('Built from the open-source project someone/some_project on GitHub, under the MIT licence.');
     // The copyright line is the licence file's own.
     expect(a.detail).toContain(licence.split(/\r?\n/).find((l) => l.startsWith('Copyright'))!);
-    expect(a.buttons).toEqual(['OK', NOTICES_BUTTON]);
+    expect(a.buttons).toEqual(['OK', CHECK_UPDATES_BUTTON, NOTICES_BUTTON]);
+  });
+
+  it('shows the version with the Electron version and platform', () => {
+    expect(describeAbout(base).detail.split('\n')).toContain('Version 0.1.0 (Electron 45.4.1, win32 x64)');
+    expect(describeAbout({ ...base, productName: 'Photo Tool', version: '0.1.40' }).detail.split('\n')).toContain('Version 0.1.40 (Electron 45.4.1, win32 x64)');
+  });
+
+  it('offers Check for updates only where updates work (the installed program)', () => {
+    expect(CHECK_UPDATES_BUTTON).toBe('Check for updates');
+    expect(describeAbout({ ...base, canCheckForUpdates: false }).buttons).toEqual(['OK', NOTICES_BUTTON]);
+    expect(describeAbout({ ...base, canCheckForUpdates: true, hasNotices: false }).buttons).toEqual(['OK', CHECK_UPDATES_BUTTON]);
   });
 
   it('in Photo Tool, does not talk about books', () => {
@@ -247,10 +259,11 @@ describe('Help > About', () => {
     expect(a.detail).toContain(`Its thumbnails and recent folders are kept in:\n${base.dataDir}`);
     expect(a.detail).not.toMatch(/\bbooks?\b/i);
     expect(a.detail).toContain('uses the network only for OpenStreetMap map tiles, and only after you choose Load maps');
+    expect(a.detail).toContain('to check GitHub for a new version once a day, unless you turn that off in Help.');
     expect(a.detail).not.toContain('never uses the network');
   });
 
-  it('has no addresses in it: the app opens no links', () => {
+  it('has no addresses in it (it must make sense offline)', () => {
     for (const repository of ['github:someone/some_project', 'https://example.com/someone/some_project', undefined]) {
       const a = describeAbout({ ...base, repository });
       expect(`${a.title}\n${a.message}\n${a.detail}`).not.toMatch(/https?:|www\./);
@@ -258,7 +271,7 @@ describe('Help > About', () => {
   });
 
   it('offers the notices only when the file is there, and copes without a licence file', () => {
-    const a = describeAbout({ ...base, licence: null, hasNotices: false });
+    const a = describeAbout({ ...base, licence: null, hasNotices: false, canCheckForUpdates: false });
     expect(a.buttons).toEqual(['OK']);
     expect(a.detail).not.toContain(NOTICES_BUTTON);
     expect(a.detail).toContain('Built from the open-source project someone/some_project on GitHub.');

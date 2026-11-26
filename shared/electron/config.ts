@@ -264,23 +264,26 @@ export function describeFailure(detail: string, ctx: { productName: string; data
 export const LICENCE_FILE = 'LICENSE.txt';
 export const NOTICES_FILE = 'THIRD-PARTY-NOTICES.txt';
 export const NOTICES_BUTTON = 'Third-party notices';
+/** About's button that runs Help > Check for updates (shared/electron/updates.ts). */
+export const CHECK_UPDATES_BUTTON = 'Check for updates';
 
 export interface About {
   title: string;
   message: string;
   detail: string;
-  /** 'OK' first; NOTICES_BUTTON when there is a notices file to open. */
+  /** 'OK' first; then CHECK_UPDATES_BUTTON where updates work, and NOTICES_BUTTON when there is a notices file to open. */
   buttons: string[];
 }
 
 /**
- * The words of the About box. Plain text with no addresses in it: the app opens no links and has
- * to make sense offline. `licence` is the text of the app's own licence file (its first line names
- * the licence, a later one the copyright holder); `repository` is where the project the app is
- * built from lives, as product.json has it ("github:owner/name"). Photo Tool (by its name) says
- * when it uses the network and keeps no books.
+ * The words of the About box (F1). Plain text with no addresses in it: it has to make sense offline.
+ * `licence` is the text of the app's own licence file (its first line names the licence, a later one
+ * the copyright holder); `repository` is where the project the app is built from lives, as product.json
+ * has it ("github:owner/name"); `runtime` is "Electron <version>, <platform> <arch>"; `canCheckForUpdates`
+ * (the installed program only) adds the Check for updates button. Photo Tool (by its name) says when it
+ * uses the network and keeps no books.
  */
-export function describeAbout(o: { productName: string; version: string; description: string; dataDir: string; licence: string | null; repository?: string; hasNotices: boolean }): About {
+export function describeAbout(o: { productName: string; version: string; description: string; dataDir: string; licence: string | null; repository?: string; hasNotices: boolean; canCheckForUpdates: boolean; runtime: string }): About {
   const photoTool = isPhotoTool(o.productName);
   const lines = (o.licence ?? '').split(/\r?\n/).map((l) => l.trim());
   const licenceName = lines.find(Boolean)?.replace(/\blicense\b/i, 'licence');
@@ -295,7 +298,17 @@ export function describeAbout(o: { productName: string; version: string; descrip
   return {
     title: `About ${o.productName}`,
     message: `${o.productName} ${o.version}`,
-    detail: [o.description, photoTool ? `Everything stays on this computer. ${o.productName} uses the network only for OpenStreetMap map tiles, and only after you choose Load maps on the Map tab, and to download photo-tagging models from Hugging Face when you ask for one in Settings.` : `Everything stays on this computer. ${o.productName} never uses the network.`, photoTool ? `Its thumbnails and recent folders are kept in:\n${o.dataDir}` : `Your books are kept in:\n${o.dataDir}`, credit.join('\n')].filter(Boolean).join('\n\n'),
-    buttons: o.hasNotices ? ['OK', NOTICES_BUTTON] : ['OK'],
+    detail: [
+      `Version ${o.version} (${o.runtime})`,
+      o.description,
+      photoTool
+        ? `Everything stays on this computer. ${o.productName} uses the network only for OpenStreetMap map tiles, and only after you choose Load maps on the Map tab; to download photo-tagging models from Hugging Face when you ask for one in Settings; and to check GitHub for a new version once a day, unless you turn that off in Help.`
+        : `Everything stays on this computer. ${o.productName} uses the network only to check GitHub for a new version once a day, unless you turn that off in Help.`,
+      photoTool ? `Its thumbnails and recent folders are kept in:\n${o.dataDir}` : `Your books are kept in:\n${o.dataDir}`,
+      credit.join('\n'),
+    ]
+      .filter(Boolean)
+      .join('\n\n'),
+    buttons: ['OK', ...(o.canCheckForUpdates ? [CHECK_UPDATES_BUTTON] : []), ...(o.hasNotices ? [NOTICES_BUTTON] : [])],
   };
 }
