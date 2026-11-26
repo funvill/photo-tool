@@ -1,0 +1,247 @@
+// Checking GitHub for a new version: the controller. It drives an updater passed in (electron-updater's
+// autoUpdater in the shell, a fake in shared/tests/updates.test.ts) and asks the user through `ask`, so
+// nothing here imports Electron or electron-updater at run time.
+//
+//   check at start   quiet: once a day, packaged only (updateRules.shouldCheckAtStart); a failure is logged, never shown
+//   Help menu        "Check for updates…" (always shows a result) and "Check for updates automatically"
+//   update found     Download / Release notes / Later
+//   downloading      the taskbar progress bar, and the menu item reads "Downloading update… 42 %"
+//   downloaded       Restart now / Later; Restart now runs the shell's prepareInstall, then installs
+//
+// One check and one download at a time: a second request shares the one in flight.
+import type { MenuItemConstructorOptions } from 'electron';
+import { isNoRelease, readUpdateSettings, releasePage, shouldCheckAtStart, updateText, writeUpdateSettings, type UpdateSettings } from './updateRules';
+
+/** The part of electron-updater's AppUpdater the controller uses. */
+export interface UpdaterLike {
+  channel: string | null;
+  autoDownload: boolean;
+  autoInstallOnAppQuit: boolean;
+  allowDowngrade: boolean;
+  disableDifferentialDownload: boolean;
+  checkForUpdates(): Promise<{ isUpdateAvailable: boolean; updateInfo: { version: string } } | null>;
+  downloadUpdate(): Promise<unknown>;
+  quitAndInstall(isSilent?: boolean, isForceRunAfter?: boolean): void;
+  on(event: 'download-progress', cb: (p: { percent: number }) => void): unknown;
+}
+
+export interface UpdateDeps {
+  updater: UpdaterLike;
+  /** The program's own update channel ('photo-tool', 'photobook-editor'): its update file is <channel>.yml. */
+  channel: string;
+  productName: string;
+  currentVersion: string;
+  packaged: boolean;
+  /** Where the releases are, for Release notes; null leaves that button out. */
+  repo: { owner: string; repo: string } | null;
+  /** <profileDir>/updates.json */
+  settingsFile: string;
+  /** Show a message with these buttons; resolves to the index of the one pressed. */
+  ask(o: { message: string; buttons: string[] }): Promise<number>;
+  openExternal(url: string): void;
+  /** The window's taskbar progress, 0 to 1; null takes it away. */
+  setProgress(fraction: number | null): void;
+  /** Build the Help menu again (the items below changed). */
+  refreshMenu(): void;
+  /** The shell's safe way out before installing; false calls the install off. */
+  prepareInstall(): Promise<boolean>;
+  log(...a: unknown[]): void;
+  now(): number;
+}
+
+export interface Updates {
+  checkAtStart(o: { selfTest: boolean; disabledByEnv: boolean }): Promise<void>;
+  checkNow(): Promise<void>;
+  /** "Check for updates…" (or the download's progress, disabled) and the "Check for updates automatically" checkbox. */
+  menuItems(): MenuItemConstructorOptions[];
+}
+
+type Outcome = { kind: 'available'; version: string } | { kind: 'upToDate' } | { kind: 'failed'; error: unknown };
+
+const BUTTONS = {
+  download: 'Download',
+  notes: 'Release notes',
+  later: 'Later',
+  restart: 'Restart now',
+  again: 'Try again',
+  close: 'Close',
+  ok: 'OK',
+};
+
+/** The first line of an error, short enough for a message box. */
+function reason(e: unknown): string {
+  const text = e instanceof Error ? e.message : String(e);
+  const line = text.split(/\r?\n/).find((l) => l.trim()) ?? text;
+  return line.trim().slice(0, 300);
+}
+
+export function createUpdates(d: UpdateDeps): Updates {
+  const { updater } = d;
+  // electron-updater turns allowDowngrade on whenever a channel is set; an older release is never offered.
+  updater.channel = d.channel;
+  updater.allowDowngrade = false;
+  updater.autoDownload = false;
+  updater.autoInstallOnAppQuit = false;
+  // Every update downloads the whole installer (no block maps are published).
+  updater.disableDifferentialDownload = true;
+
+  let checking: Promise<Outcome> | null = null;
+  let offering: Promise<void> | null = null;
+  let downloading: Promise<void> | null = null;
+  /** The download's progress in percent, or null when nothing is downloading. */
+  let percent: number | null = null;
+
+  updater.on('download-progress', (p) => {
+    const before = percent === null ? null : Math.round(percent);
+    percent = p.percent;
+    d.setProgress(p.percent / 100);
+    if (Math.round(p.percent) !== before) d.refreshMenu();
+  });
+
+  const settings = (): UpdateSettings => readUpdateSettings(d.settingsFile);
+  function save(s: UpdateSettings) {
+    try {
+      writeUpdateSettings(d.settingsFile, s);
+    } catch (e) {
+      d.log('could not save the update settings', String(e));
+    }
+  }
+  const ask = async (message: string, buttons: string[]) => buttons[await d.ask({ message, buttons })];
+
+  /** One check at a time: a second caller gets the answer of the one in flight. */
+  function check(): Promise<Outcome> {
+    checking ??= (async (): Promise<Outcome> => {
+      try {
+        const r = await updater.checkForUpdates();
+        const outcome: Outcome = r?.isUpdateAvailable ? { kind: 'available', version: r.updateInfo.version } : { kind: 'upToDate' };
+        save({ ...settings(), lastCheck: d.now() });
+        return outcome;
+      } catch (e) {
+        if (!isNoRelease(e)) return { kind: 'failed', error: e };
+        // Nothing published yet: an answer all the same.
+        save({ ...settings(), lastCheck: d.now() });
+        return { kind: 'upToDate' };
+      }
+    })().finally(() => {
+      checking = null;
+    });
+    return checking;
+  }
+
+  function setPercent(p: number | null) {
+    percent = p;
+    d.setProgress(p === null ? null : p / 100);
+    d.refreshMenu();
+  }
+
+  async function offerInstall(version: string) {
+    if ((await ask(updateText.ready(d.productName, version), [BUTTONS.restart, BUTTONS.later])) !== BUTTONS.restart) return;
+    if (!(await d.prepareInstall())) {
+      d.log('update install called off');
+      return;
+    }
+    d.log('installing update', version);
+    // Silently, then start the new version (the NSIS installer is one-click; Linux ignores the first flag).
+    updater.quitAndInstall(true, true);
+  }
+
+  function download(version: string): Promise<void> {
+    downloading ??= (async () => {
+      for (;;) {
+        setPercent(0);
+        try {
+          await updater.downloadUpdate();
+        } catch (e) {
+          setPercent(null);
+          d.log('update download failed', reason(e));
+          if ((await ask(updateText.downloadFailed(reason(e)), [BUTTONS.again, BUTTONS.close])) === BUTTONS.again) continue;
+          return;
+        }
+        setPercent(null);
+        d.log('update downloaded', version);
+        break;
+      }
+      await offerInstall(version);
+    })().finally(() => {
+      downloading = null;
+      d.refreshMenu();
+    });
+    return downloading;
+  }
+
+  /** Update found: one offer at a time. */
+  function offer(version: string): Promise<void> {
+    offering ??= (async () => {
+      const buttons = d.repo ? [BUTTONS.download, BUTTONS.notes, BUTTONS.later] : [BUTTONS.download, BUTTONS.later];
+      for (;;) {
+        const choice = await ask(updateText.available(d.productName, version, d.currentVersion), buttons);
+        if (choice === BUTTONS.notes && d.repo) {
+          d.openExternal(releasePage(d.repo, version));
+          continue;
+        }
+        if (choice === BUTTONS.download) void download(version);
+        return;
+      }
+    })().finally(() => {
+      offering = null;
+    });
+    return offering.then(() => downloading ?? undefined);
+  }
+
+  /** The manual check in progress (its dialogs included): a second click joins it. */
+  let manual: Promise<void> | null = null;
+  function checkNow(): Promise<void> {
+    if (downloading || offering) return Promise.resolve();
+    manual ??= (async () => {
+      if (!d.packaged) {
+        await ask(updateText.notPackaged(d.productName), [BUTTONS.ok]);
+        return;
+      }
+      const o = await check();
+      d.log('update check', o.kind === 'failed' ? { kind: 'failed', reason: reason(o.error) } : o);
+      if (o.kind === 'available') return offer(o.version);
+      if (offering || downloading) return; // the check at start found it first and is offering it
+      if (o.kind === 'upToDate') await ask(updateText.upToDate(d.productName, d.currentVersion), [BUTTONS.ok]);
+      else await ask(updateText.failed(reason(o.error)), [BUTTONS.ok]);
+    })().finally(() => {
+      manual = null;
+    });
+    return manual;
+  }
+
+  async function checkAtStart(o: { selfTest: boolean; disabledByEnv: boolean }) {
+    try {
+      if (!shouldCheckAtStart({ packaged: d.packaged, selfTest: o.selfTest, disabledByEnv: o.disabledByEnv, settings: settings(), now: d.now() })) {
+        d.log('update check at start skipped');
+        return;
+      }
+      const r = await check();
+      if (r.kind === 'failed') {
+        d.log('update check at start failed', reason(r.error));
+        return;
+      }
+      d.log('update check at start', r);
+      if (r.kind === 'available') await offer(r.version);
+    } catch (e) {
+      d.log('update check at start failed', String(e));
+    }
+  }
+
+  function menuItems(): MenuItemConstructorOptions[] {
+    const auto = settings().auto;
+    return [
+      percent === null ? { label: 'Check for &updates…', enabled: true, click: () => void checkNow() } : { label: updateText.downloading(percent), enabled: false },
+      {
+        label: 'Check for updates &automatically',
+        type: 'checkbox',
+        checked: auto,
+        click: () => {
+          save({ ...settings(), auto: !auto });
+          d.refreshMenu();
+        },
+      },
+    ];
+  }
+
+  return { checkAtStart, checkNow, menuItems };
+}
